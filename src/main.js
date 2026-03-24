@@ -262,6 +262,7 @@ ipcMain.handle('check-prerequisites', async () => {
     docker: await probe(['docker', '--version']),
     python: await probe(['python', '--version']),
     ollama: await probe(['ollama', '--version']),
+    git: await probe(['git', '--version']),
   }
   return checks
 })
@@ -297,6 +298,42 @@ ipcMain.handle('pick-ember-folder', async () => {
     properties: ['openDirectory'],
   })
   return result.canceled ? null : result.filePaths[0]
+})
+
+// ---------------------------------------------------------------------------
+// IPC — Clone ember-2 repo
+// ---------------------------------------------------------------------------
+
+ipcMain.handle('clone-ember-repo', (_e, { parentDir }) => {
+  return new Promise((resolve) => {
+    const targetDir = path.join(parentDir, 'ember-2')
+    if (fs.existsSync(targetDir)) {
+      return resolve({ ok: true, path: targetDir, message: 'Already exists' })
+    }
+    const proc = spawn('git', ['clone', 'https://github.com/niansahc/ember-2.git'], {
+      cwd: parentDir,
+      shell: true,
+    })
+    proc.stdout.on('data', (d) => {
+      mainWindow.webContents.send('clone-progress', d.toString())
+    })
+    proc.stderr.on('data', (d) => {
+      mainWindow.webContents.send('clone-progress', d.toString())
+    })
+    proc.on('close', (code) => {
+      if (code === 0) {
+        saveEmberPath(targetDir)
+        resolve({ ok: true, path: targetDir })
+      } else {
+        resolve({ ok: false })
+      }
+    })
+    proc.on('error', (err) => resolve({ ok: false, error: err.message }))
+  })
+})
+
+ipcMain.handle('get-default-install-dir', () => {
+  return process.platform === 'win32' ? 'C:\\Ember-2' : path.join(os.homedir(), 'Ember-2')
 })
 
 // ---------------------------------------------------------------------------
@@ -410,14 +447,14 @@ ipcMain.handle('run-install-step', (_e, { step, emberPath }) => {
       cwd = emberPath
       const isWin = process.platform === 'win32'
       cmd = isWin
-        ? path.join(emberPath, '.venv', 'Scripts', 'python.exe')
+        ? `"${path.join(emberPath, '.venv', 'Scripts', 'python.exe')}"`
         : path.join(emberPath, '.venv', 'bin', 'python')
       args = ['-m', 'pip', 'install', '-r', 'requirements.txt']
     } else if (step === 'apikey') {
       cwd = emberPath
       const isWin = process.platform === 'win32'
       cmd = isWin
-        ? path.join(emberPath, '.venv', 'Scripts', 'python.exe')
+        ? `"${path.join(emberPath, '.venv', 'Scripts', 'python.exe')}"`
         : path.join(emberPath, '.venv', 'bin', 'python')
       args = ['scripts/set_api_key.py']
     } else if (step === 'docker') {
@@ -665,6 +702,7 @@ if (DEMO_MODE) {
     docker: { ok: true, version: 'Docker version 27.5.1 (demo)' },
     python: { ok: true, version: 'Python 3.12.0 (demo)' },
     ollama: { ok: true, version: 'ollama version 0.6.2 (demo)' },
+    git: { ok: true, version: 'git version 2.47.0 (demo)' },
   }))
 
   // Override ollama models — return fake list
@@ -828,6 +866,25 @@ if (DEMO_MODE) {
 
   ipcMain.removeHandler('get-ui-choice')
   ipcMain.handle('get-ui-choice', async () => 'ember-ui')
+
+  // Override clone — simulate progress
+  ipcMain.removeHandler('clone-ember-repo')
+  ipcMain.handle('clone-ember-repo', async (_e, { parentDir }) => {
+    const msgs = [
+      'Cloning into ember-2...\n',
+      'Receiving objects: 100%\n',
+      'Resolving deltas: 100%\n',
+      'done.\n',
+    ]
+    for (const msg of msgs) {
+      mainWindow.webContents.send('clone-progress', msg)
+      await sleep(600)
+    }
+    return { ok: true, path: parentDir + '/ember-2' }
+  })
+
+  ipcMain.removeHandler('get-default-install-dir')
+  ipcMain.handle('get-default-install-dir', () => 'C:\\Ember-2')
 }
 
 function sleep(ms) {

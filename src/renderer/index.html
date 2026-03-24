@@ -60,6 +60,12 @@
         <span class="prereq-version"></span>
         <a class="prereq-link hidden" href="#" data-url="https://ollama.com/download">Download</a>
       </div>
+      <div class="prereq-row" id="prereq-git">
+        <span class="prereq-icon">⏳</span>
+        <span class="prereq-label">Git</span>
+        <span class="prereq-version"></span>
+        <a class="prereq-link hidden" href="#" data-url="https://git-scm.com/downloads">Download</a>
+      </div>
     </div>
 
     <div class="btn-row">
@@ -69,20 +75,26 @@
   </section>
 
   <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- Screen 2 — Ember repo path                                       -->
+  <!-- Screen 2 — Install location (clone)                              -->
   <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-ember-path" class="screen">
-    <h2>Where is Ember?</h2>
-    <p>Point me to the <strong>ember-2</strong> folder on your computer.</p>
+    <h2>Where should I install Ember?</h2>
+    <p>Choose a folder. I'll create an <strong>ember-2</strong> subfolder inside it.</p>
+    <p class="hint">Default works great for most people.</p>
 
     <div class="path-row">
-      <input type="text" id="ember-path-input" class="path-input" readonly placeholder="No folder selected">
+      <input type="text" id="ember-path-input" class="path-input" placeholder="C:\Ember-2">
       <button class="btn-secondary" id="btn-pick-ember">Browse...</button>
+    </div>
+
+    <div id="clone-status" class="hidden">
+      <p class="ember-voice">"Downloading Ember — this takes about a minute..."</p>
+      <div id="clone-log" class="log-box"></div>
     </div>
 
     <div class="btn-row">
       <button class="btn-secondary" data-prev="screen-prereqs">Back</button>
-      <button class="btn-primary" id="btn-ember-path-next" data-next="screen-vault" disabled>Next</button>
+      <button class="btn-primary" id="btn-install-ember">Install Here</button>
     </div>
   </section>
 

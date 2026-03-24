@@ -92,25 +92,56 @@ document.getElementById('btn-recheck').addEventListener('click', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Screen: Ember path
+// Screen: Install location (clone)
 // ---------------------------------------------------------------------------
 
-async function initEmberPath() {
-  const detected = await window.ember.getEmberPath()
-  if (detected) {
-    document.getElementById('ember-path-input').value = detected
-    state.emberPath = detected
-    document.getElementById('btn-ember-path-next').disabled = false
-  }
+async function initInstallDir() {
+  const defaultDir = await window.ember.getDefaultInstallDir()
+  document.getElementById('ember-path-input').value = defaultDir
+  state.emberPath = null // Not yet cloned
 }
 
 document.getElementById('btn-pick-ember').addEventListener('click', async () => {
   const chosen = await window.ember.pickEmberFolder()
   if (chosen) {
     document.getElementById('ember-path-input').value = chosen
-    state.emberPath = chosen
-    await window.ember.saveEmberPath(chosen)
-    document.getElementById('btn-ember-path-next').disabled = false
+  }
+})
+
+document.getElementById('btn-install-ember').addEventListener('click', async () => {
+  const parentDir = document.getElementById('ember-path-input').value.trim()
+  if (!parentDir) return
+
+  const btn = document.getElementById('btn-install-ember')
+  btn.disabled = true
+  btn.textContent = 'Installing...'
+
+  const cloneStatus = document.getElementById('clone-status')
+  const cloneLog = document.getElementById('clone-log')
+  cloneStatus.classList.remove('hidden')
+  cloneLog.textContent = ''
+
+  window.ember.onCloneProgress((text) => {
+    cloneLog.textContent += text
+    cloneLog.scrollTop = cloneLog.scrollHeight
+  })
+
+  const result = await window.ember.cloneEmberRepo(parentDir)
+  window.ember.removeAllListeners('clone-progress')
+
+  if (result.ok) {
+    state.emberPath = result.path
+    await window.ember.saveEmberPath(result.path)
+    cloneLog.textContent += result.message === 'Already exists'
+      ? '\nEmber is already installed here. Moving on...\n'
+      : '\nDone!\n'
+    btn.textContent = 'Installed ✓'
+    // Auto-advance after brief pause
+    setTimeout(() => showScreen('screen-vault'), 800)
+  } else {
+    cloneLog.textContent += '\nFailed to clone. Check your internet connection and try again.\n'
+    btn.disabled = false
+    btn.textContent = 'Try Again'
   }
 })
 
@@ -198,8 +229,12 @@ document.getElementById('model-select').addEventListener('change', (e) => {
 })
 
 document.getElementById('btn-pull-model').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-pull-model')
   const model = document.getElementById('model-select').value || state.model
   const logBox = document.getElementById('pull-model-log')
+
+  btn.disabled = true
+  btn.textContent = 'Downloading...'
   logBox.classList.remove('hidden')
   logBox.textContent = `Pulling ${model}...\n`
 
@@ -210,6 +245,9 @@ document.getElementById('btn-pull-model').addEventListener('click', async () => 
 
   const result = await window.ember.pullOllamaModel(model)
   window.ember.removeAllListeners('ollama-pull-progress')
+
+  btn.disabled = false
+  btn.textContent = 'Pull Model'
 
   if (result.ok) {
     logBox.textContent += '\nDone!\n'
@@ -238,8 +276,12 @@ document.getElementById('vision-select').addEventListener('change', (e) => {
 })
 
 document.getElementById('btn-pull-vision').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-pull-vision')
   const model = document.getElementById('vision-select').value || 'llama3.2-vision:11b'
   const logBox = document.getElementById('pull-vision-log')
+
+  btn.disabled = true
+  btn.textContent = 'Downloading...'
   logBox.classList.remove('hidden')
   logBox.textContent = `Pulling ${model}...\n`
 
@@ -250,6 +292,9 @@ document.getElementById('btn-pull-vision').addEventListener('click', async () =>
 
   const result = await window.ember.pullOllamaModel(model)
   window.ember.removeAllListeners('ollama-pull-progress')
+
+  btn.disabled = false
+  btn.textContent = 'Pull Model'
 
   if (result.ok) {
     logBox.textContent += '\nDone!\n'
@@ -674,7 +719,7 @@ async function init() {
   showScreen('screen-welcome')
 
   // Pre-load data in background
-  initEmberPath()
+  initInstallDir()
   initVaultPath()
   checkPrerequisites()
   loadModels()
