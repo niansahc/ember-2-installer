@@ -149,7 +149,9 @@ ipcMain.handle('check-ember-update', async () => {
   const vf = path.join(emberPath, 'version.json')
   if (fs.existsSync(vf)) {
     try {
-      installed = JSON.parse(fs.readFileSync(vf, 'utf-8')).tag
+      const parsed = JSON.parse(fs.readFileSync(vf, 'utf-8'))
+      installed = parsed.version || parsed.tag || null
+      if (installed && !installed.startsWith('v')) installed = `v${installed}`
     } catch {}
   }
 
@@ -459,12 +461,14 @@ ipcMain.handle('check-for-update', async () => {
   const vf = path.join(emberPath, 'version.json')
   if (fs.existsSync(vf)) {
     try {
-      installed = JSON.parse(fs.readFileSync(vf, 'utf-8')).tag
+      const parsed = JSON.parse(fs.readFileSync(vf, 'utf-8'))
+      installed = parsed.version || parsed.tag || null
+      if (installed && !installed.startsWith('v')) installed = `v${installed}`
     } catch {}
   }
 
   // Fetch latest release from GitHub
-  const latest = await fetchLatestRelease()
+  const latest = await fetchLatestRelease('niansahc/ember-2')
   if (!latest) return { hasUpdate: false }
 
   const hasUpdate = installed && installed !== latest.tag_name
@@ -477,11 +481,11 @@ ipcMain.handle('check-for-update', async () => {
   }
 })
 
-function fetchLatestRelease() {
+function fetchLatestRelease(repo = 'niansahc/ember-2') {
   return new Promise((resolve) => {
     const options = {
       hostname: 'api.github.com',
-      path: '/repos/niansahc/ember-2/releases/latest',
+      path: `/repos/${repo}/releases/latest`,
       headers: { 'User-Agent': 'ember-2-installer' },
     }
     https.get(options, (res) => {
@@ -497,6 +501,50 @@ function fetchLatestRelease() {
     }).on('error', () => resolve(null))
   })
 }
+
+// ---------------------------------------------------------------------------
+// IPC — Check Open WebUI / UI config
+// ---------------------------------------------------------------------------
+
+ipcMain.handle('check-open-webui', async () => {
+  try {
+    const http = require('http')
+    return new Promise((resolve) => {
+      const req = http.get('http://localhost:3000', { timeout: 3000 }, (res) => {
+        resolve({ running: res.statusCode < 500 })
+      })
+      req.on('error', () => resolve({ running: false }))
+      req.on('timeout', () => { req.destroy(); resolve({ running: false }) })
+    })
+  } catch {
+    return { running: false }
+  }
+})
+
+ipcMain.handle('save-ui-choice', (_e, { choice }) => {
+  const emberPath = getEmberPath()
+  if (!emberPath) return { ok: false }
+  const configPath = path.join(emberPath, 'config.json')
+  let config = {}
+  if (fs.existsSync(configPath)) {
+    try { config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) } catch {}
+  }
+  config.ui = choice // 'ember-ui' or 'open-webui'
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
+  return { ok: true }
+})
+
+ipcMain.handle('get-ui-choice', () => {
+  const emberPath = getEmberPath()
+  if (!emberPath) return null
+  const configPath = path.join(emberPath, 'config.json')
+  if (!fs.existsSync(configPath)) return null
+  try {
+    return JSON.parse(fs.readFileSync(configPath, 'utf-8')).ui || null
+  } catch {
+    return null
+  }
+})
 
 ipcMain.handle('run-git-pull', (_e) => {
   const emberPath = getEmberPath()
@@ -751,7 +799,7 @@ if (DEMO_MODE) {
   ipcMain.removeHandler('check-ember-update')
   ipcMain.handle('check-ember-update', async () => {
     await sleep(600)
-    return { hasUpdate: false, installed: 'v0.9.0', latest: 'v0.9.0' }
+    return { hasUpdate: false, installed: 'v0.9.3', latest: 'v0.9.3' }
   })
 
   ipcMain.removeHandler('run-ember-update')
@@ -765,8 +813,21 @@ if (DEMO_MODE) {
       mainWindow.webContents.send('ember-update-log', text)
       await sleep(800)
     }
-    return { ok: true, tag: 'v0.9.0' }
+    return { ok: true, tag: 'v0.9.3' }
   })
+
+  // Override UI choice checks
+  ipcMain.removeHandler('check-open-webui')
+  ipcMain.handle('check-open-webui', async () => {
+    await sleep(300)
+    return { running: true }
+  })
+
+  ipcMain.removeHandler('save-ui-choice')
+  ipcMain.handle('save-ui-choice', async () => ({ ok: true }))
+
+  ipcMain.removeHandler('get-ui-choice')
+  ipcMain.handle('get-ui-choice', async () => 'ember-ui')
 }
 
 function sleep(ms) {

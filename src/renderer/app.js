@@ -484,9 +484,35 @@ async function runStep(step) {
 // Screen: Done
 // ---------------------------------------------------------------------------
 
-document.getElementById('btn-open-webui').addEventListener('click', () => {
-  window.ember.openWebUI()
+// UI Choice — detect Open WebUI, save preference, open chosen UI
+document.getElementById('btn-open-ember').addEventListener('click', async () => {
+  const choice = document.querySelector('input[name="ui-choice"]:checked')?.value || 'ember-ui'
+  await window.ember.saveUiChoice(choice)
+  if (choice === 'open-webui') {
+    window.ember.openUrl('http://localhost:3000')
+  } else {
+    window.ember.openUrl('http://localhost:5173')
+  }
 })
+
+// Check for Open WebUI and load saved choice when Done screen appears
+async function initUiChoice() {
+  const notice = document.getElementById('ui-choice-notice')
+
+  // Check if Open WebUI is running
+  const webui = await window.ember.checkOpenWebUI()
+  if (webui.running) {
+    notice.textContent = "We noticed you have Open WebUI running. You can keep using it or switch to Ember's interface — your choice."
+    notice.classList.remove('hidden')
+  }
+
+  // Restore saved choice
+  const saved = await window.ember.getUiChoice()
+  if (saved) {
+    const radio = document.querySelector(`input[name="ui-choice"][value="${saved}"]`)
+    if (radio) radio.checked = true
+  }
+}
 
 // Ember-2 backend version check
 document.getElementById('btn-check-ember-update').addEventListener('click', async () => {
@@ -544,10 +570,11 @@ document.getElementById('btn-run-ember-update').addEventListener('click', async 
   }
 })
 
-// Auto-check version when Done screen appears
+// Auto-check version and UI choice when Done screen appears
 async function loadEmberVersion() {
   const result = await window.ember.checkEmberUpdate()
   document.getElementById('ember-version-label').textContent = result.installed || 'unknown'
+  initUiChoice()
 }
 
 // ---------------------------------------------------------------------------

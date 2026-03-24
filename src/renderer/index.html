@@ -278,8 +278,24 @@
     <h1>You're all set.</h1>
     <p class="ember-voice">"I'm ready. Let's begin."</p>
 
+    <!-- UI Choice -->
+    <div id="ui-choice-section">
+      <p id="ui-choice-notice" class="hidden hint" style="margin-bottom: 0.75rem;"></p>
+      <p class="hint" style="margin-bottom: 0.5rem;">How would you like to talk to Ember?</p>
+      <div class="radio-group">
+        <label class="radio-row">
+          <input type="radio" name="ui-choice" value="ember-ui" checked>
+          <span><strong>Ember's interface</strong> — custom-built for Ember (recommended)</span>
+        </label>
+        <label class="radio-row">
+          <input type="radio" name="ui-choice" value="open-webui">
+          <span><strong>Open WebUI</strong> — general-purpose chat interface</span>
+        </label>
+      </div>
+    </div>
+
     <div class="done-actions">
-      <button class="btn-primary" id="btn-open-webui">Open Ember</button>
+      <button class="btn-primary" id="btn-open-ember">Open Ember</button>
     </div>
 
     <!-- Ember-2 backend version & updates -->

@@ -70,6 +70,11 @@ contextBridge.exposeInMainWorld('ember', {
   onEmberUpdateLog: (fn) =>
     ipcRenderer.on('ember-update-log', (_e, text) => fn(text)),
 
+  // UI choice
+  checkOpenWebUI: () => ipcRenderer.invoke('check-open-webui'),
+  saveUiChoice: (choice) => ipcRenderer.invoke('save-ui-choice', { choice }),
+  getUiChoice: () => ipcRenderer.invoke('get-ui-choice'),
+
   // Demo mode
   getDemoMode: () => ipcRenderer.invoke('get-demo-mode'),
 
