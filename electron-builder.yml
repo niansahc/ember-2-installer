@@ -1,0 +1,35 @@
+appId: com.ember2.installer
+productName: Ember Setup
+
+publish:
+  provider: github
+  owner: niansahc
+  repo: ember-2-installer
+
+directories:
+  output: dist
+
+files:
+  - src/**/*
+  - assets/**/*
+
+win:
+  target: nsis
+  icon: assets/Ember2.ico
+  signAndEditExecutable: false
+
+mac:
+  target: dmg
+  icon: assets/Ember2.png
+
+linux:
+  target: AppImage
+  icon: assets/Ember2.png
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  installerIcon: assets/Ember2.ico
+  installerHeaderIcon: assets/Ember2.ico
+  createDesktopShortcut: true
+  createStartMenuShortcut: true

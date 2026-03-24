@@ -1,0 +1,593 @@
+/* ── Ember-2 Installer Theme ─────────────────────────────────────── */
+
+:root {
+  --bg:      #1a0a2e;
+  --bg-card: #241445;
+  --accent:  #ff8c00;
+  --text:    #f5e6d0;
+  --text-dim:#a89880;
+  --success: #4caf50;
+  --error:   #e74c3c;
+  --border:  #3a2060;
+  --input-bg:#1e1040;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* ── Installer update banner ────────────────────────────────────────── */
+
+#installer-update-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #2a1548, #3a1860);
+  border-bottom: 1px solid var(--accent);
+  font-size: 0.85rem;
+  z-index: 200;
+}
+
+.btn-banner {
+  font-family: inherit;
+  font-size: 0.8rem;
+  padding: 4px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+
+.btn-banner:hover {
+  background: rgba(255, 140, 0, 0.15);
+}
+
+/* ── Demo badge ────────────────────────────────────────────────────── */
+
+#demo-badge {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  background: var(--accent);
+  color: #1a0a2e;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 4px 10px;
+  border-radius: 4px;
+  z-index: 100;
+  opacity: 0.85;
+}
+
+/* ── Logo ──────────────────────────────────────────────────────────── */
+
+#logo-wrap {
+  text-align: center;
+  padding: 30px 0 10px;
+}
+
+#logo {
+  height: 120px;
+  border-radius: 50%;
+  box-shadow: 0 0 24px rgba(255, 140, 0, 0.4);
+  transition: box-shadow 0.3s ease;
+}
+
+#logo:hover {
+  box-shadow: 0 0 32px rgba(255, 140, 0, 0.55),
+              0 0 60px rgba(255, 140, 0, 0.2);
+}
+
+/* ── Screens ───────────────────────────────────────────────────────── */
+
+.screen {
+  display: none;
+  width: 600px;
+  max-width: 90vw;
+  padding: 10px 30px 30px;
+  animation: fadeIn 0.3s ease;
+}
+
+.screen.active {
+  display: block;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+h1 {
+  font-size: 1.8rem;
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+h2 {
+  font-size: 1.3rem;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+p {
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+
+.subtitle {
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 1.1rem;
+}
+
+.hint {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.ember-voice {
+  color: var(--accent);
+  font-style: italic;
+  font-size: 0.9rem;
+}
+
+.step-voice {
+  margin-top: 4px;
+  margin-bottom: 0;
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────── */
+
+.btn-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.btn-primary, .btn-secondary {
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 10px 24px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s, opacity 0.2s;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #1a0a2e;
+  font-weight: 600;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #e67e00;
+}
+
+.btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: var(--border);
+  color: var(--text);
+}
+
+.btn-secondary:hover {
+  background: #4a3070;
+}
+
+/* ── Prerequisites ─────────────────────────────────────────────────── */
+
+.prereq-list {
+  margin: 16px 0;
+}
+
+.prereq-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 6px;
+  background: var(--bg-card);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.prereq-icon {
+  font-size: 1.2rem;
+  width: 24px;
+  text-align: center;
+}
+
+.prereq-label {
+  font-weight: 600;
+  width: 80px;
+}
+
+.prereq-version {
+  flex: 1;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.prereq-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.prereq-link:hover {
+  text-decoration: underline;
+}
+
+/* ── Path inputs ───────────────────────────────────────────────────── */
+
+.path-row {
+  display: flex;
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.path-input {
+  flex: 1;
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--text);
+  outline: none;
+}
+
+.path-input:focus {
+  border-color: var(--accent);
+}
+
+/* ── Model select ──────────────────────────────────────────────────── */
+
+.model-row {
+  display: flex;
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.model-select {
+  flex: 1;
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--text);
+  outline: none;
+  cursor: pointer;
+}
+
+.model-select:focus {
+  border-color: var(--accent);
+}
+
+.model-select option {
+  background: var(--bg-card);
+  color: var(--text);
+}
+
+/* ── Toggle ────────────────────────────────────────────────────────── */
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.toggle {
+  position: relative;
+  display: inline-block;
+  width: 48px;
+  height: 26px;
+}
+
+.toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: var(--border);
+  border-radius: 26px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 20px;
+  height: 20px;
+  background: var(--text);
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+
+.toggle input:checked + .toggle-slider {
+  background: var(--accent);
+}
+
+.toggle input:checked + .toggle-slider::before {
+  transform: translateX(22px);
+}
+
+.toggle-label {
+  font-size: 0.95rem;
+}
+
+/* ── Radio ─────────────────────────────────────────────────────────── */
+
+.radio-group {
+  margin: 16px 0;
+}
+
+.radio-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 6px;
+  background: var(--bg-card);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.radio-row:hover {
+  border-color: var(--accent);
+}
+
+.radio-row input[type="radio"] {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+}
+
+/* ── Install steps ─────────────────────────────────────────────────── */
+
+.install-steps {
+  margin: 12px 0;
+}
+
+.install-step {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  margin-bottom: 4px;
+  border-radius: 6px;
+}
+
+.install-step.active {
+  background: var(--bg-card);
+}
+
+.step-icon {
+  font-size: 1.1rem;
+  width: 24px;
+  text-align: center;
+}
+
+.step-label {
+  flex: 1;
+  font-size: 0.9rem;
+}
+
+.step-voice {
+  width: 100%;
+  padding-left: 34px;
+}
+
+/* ── Log box ───────────────────────────────────────────────────────── */
+
+.log-box {
+  background: #0d0520;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  margin-top: 10px;
+  font-family: 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  max-height: 140px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ── Tailscale walkthrough ──────────────────────────────────────────── */
+
+#tailscale-walkthrough {
+  margin-top: 14px;
+}
+
+.ts-step {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+.ts-step-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.ts-step-icon {
+  font-size: 1.1rem;
+  width: 24px;
+  text-align: center;
+}
+
+.ts-step-title {
+  flex: 1;
+}
+
+.ts-step-body {
+  padding: 0 14px 12px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.ts-step-body p {
+  margin-bottom: 8px;
+}
+
+.ts-step-body .btn-secondary {
+  font-size: 0.8rem;
+  padding: 6px 14px;
+}
+
+.ts-ip-display {
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.ts-url-display {
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  color: var(--success);
+  font-weight: 600;
+  font-size: 0.9rem;
+  word-break: break-all;
+}
+
+.ts-phone-steps {
+  margin: 0;
+  padding-left: 20px;
+  line-height: 1.8;
+}
+
+.accent-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.accent-link:hover {
+  text-decoration: underline;
+}
+
+.ts-checking {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+/* ── Done screen ───────────────────────────────────────────────────── */
+
+.done-actions {
+  text-align: center;
+  margin: 16px 0;
+}
+
+.done-update-section {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.done-version-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.85rem;
+}
+
+.btn-sm {
+  font-size: 0.8rem !important;
+  padding: 6px 12px !important;
+}
+
+#ember-update-info {
+  margin-top: 12px;
+}
+
+#ember-update-info p {
+  margin-bottom: 8px;
+  font-size: 0.85rem;
+}
+
+/* ── Cloud warning ─────────────────────────────────────────────────── */
+
+.cloud-warning {
+  color: #ff8c00;
+  font-size: 0.85rem;
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(255, 140, 0, 0.1);
+  border: 1px solid rgba(255, 140, 0, 0.3);
+  border-radius: 6px;
+}
+
+/* ── Utility ───────────────────────────────────────────────────────── */
+
+.hidden {
+  display: none !important;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}

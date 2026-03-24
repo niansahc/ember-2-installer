@@ -1,0 +1,23 @@
+{
+  "name": "ember-2-installer",
+  "productName": "Ember Setup",
+  "version": "1.0.0",
+  "description": "Installer and setup wizard for Ember-2",
+  "author": "niansahc",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:real": "electron . --real",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux"
+  },
+  "dependencies": {
+    "electron-updater": "^6.1.0"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "latest"
+  }
+}
