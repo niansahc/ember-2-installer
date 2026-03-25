@@ -722,49 +722,8 @@ function fetchLatestRelease(repo = 'niansahc/ember-2') {
   })
 }
 
-// ---------------------------------------------------------------------------
-// IPC — Check Open WebUI / UI config
-// ---------------------------------------------------------------------------
-
-ipcMain.handle('check-open-webui', async () => {
-  try {
-    const http = require('http')
-    return new Promise((resolve) => {
-      const req = http.get('http://localhost:3000', { timeout: 3000 }, (res) => {
-        resolve({ running: res.statusCode < 500 })
-      })
-      req.on('error', () => resolve({ running: false }))
-      req.on('timeout', () => { req.destroy(); resolve({ running: false }) })
-    })
-  } catch {
-    return { running: false }
-  }
-})
-
-ipcMain.handle('save-ui-choice', (_e, { choice }) => {
-  const emberPath = getEmberPath()
-  if (!emberPath) return { ok: false }
-  const configPath = path.join(emberPath, 'config.json')
-  let config = {}
-  if (fs.existsSync(configPath)) {
-    try { config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) } catch {}
-  }
-  config.ui = choice // 'ember-ui' or 'open-webui'
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
-  return { ok: true }
-})
-
-ipcMain.handle('get-ui-choice', () => {
-  const emberPath = getEmberPath()
-  if (!emberPath) return null
-  const configPath = path.join(emberPath, 'config.json')
-  if (!fs.existsSync(configPath)) return null
-  try {
-    return JSON.parse(fs.readFileSync(configPath, 'utf-8')).ui || null
-  } catch {
-    return null
-  }
-})
+// (Open WebUI check and UI choice removed — Ember UI is now the only option,
+//  served directly by FastAPI from the ui/ folder)
 
 ipcMain.handle('run-git-pull', (_e) => {
   const emberPath = getEmberPath()
@@ -798,9 +757,6 @@ ipcMain.handle('check-docker-daemon', () => {
 // IPC — Misc
 // ---------------------------------------------------------------------------
 
-ipcMain.handle('open-webui', () => {
-  shell.openExternal('http://localhost:3000')
-})
 
 ipcMain.handle('open-url', (_e, url) => {
   shell.openExternal(url)
@@ -1058,18 +1014,7 @@ if (DEMO_MODE) {
   ipcMain.removeHandler('check-docker-daemon')
   ipcMain.handle('check-docker-daemon', async () => ({ ok: true }))
 
-  // Override UI choice checks
-  ipcMain.removeHandler('check-open-webui')
-  ipcMain.handle('check-open-webui', async () => {
-    await sleep(300)
-    return { running: true }
-  })
-
-  ipcMain.removeHandler('save-ui-choice')
-  ipcMain.handle('save-ui-choice', async () => ({ ok: true }))
-
-  ipcMain.removeHandler('get-ui-choice')
-  ipcMain.handle('get-ui-choice', async () => 'ember-ui')
+  // (Open WebUI overrides removed — Ember UI only)
 
   // Override clone — simulate progress
   ipcMain.removeHandler('clone-ember-repo')

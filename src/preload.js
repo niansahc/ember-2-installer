@@ -78,11 +78,6 @@ contextBridge.exposeInMainWorld('ember', {
   // Docker daemon
   checkDockerDaemon: () => ipcRenderer.invoke('check-docker-daemon'),
 
-  // UI choice
-  checkOpenWebUI: () => ipcRenderer.invoke('check-open-webui'),
-  saveUiChoice: (choice) => ipcRenderer.invoke('save-ui-choice', { choice }),
-  getUiChoice: () => ipcRenderer.invoke('get-ui-choice'),
-
   // Demo mode
   getDemoMode: () => ipcRenderer.invoke('get-demo-mode'),
 
