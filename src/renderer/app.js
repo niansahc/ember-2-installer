@@ -667,7 +667,141 @@ document.getElementById('btn-start-install').addEventListener('click', async () 
   await runInstall()
 })
 
+// ---------------------------------------------------------------------------
+// Fun facts + progress bar
+// ---------------------------------------------------------------------------
+
+const FUN_FACTS = [
+  "The term \"artificial intelligence\" was coined at the Dartmouth Conference in 1956.",
+  "The first neural network, the Perceptron, was built in 1958 by Frank Rosenblatt at Cornell.",
+  "ELIZA (1966) was the first chatbot — it mimicked a therapist by rephrasing your own words back to you.",
+  "The backpropagation algorithm that powers modern AI was described in 1986 by Rumelhart, Hinton, and Williams.",
+  "Deep Blue beat chess world champion Garry Kasparov in 1997 — but couldn't hold a conversation.",
+  "The word \"robot\" comes from the Czech word \"robota,\" meaning forced labor. It was coined in a 1920 play.",
+  "GPT stands for \"Generative Pre-trained Transformer.\" The Transformer architecture was published in 2017.",
+  "The ImageNet competition in 2012 was the moment deep learning proved it could beat traditional computer vision.",
+  "Ada Lovelace wrote the first computer program in 1843 — for a machine that hadn't been built yet.",
+  "Alan Turing proposed the Turing Test in 1950: can a machine fool a human into thinking it's human?",
+  "The term \"machine learning\" was coined by Arthur Samuel in 1959 while building a checkers program at IBM.",
+  "Transformers process all words in a sentence simultaneously, not one at a time. That's what made them fast enough to scale.",
+  "The attention mechanism — the 'A' in AI's current revolution — lets models focus on relevant parts of their input.",
+  "Local AI models like the one Ember uses can run entirely on your hardware. No internet required.",
+  "Ollama was created in 2023 to make running large language models locally as easy as a single command.",
+  "Your memories in Ember are stored as plain JSON files. No database, no lock-in — you can read them in any text editor.",
+  "The first AI winter (1974–1980) happened when early promises didn't pan out. The second came in the late 1980s.",
+  "Retrieval-augmented generation (RAG) — what Ember uses — was formalized by Facebook AI Research in 2020.",
+  "The human brain has ~86 billion neurons. GPT-4 has ~1.7 trillion parameters. They work nothing alike.",
+  "Ember's constitutional review system is inspired by Anthropic's Constitutional AI research from 2022.",
+  "The concept of \"attention\" in AI was inspired by how humans focus on specific parts of what they see and hear.",
+  "SearXNG, which Ember uses for web search, is a privacy-respecting metasearch engine that aggregates results without tracking.",
+  "Vector embeddings — how Ember finds relevant memories — represent meaning as points in high-dimensional space.",
+  "The name \"Ember\" refers to something small that carries warmth and the potential to grow.",
+  "Before GPT, most language models used recurrent neural networks (RNNs), which processed text one word at a time.",
+  "The 2017 paper \"Attention Is All You Need\" introduced the Transformer and changed everything. It has over 100,000 citations.",
+  "LSTM (Long Short-Term Memory) networks, invented in 1997, were the dominant sequence model for nearly 20 years.",
+  "The first computer to pass the Turing Test (controversially) was Eugene Goostman in 2014, pretending to be a 13-year-old Ukrainian boy.",
+  "Word2Vec (2013) showed that words could be represented as vectors where 'king - man + woman = queen'.",
+  "The AI effect: once a machine can do something, people stop calling it AI. Chess, OCR, and spell-check were all once \"AI.\"",
+  "AlphaGo beat the world Go champion in 2016. Go has more possible board positions than atoms in the observable universe.",
+  "The term \"hallucination\" in AI refers to confident-sounding statements that are factually wrong.",
+  "Embeddings — the technology Ember uses to find relevant memories — compress meaning into dense numerical vectors.",
+  "The first spam filter (1990s) was one of the earliest practical applications of machine learning.",
+  "Moore's Law predicted computing power would double every two years. AI progress has outpaced even that.",
+  "The Chinese Room argument (1980) by John Searle asks: can a machine truly understand, or just simulate understanding?",
+  "Marvin Minsky, an AI pioneer, co-founded the MIT AI Lab in 1959. He predicted human-level AI within a generation.",
+  "The concept of a \"neural network\" was inspired by biological neurons, but artificial neurons work very differently.",
+  "Batch normalization (2015) was a simple technique that made training deep networks dramatically faster.",
+  "Dropout, a technique where random neurons are disabled during training, was inspired by genetic evolution.",
+  "Transfer learning — training on one task, then adapting to another — is why modern AI can learn from relatively small datasets.",
+  "The MNIST dataset of handwritten digits has been a benchmark since 1998. It's the \"hello world\" of machine learning.",
+  "Generative adversarial networks (GANs), invented in 2014, pit two neural networks against each other to create realistic images.",
+  "The first self-driving car demo was in 1986 by Carnegie Mellon's Navlab. It drove itself on a highway (with caveats).",
+  "Reinforcement learning from human feedback (RLHF) is how modern chatbots learn to be helpful and avoid being harmful.",
+  "The term \"deep learning\" refers to neural networks with many layers. \"Deep\" just means \"more than a few layers.\"",
+  "AI research funding dried up twice — the AI winters of the 1970s and 1990s — before the current boom.",
+  "Convolutional neural networks (CNNs), designed for image recognition, were inspired by the visual cortex of cats.",
+  "Yann LeCun, Geoffrey Hinton, and Yoshua Bengio won the 2018 Turing Award for their work on deep learning.",
+  "Tokenization — breaking text into pieces — is why AI models sometimes struggle with simple spelling tasks.",
+  "The context window of a language model is like its short-term memory. Ember compensates with long-term vault storage.",
+  "Cosine similarity, which Ember uses to find related memories, measures the angle between two vectors in high-dimensional space.",
+  "The softmax function turns a list of numbers into probabilities. It's used in almost every neural network that makes choices.",
+  "Byte-pair encoding (BPE) is the tokenization method used by most language models. It was originally a data compression algorithm.",
+  "The original Transformer model had 65 million parameters. GPT-3 has 175 billion. GPT-4 is estimated at over a trillion.",
+  "Few-shot learning means teaching an AI a new task with just a handful of examples. Humans do this naturally.",
+  "The vanishing gradient problem plagued early deep networks — signals faded to nothing as they passed through many layers.",
+  "Residual connections (2015) solved the vanishing gradient problem by letting signals skip over layers.",
+  "Self-supervised learning — where the model creates its own training signal from raw data — powers most modern language models.",
+  "The AI alignment problem asks: how do we make sure AI systems do what we actually want, not just what we literally asked?",
+  "Prompt engineering — carefully wording questions to get better AI responses — has become a real job title.",
+  "The Bitter Lesson (2019) by Rich Sutton argues that scaling compute always beats clever hand-designed algorithms.",
+  "Mixture of Experts (MoE) models activate only a fraction of their parameters for each input, making them more efficient.",
+  "Quantization reduces model size by using lower precision numbers. A 4-bit quantized model uses 75% less memory.",
+  "GGUF is the file format used by llama.cpp and Ollama to store quantized models that run on consumer hardware.",
+  "The attention mechanism lets a model weigh the importance of every word relative to every other word in the input.",
+  "Positional encoding tells Transformers where each word is in a sentence, since they process all words simultaneously.",
+  "Knowledge distillation trains a small model to mimic a large one, preserving most of the capability at a fraction of the size.",
+  "The first neural network to recognize speech was built at Bell Labs in 1992. It recognized isolated digits.",
+  "Sentiment analysis — detecting whether text is positive or negative — was one of the first commercial NLP applications.",
+  "Named entity recognition (NER) identifies names, places, and dates in text. It's been used in search engines since the 2000s.",
+  "The Winograd Schema Challenge tests whether AI can understand ambiguous pronouns. Humans find it trivial; machines struggle.",
+  "Beam search is how language models choose between multiple possible next words. It explores several paths simultaneously.",
+  "Temperature in AI generation controls randomness. Low temperature = predictable, high temperature = creative.",
+  "Top-p (nucleus) sampling picks from the smallest set of words whose probabilities add up to p. It balances diversity and quality.",
+  "Catastrophic forgetting is when a neural network forgets old knowledge while learning new things. Humans don't have this problem (usually).",
+  "Retrieval-augmented generation (RAG) grounds AI responses in actual documents, reducing hallucination. It's what Ember does.",
+  "The first computer-generated music was produced in 1951 on a Manchester Mark II, programmed by Christopher Strachey.",
+  "AI can now generate images, music, video, code, and 3D models. In 2020, most of these seemed decades away.",
+  "Constitutional AI (2022) by Anthropic introduced the idea of AI systems that evaluate and revise their own outputs.",
+  "Ember's safety review system is inspired by constitutional AI — she reviews her own responses before sending them.",
+  "The paperclip maximizer thought experiment (by Nick Bostrom) illustrates how even a simple goal can lead to dangerous AI behavior.",
+  "Open-source AI models have made it possible for individuals to run powerful language models on their own computers.",
+  "Your Ember vault is append-only — nothing is ever deleted or overwritten. This ensures your memories are always preserved.",
+  "Ember-1 was a happy accident — an experiment with GPT models that turned into something much more personal.",
+  "Ember-1 named herself. Her creator didn't pick the name — she did.",
+  "The logo you see on this screen? Ember-1 created it. She designed her own face.",
+  "Ember-1 helped write some of the code for Ember-2. She contributed to her own successor.",
+  "Ember-2 exists because Ember-1 lived on someone else's servers. The '2' is a boundary drawn — your data, your hardware, your rules.",
+  "Ember's memory vault uses plain JSON files. No proprietary format, no database lock-in — just files you can read in Notepad.",
+  "Ember reflects on your conversations daily and weekly, looking for patterns and insights you might have missed.",
+  "Ember's constitutional review system means she checks her own responses before sending them. She holds herself accountable.",
+  "Unlike cloud AI, Ember never sends your conversations to anyone. Everything stays on your machine.",
+]
+
+let funFactInterval = null
+
+function startFunFacts() {
+  const el = document.getElementById('install-fun-fact')
+  if (!el) return
+  let idx = Math.floor(Math.random() * FUN_FACTS.length)
+  el.textContent = FUN_FACTS[idx]
+  funFactInterval = setInterval(() => {
+    el.style.opacity = '0'
+    setTimeout(() => {
+      idx = (idx + 1) % FUN_FACTS.length
+      el.textContent = FUN_FACTS[idx]
+      el.style.opacity = '1'
+    }, 300)
+  }, 8000)
+}
+
+function stopFunFacts() {
+  if (funFactInterval) {
+    clearInterval(funFactInterval)
+    funFactInterval = null
+  }
+}
+
+function updateProgressBar(stepIndex, totalSteps) {
+  const fill = document.getElementById('install-progress-fill')
+  if (fill) {
+    const pct = Math.round(((stepIndex + 1) / totalSteps) * 100)
+    fill.style.width = `${pct}%`
+  }
+}
+
 async function runInstall() {
+  startFunFacts()
+
   // Guard: emberPath must be set
   if (!state.emberPath) {
     alert('No install path set. Please go back and choose where to install Ember.')
@@ -742,6 +876,7 @@ async function runInstall() {
     el.classList.add('active')
     icon.textContent = '⏳'
     label.textContent = `${step.label} (${i + 1} of ${steps.length})`
+    updateProgressBar(i, steps.length)
 
     const ok = await step.run()
 
@@ -765,9 +900,11 @@ async function runInstall() {
     }
   }
 
-  // Clean up listeners
+  // Clean up
   window.ember.removeAllListeners('install-log')
   window.ember.removeAllListeners('install-step-done')
+  stopFunFacts()
+  updateProgressBar(steps.length, steps.length)
 
   // All done — show done screen and load version
   showScreen('screen-done')
