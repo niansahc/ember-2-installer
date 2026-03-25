@@ -272,6 +272,7 @@ ipcMain.handle('check-prerequisites', async () => {
     python: await probe(['python', '--version']),
     ollama: await probe(['ollama', '--version']),
     git: await probe(['git', '--version']),
+    node: await probe(['node', '--version']),
   }
   return checks
 })
@@ -854,6 +855,7 @@ if (DEMO_MODE) {
     python: { ok: true, version: 'Python 3.12.0 (demo)' },
     ollama: { ok: true, version: 'ollama version 0.6.2 (demo)' },
     git: { ok: true, version: 'git version 2.47.0 (demo)' },
+    node: { ok: true, version: 'v24.14.0 (demo)' },
   }))
 
   // Override ollama models — return fake list
