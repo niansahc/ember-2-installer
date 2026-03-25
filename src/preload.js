@@ -34,6 +34,8 @@ contextBridge.exposeInMainWorld('ember', {
 
   // Ollama models
   getOllamaModels: () => ipcRenderer.invoke('get-ollama-models'),
+  getDefaultOllamaModels: () => ipcRenderer.invoke('get-default-ollama-models'),
+  setOllamaModelsPath: (p) => ipcRenderer.invoke('set-ollama-models-path', p),
   pullOllamaModel: (model) => ipcRenderer.invoke('pull-ollama-model', model),
 
   // Config

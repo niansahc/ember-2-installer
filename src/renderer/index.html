@@ -168,6 +168,15 @@
     <div id="model-cards" class="model-cards">
       <p class="hint">Loading models...</p>
     </div>
+    <div class="model-storage-section">
+      <p class="hint">Models are stored at:</p>
+      <div class="path-row">
+        <input type="text" id="ollama-models-path" class="path-input" placeholder="">
+        <button class="btn-secondary" id="btn-pick-ollama-models">Browse...</button>
+      </div>
+      <p class="hint" id="model-space-hint"></p>
+    </div>
+
     <div id="model-download-status" class="hidden">
       <p id="model-download-label" class="ember-voice"></p>
       <div id="model-download-log" class="log-box"></div>
@@ -283,12 +292,68 @@
 
     <div class="btn-row">
       <button class="btn-secondary" data-prev="screen-vision">Back</button>
-      <button class="btn-primary" id="btn-start-install" data-next="screen-install">Install</button>
+      <button class="btn-primary" id="btn-host-next" data-next="screen-summary">Review &amp; Install</button>
     </div>
   </section>
 
   <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- Screen 7 — Install progress                                      -->
+  <!-- Screen 7a — Summary before install                               -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <section id="screen-summary" class="screen">
+    <h2>Ready to install</h2>
+    <p class="ember-voice">"Here's everything we're about to set up."</p>
+
+    <div class="summary-list">
+      <div class="summary-row">
+        <span class="summary-label">Ember code</span>
+        <span class="summary-value" id="summary-ember-path"></span>
+        <span class="summary-size">~50 MB</span>
+      </div>
+      <div class="summary-row">
+        <span class="summary-label">Memory vault</span>
+        <span class="summary-value" id="summary-vault-path"></span>
+        <span class="summary-size">grows over time</span>
+      </div>
+      <div class="summary-row">
+        <span class="summary-label">AI model</span>
+        <span class="summary-value" id="summary-model"></span>
+        <span class="summary-size" id="summary-model-size"></span>
+      </div>
+      <div class="summary-row hidden" id="summary-vision-row">
+        <span class="summary-label">Vision model</span>
+        <span class="summary-value" id="summary-vision"></span>
+        <span class="summary-size" id="summary-vision-size"></span>
+      </div>
+      <div class="summary-row">
+        <span class="summary-label">Model storage</span>
+        <span class="summary-value" id="summary-ollama-path"></span>
+        <span class="summary-size" id="summary-model-total"></span>
+      </div>
+      <div class="summary-row">
+        <span class="summary-label">Python environment</span>
+        <span class="summary-value">Inside Ember folder</span>
+        <span class="summary-size">~2 GB</span>
+      </div>
+      <div class="summary-row">
+        <span class="summary-label">Search engine</span>
+        <span class="summary-value">SearXNG (Docker)</span>
+        <span class="summary-size">~200 MB</span>
+      </div>
+      <div class="summary-row summary-total">
+        <span class="summary-label">Estimated total</span>
+        <span class="summary-value"></span>
+        <span class="summary-size" id="summary-total-size"></span>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn-secondary" data-prev="screen-host">Back</button>
+      <button class="btn-primary" id="btn-start-install">Install</button>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- Screen 7b — Install progress                                     -->
   <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-install" class="screen">
     <h2>Installing</h2>

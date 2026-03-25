@@ -804,6 +804,27 @@ ipcMain.handle('get-default-vault', () => {
   return process.platform === 'win32' ? 'C:\\EmberVault' : '/data/embervault'
 })
 
+ipcMain.handle('get-default-ollama-models', () => {
+  // Ollama default model storage location
+  const envPath = process.env.OLLAMA_MODELS
+  if (envPath) return envPath
+  return process.platform === 'win32'
+    ? path.join(os.homedir(), '.ollama', 'models')
+    : path.join(os.homedir(), '.ollama', 'models')
+})
+
+ipcMain.handle('set-ollama-models-path', (_e, modelsPath) => {
+  // Set OLLAMA_MODELS environment variable system-wide (Windows)
+  if (process.platform === 'win32') {
+    return new Promise((resolve) => {
+      const proc = spawn('setx', ['OLLAMA_MODELS', modelsPath], { shell: true })
+      proc.on('close', (code) => resolve({ ok: code === 0 }))
+      proc.on('error', () => resolve({ ok: false }))
+    })
+  }
+  return Promise.resolve({ ok: false, error: 'Manual setup needed on this platform' })
+})
+
 ipcMain.handle('get-platform', () => process.platform)
 
 ipcMain.handle('restart-computer', () => {

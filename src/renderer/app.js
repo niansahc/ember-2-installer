@@ -18,6 +18,7 @@ const state = {
   vision: null,
   host: '127.0.0.1',
   models: [],
+  ollamaModelsPath: null,
 }
 
 // ---------------------------------------------------------------------------
@@ -370,6 +371,14 @@ function selectModel(id, container) {
   for (let i = 0; i < models.length; i++) {
     if (models[i].id === id) cards[i]?.classList.add('selected')
   }
+  // Update space hint
+  const selected = models.find((m) => m.id === id)
+  const hint = document.getElementById('model-space-hint')
+  if (hint && selected && !selected.installed) {
+    hint.textContent = `${selected.name} will need ${selected.size} of disk space.`
+  } else if (hint && selected?.installed) {
+    hint.textContent = `${selected.name} is already downloaded.`
+  }
 }
 
 function renderVisionCards() {
@@ -582,25 +591,79 @@ document.getElementById('ts-phone-android').addEventListener('click', (e) => {
 })
 
 // ---------------------------------------------------------------------------
-// Screen: Install progress
+// Screen: Ollama model storage
 // ---------------------------------------------------------------------------
 
-document.getElementById('btn-start-install').addEventListener('click', async () => {
-  // Collect final state from UI
-  state.model = document.getElementById('model-select').value || 'qwen2.5:14b'
+async function initOllamaModelsPath() {
+  const defaultPath = await window.ember.getDefaultOllamaModels()
+  const input = document.getElementById('ollama-models-path')
+  input.value = defaultPath
+  state.ollamaModelsPath = defaultPath
+}
 
-  if (document.getElementById('vision-toggle').checked) {
-    state.vision = document.getElementById('vision-select').value || 'llama3.2-vision:11b'
+document.getElementById('btn-pick-ollama-models').addEventListener('click', async () => {
+  const chosen = await window.ember.pickEmberFolder()
+  if (chosen) {
+    document.getElementById('ollama-models-path').value = chosen
+    state.ollamaModelsPath = chosen
   }
+})
 
-  // host is already set by the walkthrough (either 127.0.0.1 or the Tailscale IP)
+document.getElementById('ollama-models-path').addEventListener('input', (e) => {
+  if (e.target.value) state.ollamaModelsPath = e.target.value
+})
 
-  // If vault path is empty, use the placeholder value
+// ---------------------------------------------------------------------------
+// Screen: Summary
+// ---------------------------------------------------------------------------
+
+// Populate summary when navigating to it
+document.getElementById('btn-host-next').addEventListener('click', () => {
+  // Collect final state
   if (!state.vaultPath) {
     state.vaultPath = document.getElementById('vault-path-input').placeholder
   }
 
-  // Run the installation
+  const modelSizes = { 'qwen2.5:14b': 9, 'llama3.1:8b': 4.7, 'mistral:7b': 4.1, 'qwen3:8b': 4.9, 'deepseek-r1:8b': 4.9 }
+  const visionSizes = { 'llama3.2-vision:11b': 6.4, 'llava:13b': 8 }
+
+  document.getElementById('summary-ember-path').textContent = state.emberPath || 'Not set'
+  document.getElementById('summary-vault-path').textContent = state.vaultPath || 'Not set'
+  document.getElementById('summary-model').textContent = state.model || 'qwen2.5:14b'
+  document.getElementById('summary-ollama-path').textContent = state.ollamaModelsPath || '~/.ollama/models'
+
+  const modelGB = modelSizes[state.model] || 5
+  document.getElementById('summary-model-size').textContent = `~${modelGB} GB`
+
+  let totalGB = 0.05 + 2 + 0.2 + modelGB // ember + python + searxng + model
+
+  if (state.vision) {
+    document.getElementById('summary-vision-row').classList.remove('hidden')
+    document.getElementById('summary-vision').textContent = state.vision
+    const visionGB = visionSizes[state.vision] || 6
+    document.getElementById('summary-vision-size').textContent = `~${visionGB} GB`
+    totalGB += visionGB
+    document.getElementById('summary-model-total').textContent = `~${(modelGB + visionGB).toFixed(1)} GB total`
+  } else {
+    document.getElementById('summary-vision-row').classList.add('hidden')
+    document.getElementById('summary-model-total').textContent = `~${modelGB} GB`
+  }
+
+  document.getElementById('summary-total-size').textContent = `~${totalGB.toFixed(1)} GB`
+})
+
+// ---------------------------------------------------------------------------
+// Screen: Install progress
+// ---------------------------------------------------------------------------
+
+document.getElementById('btn-start-install').addEventListener('click', async () => {
+  // Set Ollama models path if changed from default
+  const defaultOllamaPath = await window.ember.getDefaultOllamaModels()
+  if (state.ollamaModelsPath && state.ollamaModelsPath !== defaultOllamaPath) {
+    await window.ember.setOllamaModelsPath(state.ollamaModelsPath)
+  }
+
+  showScreen('screen-install')
   await runInstall()
 })
 
@@ -974,6 +1037,7 @@ async function init() {
   // Pre-load data in background
   initInstallDir()
   initVaultPath()
+  initOllamaModelsPath()
   checkPrerequisites()
   loadModels()
 }
