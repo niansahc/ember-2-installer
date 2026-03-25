@@ -8,7 +8,12 @@
  */
 
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
-const { autoUpdater } = require('electron-updater')
+let autoUpdater = null
+try {
+  autoUpdater = require('electron-updater').autoUpdater
+} catch {
+  // electron-updater fails in unpackaged dev mode — that's fine
+}
 const path = require('path')
 const fs = require('fs')
 const { spawn } = require('child_process')
@@ -85,8 +90,8 @@ app.whenReady().then(() => {
   initPaths()
   createWindow()
 
-  // Check for installer self-updates (only when packaged)
-  if (IS_PACKAGED) {
+  // Check for installer self-updates (only when packaged + updater available)
+  if (IS_PACKAGED && autoUpdater) {
     autoUpdater.autoDownload = false
     autoUpdater.checkForUpdates().catch(() => {})
   }
@@ -104,7 +109,7 @@ app.on('window-all-closed', () => {
 // Installer self-update (electron-updater)
 // ---------------------------------------------------------------------------
 
-autoUpdater.on('update-available', (info) => {
+if (autoUpdater) autoUpdater.on('update-available', (info) => {
   if (mainWindow) {
     mainWindow.webContents.send('installer-update-available', {
       version: info.version,
@@ -114,11 +119,11 @@ autoUpdater.on('update-available', (info) => {
 })
 
 ipcMain.handle('download-installer-update', async () => {
-  autoUpdater.downloadUpdate()
+  if (autoUpdater) autoUpdater.downloadUpdate()
   return true
 })
 
-autoUpdater.on('download-progress', (progress) => {
+if (autoUpdater) autoUpdater.on('download-progress', (progress) => {
   if (mainWindow) {
     mainWindow.webContents.send('installer-download-progress', {
       percent: Math.round(progress.percent),
@@ -126,14 +131,14 @@ autoUpdater.on('download-progress', (progress) => {
   }
 })
 
-autoUpdater.on('update-downloaded', () => {
+if (autoUpdater) autoUpdater.on('update-downloaded', () => {
   if (mainWindow) {
     mainWindow.webContents.send('installer-update-downloaded')
   }
 })
 
 ipcMain.handle('install-installer-update', () => {
-  autoUpdater.quitAndInstall()
+  if (autoUpdater) autoUpdater.quitAndInstall()
 })
 
 // ---------------------------------------------------------------------------
