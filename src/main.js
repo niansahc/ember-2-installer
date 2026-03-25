@@ -342,6 +342,92 @@ ipcMain.handle('get-default-install-dir', () => {
   return process.platform === 'win32' ? 'C:\\Ember-2' : path.join(os.homedir(), 'Ember-2')
 })
 
+ipcMain.handle('scan-for-ember', () => {
+  // Check common locations for an existing ember-2 install
+  const candidates = []
+  const home = os.homedir()
+
+  if (process.platform === 'win32') {
+    candidates.push(
+      'C:\\Ember-2\\ember-2',
+      'D:\\Ember-2\\ember-2',
+      path.join(home, 'Desktop', 'Ember-2', 'ember-2'),
+      path.join(home, 'Documents', 'Ember-2', 'ember-2'),
+      path.join(home, 'ember-2'),
+      path.join(home, 'Desktop', 'ember-2'),
+    )
+  } else {
+    candidates.push(
+      path.join(home, 'Ember-2', 'ember-2'),
+      path.join(home, 'ember-2'),
+      '/opt/ember-2',
+    )
+  }
+
+  // Add the sibling path (relative to installer)
+  candidates.push(DEV_EMBER_PATH)
+
+  // Add previously saved path
+  if (fs.existsSync(INSTALL_PATH_FILE)) {
+    const saved = fs.readFileSync(INSTALL_PATH_FILE, 'utf-8').trim()
+    if (saved) candidates.push(saved)
+  }
+
+  // Check each candidate for version.json (confirms it's a real ember-2 install)
+  for (const candidate of candidates) {
+    try {
+      const versionFile = path.join(candidate, 'version.json')
+      if (fs.existsSync(versionFile)) {
+        const data = JSON.parse(fs.readFileSync(versionFile, 'utf-8'))
+        return {
+          found: true,
+          path: candidate,
+          version: data.version || data.tag || 'unknown',
+        }
+      }
+    } catch {}
+  }
+  return { found: false }
+})
+
+// Curated model recommendations
+ipcMain.handle('get-recommended-models', async () => {
+  // Get installed models from Ollama
+  let installed = []
+  try {
+    const result = await new Promise((resolve) => {
+      const proc = spawn('ollama', ['list'], { shell: true })
+      let out = ''
+      proc.stdout.on('data', (d) => (out += d))
+      proc.on('close', () => {
+        const lines = out.trim().split('\n').slice(1)
+        resolve(lines.map((l) => l.split(/\s+/)[0]).filter(Boolean))
+      })
+      proc.on('error', () => resolve([]))
+    })
+    installed = result
+  } catch {}
+
+  const recommended = [
+    { id: 'qwen2.5:14b', name: 'Qwen 2.5 14B', desc: 'Best balance of speed and intelligence', size: '~9 GB', recommended: true },
+    { id: 'llama3.1:8b', name: 'Llama 3.1 8B', desc: 'Fast and lightweight', size: '~4.7 GB' },
+    { id: 'mistral:7b', name: 'Mistral 7B', desc: 'Good for general conversation', size: '~4.1 GB' },
+    { id: 'qwen3:8b', name: 'Qwen 3 8B', desc: 'Newest, strong reasoning', size: '~4.9 GB' },
+    { id: 'deepseek-r1:8b', name: 'DeepSeek R1 8B', desc: 'Strong at analysis and code', size: '~4.9 GB' },
+  ]
+
+  const visionModels = [
+    { id: 'llama3.2-vision:11b', name: 'Llama 3.2 Vision 11B', desc: 'Can analyze images you share', size: '~6.4 GB', recommended: true },
+    { id: 'llava:13b', name: 'LLaVA 13B', desc: 'Alternative vision model', size: '~8 GB' },
+  ]
+
+  return {
+    recommended: recommended.map((m) => ({ ...m, installed: installed.includes(m.id) })),
+    vision: visionModels.map((m) => ({ ...m, installed: installed.includes(m.id) })),
+    installed,
+  }
+})
+
 // ---------------------------------------------------------------------------
 // IPC — Vault
 // ---------------------------------------------------------------------------
@@ -923,6 +1009,27 @@ if (DEMO_MODE) {
 
   ipcMain.removeHandler('get-default-install-dir')
   ipcMain.handle('get-default-install-dir', () => 'C:\\Ember-2')
+
+  // Override ember scan
+  ipcMain.removeHandler('scan-for-ember')
+  ipcMain.handle('scan-for-ember', () => ({ found: false }))
+
+  // Override recommended models
+  ipcMain.removeHandler('get-recommended-models')
+  ipcMain.handle('get-recommended-models', async () => ({
+    recommended: [
+      { id: 'qwen2.5:14b', name: 'Qwen 2.5 14B', desc: 'Best balance of speed and intelligence', size: '~9 GB', recommended: true, installed: true },
+      { id: 'llama3.1:8b', name: 'Llama 3.1 8B', desc: 'Fast and lightweight', size: '~4.7 GB', installed: false },
+      { id: 'mistral:7b', name: 'Mistral 7B', desc: 'Good for general conversation', size: '~4.1 GB', installed: true },
+      { id: 'qwen3:8b', name: 'Qwen 3 8B', desc: 'Newest, strong reasoning', size: '~4.9 GB', installed: false },
+      { id: 'deepseek-r1:8b', name: 'DeepSeek R1 8B', desc: 'Strong at analysis and code', size: '~4.9 GB', installed: false },
+    ],
+    vision: [
+      { id: 'llama3.2-vision:11b', name: 'Llama 3.2 Vision 11B', desc: 'Can analyze images you share', size: '~6.4 GB', recommended: true, installed: true },
+      { id: 'llava:13b', name: 'LLaVA 13B', desc: 'Alternative vision model', size: '~8 GB', installed: false },
+    ],
+    installed: ['qwen2.5:14b', 'mistral:7b', 'llama3.2-vision:11b'],
+  }))
 }
 
 function sleep(ms) {

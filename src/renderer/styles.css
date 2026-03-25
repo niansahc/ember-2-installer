@@ -303,6 +303,143 @@ p {
   color: var(--text);
 }
 
+/* ── Model cards ───────────────────────────────────────────────────── */
+
+.model-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.model-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.model-card:hover {
+  border-color: var(--accent);
+  background: var(--bg-card);
+}
+
+.model-card.selected {
+  border-color: var(--accent);
+  background: rgba(255, 140, 0, 0.08);
+}
+
+.model-card-radio {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  flex-shrink: 0;
+  transition: border-color 0.15s;
+}
+
+.model-card.selected .model-card-radio {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--bg-card);
+}
+
+.model-card-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.model-card-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.model-card-desc {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin-top: 1px;
+}
+
+.model-card-badge {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.model-card-badge.installed {
+  background: rgba(76, 175, 80, 0.15);
+  color: var(--success);
+}
+
+.model-card-badge.download {
+  background: rgba(255, 140, 0, 0.1);
+  color: var(--accent);
+}
+
+.model-card-badge.recommended {
+  background: rgba(255, 140, 0, 0.15);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── Detected notice ───────────────────────────────────────────────── */
+
+.detected-notice {
+  display: flex;
+  gap: 12px;
+  padding: 12px 16px;
+  background: rgba(76, 175, 80, 0.08);
+  border: 1px solid rgba(76, 175, 80, 0.25);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  align-items: flex-start;
+}
+
+.detected-icon {
+  font-size: 1.2rem;
+  flex-shrink: 0;
+}
+
+.detected-info p {
+  font-size: 0.88rem;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+/* ── Welcome footer ────────────────────────────────────────────────── */
+
+.welcome-footer {
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  font-family: inherit;
+}
+
+.btn-link:hover {
+  color: var(--accent);
+}
+
 /* ── Toggle ────────────────────────────────────────────────────────── */
 
 .toggle-row {

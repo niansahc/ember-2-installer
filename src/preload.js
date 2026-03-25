@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('ember', {
   pickEmberFolder: () => ipcRenderer.invoke('pick-ember-folder'),
   cloneEmberRepo: (parentDir) => ipcRenderer.invoke('clone-ember-repo', { parentDir }),
   getDefaultInstallDir: () => ipcRenderer.invoke('get-default-install-dir'),
+  scanForEmber: () => ipcRenderer.invoke('scan-for-ember'),
+  getRecommendedModels: () => ipcRenderer.invoke('get-recommended-models'),
   onCloneProgress: (fn) => ipcRenderer.on('clone-progress', (_e, text) => fn(text)),
 
   // Vault

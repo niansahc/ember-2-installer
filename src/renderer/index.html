@@ -32,6 +32,10 @@
     <div class="btn-row">
       <button class="btn-primary" data-next="screen-prereqs">Next</button>
     </div>
+    <div class="welcome-footer">
+      <button class="btn-link" id="btn-check-installer-update">Check for installer updates</button>
+      <span id="installer-update-status" class="hint"></span>
+    </div>
   </section>
 
   <!-- ══════════════════════════════════════════════════════════════════ -->
@@ -82,6 +86,14 @@
     <p>Choose a folder. I'll create an <strong>ember-2</strong> subfolder inside it.</p>
     <p class="hint">Default works great for most people.</p>
 
+    <div id="ember-detected" class="detected-notice hidden">
+      <span class="detected-icon">✨</span>
+      <div class="detected-info">
+        <p id="ember-detected-text"></p>
+        <button class="btn-secondary btn-sm" id="btn-use-detected">Use this installation</button>
+      </div>
+    </div>
+
     <div class="path-row">
       <input type="text" id="ember-path-input" class="path-input" placeholder="C:\Ember-2">
       <button class="btn-secondary" id="btn-pick-ember">Browse...</button>
@@ -119,32 +131,32 @@
   </section>
 
   <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- Screen 4 — Model selection                                       -->
+  <!-- Screen 4 — Model selection (curated cards)                       -->
   <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-model" class="screen">
-    <h2>Primary Model</h2>
-    <p>The model Ember uses for conversation and reasoning.</p>
+    <h2>Choose Ember's Brain</h2>
+    <p>This is the model Ember uses to think and talk. Pick one to start — you can change it later.</p>
 
-    <div class="model-row">
-      <select id="model-select" class="model-select">
-        <option value="">Loading models...</option>
-      </select>
-      <button class="btn-secondary" id="btn-pull-model">Pull Model</button>
+    <div id="model-cards" class="model-cards">
+      <p class="hint">Loading models...</p>
     </div>
-    <div id="pull-model-log" class="log-box hidden"></div>
+    <div id="model-download-status" class="hidden">
+      <p id="model-download-label" class="ember-voice"></p>
+      <div id="model-download-log" class="log-box"></div>
+    </div>
 
     <div class="btn-row">
       <button class="btn-secondary" data-prev="screen-vault">Back</button>
-      <button class="btn-primary" data-next="screen-vision">Next</button>
+      <button class="btn-primary" id="btn-model-next" data-next="screen-vision">Next</button>
     </div>
   </section>
 
   <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- Screen 5 — Vision model                                          -->
+  <!-- Screen 5 — Vision model (curated cards)                          -->
   <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-vision" class="screen">
-    <h2>Vision Model</h2>
-    <p>Enables image analysis in chat. This is optional.</p>
+    <h2>Can Ember See Images?</h2>
+    <p>A vision model lets Ember analyze photos and screenshots you share. This is optional.</p>
 
     <div class="toggle-row">
       <label class="toggle">
@@ -155,13 +167,11 @@
     </div>
 
     <div id="vision-model-wrap" class="hidden">
-      <div class="model-row">
-        <select id="vision-select" class="model-select">
-          <option value="">Loading models...</option>
-        </select>
-        <button class="btn-secondary" id="btn-pull-vision">Pull Model</button>
+      <div id="vision-cards" class="model-cards"></div>
+      <div id="vision-download-status" class="hidden">
+        <p id="vision-download-label" class="ember-voice"></p>
+        <div id="vision-download-log" class="log-box"></div>
       </div>
-      <div id="pull-vision-log" class="log-box hidden"></div>
     </div>
 
     <div class="btn-row">

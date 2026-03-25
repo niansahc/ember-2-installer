@@ -92,13 +92,28 @@ document.getElementById('btn-recheck').addEventListener('click', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Screen: Install location (clone)
+// Screen: Install location (clone) + Ember detection
 // ---------------------------------------------------------------------------
 
 async function initInstallDir() {
   const defaultDir = await window.ember.getDefaultInstallDir()
   document.getElementById('ember-path-input').value = defaultDir
   state.emberPath = null // Not yet cloned
+
+  // Scan for existing installation
+  const scan = await window.ember.scanForEmber()
+  if (scan.found) {
+    const notice = document.getElementById('ember-detected')
+    const text = document.getElementById('ember-detected-text')
+    text.textContent = `I found an existing Ember installation at ${scan.path} (v${scan.version}).`
+    notice.classList.remove('hidden')
+
+    document.getElementById('btn-use-detected').addEventListener('click', async () => {
+      state.emberPath = scan.path
+      await window.ember.saveEmberPath(scan.path)
+      showScreen('screen-vault')
+    })
+  }
 }
 
 document.getElementById('btn-pick-ember').addEventListener('click', async () => {
@@ -183,79 +198,112 @@ document.getElementById('vault-path-input').addEventListener('input', (e) => {
 })
 
 // ---------------------------------------------------------------------------
-// Screen: Model selection
+// Screen: Model selection (curated cards)
 // ---------------------------------------------------------------------------
 
+let modelData = null
+
 async function loadModels() {
-  const models = await window.ember.getOllamaModels()
-  state.models = models
+  modelData = await window.ember.getRecommendedModels()
+  renderModelCards()
+  renderVisionCards()
+}
 
-  const select = document.getElementById('model-select')
-  select.innerHTML = ''
+function renderModelCards() {
+  const container = document.getElementById('model-cards')
+  container.innerHTML = ''
 
-  if (models.length === 0) {
-    select.innerHTML = '<option value="qwen2.5:14b">qwen2.5:14b (type to change)</option>'
-  } else {
-    models.forEach((m) => {
-      const opt = document.createElement('option')
-      opt.value = m
-      opt.textContent = m
-      if (m === 'qwen2.5:14b') opt.selected = true
-      select.appendChild(opt)
-    })
-  }
-
-  // Also populate vision select
-  const vSelect = document.getElementById('vision-select')
-  vSelect.innerHTML = ''
-  const visionModels = models.filter((m) => m.toLowerCase().includes('vision'))
-  const allForVision = visionModels.length > 0 ? visionModels : models
-
-  if (allForVision.length === 0) {
-    vSelect.innerHTML = '<option value="llama3.2-vision:11b">llama3.2-vision:11b</option>'
-  } else {
-    allForVision.forEach((m) => {
-      const opt = document.createElement('option')
-      opt.value = m
-      opt.textContent = m
-      if (m.includes('vision')) opt.selected = true
-      vSelect.appendChild(opt)
-    })
+  for (const m of modelData.recommended) {
+    const card = document.createElement('div')
+    card.className = `model-card ${m.id === state.model ? 'selected' : ''}`
+    card.innerHTML = `
+      <div class="model-card-radio"></div>
+      <div class="model-card-info">
+        <div class="model-card-name">${m.name}</div>
+        <div class="model-card-desc">${m.desc}</div>
+      </div>
+      ${m.recommended ? '<span class="model-card-badge recommended">Recommended</span>' : ''}
+      ${m.installed
+        ? '<span class="model-card-badge installed">Installed</span>'
+        : `<span class="model-card-badge download">Download ${m.size}</span>`
+      }
+    `
+    card.addEventListener('click', () => selectModel(m.id, container))
+    container.appendChild(card)
   }
 }
 
-document.getElementById('model-select').addEventListener('change', (e) => {
-  state.model = e.target.value
-})
+function selectModel(id, container) {
+  state.model = id
+  container.querySelectorAll('.model-card').forEach((c) => c.classList.remove('selected'))
+  const cards = container.querySelectorAll('.model-card')
+  const models = modelData.recommended
+  for (let i = 0; i < models.length; i++) {
+    if (models[i].id === id) cards[i]?.classList.add('selected')
+  }
+}
 
-document.getElementById('btn-pull-model').addEventListener('click', async () => {
-  const btn = document.getElementById('btn-pull-model')
-  const model = document.getElementById('model-select').value || state.model
-  const logBox = document.getElementById('pull-model-log')
+function renderVisionCards() {
+  const container = document.getElementById('vision-cards')
+  if (!container) return
+  container.innerHTML = ''
 
-  btn.disabled = true
-  btn.textContent = 'Downloading...'
-  logBox.classList.remove('hidden')
-  logBox.textContent = `Pulling ${model}...\n`
+  for (const m of modelData.vision) {
+    const card = document.createElement('div')
+    card.className = `model-card ${m.id === state.vision ? 'selected' : ''}`
+    card.innerHTML = `
+      <div class="model-card-radio"></div>
+      <div class="model-card-info">
+        <div class="model-card-name">${m.name}</div>
+        <div class="model-card-desc">${m.desc}</div>
+      </div>
+      ${m.installed
+        ? '<span class="model-card-badge installed">Installed</span>'
+        : `<span class="model-card-badge download">Download ${m.size}</span>`
+      }
+    `
+    card.addEventListener('click', () => {
+      state.vision = m.id
+      container.querySelectorAll('.model-card').forEach((c) => c.classList.remove('selected'))
+      card.classList.add('selected')
+    })
+    container.appendChild(card)
+  }
+
+  // Auto-select first vision model
+  if (!state.vision && modelData.vision.length > 0) {
+    state.vision = modelData.vision[0].id
+  }
+}
+
+// Download model if not installed (called during install step)
+async function ensureModelDownloaded(modelId, logBoxId, labelId) {
+  if (!modelData) return true
+  const allModels = [...modelData.recommended, ...modelData.vision]
+  const model = allModels.find((m) => m.id === modelId)
+  if (!model || model.installed) return true // already installed
+
+  const logBox = document.getElementById(logBoxId)
+  const label = document.getElementById(labelId)
+  if (logBox) {
+    logBox.parentElement.classList.remove('hidden')
+    logBox.textContent = `Downloading ${model.name} (${model.size})...\n`
+  }
+  if (label) label.textContent = `"Downloading ${model.name} — this might take a few minutes..."`;
 
   window.ember.onOllamaPullProgress((text) => {
-    logBox.textContent += text
-    logBox.scrollTop = logBox.scrollHeight
+    if (logBox) {
+      logBox.textContent += text
+      logBox.scrollTop = logBox.scrollHeight
+    }
   })
 
-  const result = await window.ember.pullOllamaModel(model)
+  const result = await window.ember.pullOllamaModel(modelId)
   window.ember.removeAllListeners('ollama-pull-progress')
 
-  btn.disabled = false
-  btn.textContent = 'Pull Model'
-
-  if (result.ok) {
-    logBox.textContent += '\nDone!\n'
-    await loadModels()
-  } else {
-    logBox.textContent += '\nFailed. Check that Ollama is running.\n'
-  }
-})
+  if (result.ok && logBox) logBox.textContent += '\nDone!\n'
+  return result.ok
+}
 
 // ---------------------------------------------------------------------------
 // Screen: Vision model
@@ -265,42 +313,12 @@ document.getElementById('vision-toggle').addEventListener('change', (e) => {
   const wrap = document.getElementById('vision-model-wrap')
   if (e.target.checked) {
     wrap.classList.remove('hidden')
+    if (!state.vision && modelData?.vision?.length > 0) {
+      state.vision = modelData.vision[0].id
+    }
   } else {
     wrap.classList.add('hidden')
     state.vision = null
-  }
-})
-
-document.getElementById('vision-select').addEventListener('change', (e) => {
-  state.vision = e.target.value
-})
-
-document.getElementById('btn-pull-vision').addEventListener('click', async () => {
-  const btn = document.getElementById('btn-pull-vision')
-  const model = document.getElementById('vision-select').value || 'llama3.2-vision:11b'
-  const logBox = document.getElementById('pull-vision-log')
-
-  btn.disabled = true
-  btn.textContent = 'Downloading...'
-  logBox.classList.remove('hidden')
-  logBox.textContent = `Pulling ${model}...\n`
-
-  window.ember.onOllamaPullProgress((text) => {
-    logBox.textContent += text
-    logBox.scrollTop = logBox.scrollHeight
-  })
-
-  const result = await window.ember.pullOllamaModel(model)
-  window.ember.removeAllListeners('ollama-pull-progress')
-
-  btn.disabled = false
-  btn.textContent = 'Pull Model'
-
-  if (result.ok) {
-    logBox.textContent += '\nDone!\n'
-    await loadModels()
-  } else {
-    logBox.textContent += '\nFailed. Check that Ollama is running.\n'
   }
 })
 
@@ -474,13 +492,53 @@ async function runInstall() {
     logBox.scrollTop = logBox.scrollHeight
   })
 
+  // Check if models need downloading
+  const needsModelDownload = modelData && !modelData.recommended.find((m) => m.id === state.model)?.installed
+  const needsVisionDownload = state.vision && modelData && !modelData.vision.find((m) => m.id === state.vision)?.installed
+
   const steps = [
     { id: 'env',    label: 'Writing configuration...',          run: writeEnv },
     { id: 'venv',   label: 'Creating Python environment...',    run: () => runStep('venv') },
     { id: 'pip',    label: 'Installing dependencies...',        run: () => runStep('pip') },
     { id: 'apikey', label: 'Setting up API key...',             run: () => runStep('apikey'), nonFatal: true },
-    { id: 'docker', label: 'Starting services...',              run: runDockerStep },
   ]
+
+  if (needsModelDownload) {
+    steps.push({
+      id: 'model',
+      label: `Downloading ${state.model}...`,
+      run: () => ensureModelDownloaded(state.model, 'model-download-log', 'model-download-label'),
+    })
+  }
+
+  if (needsVisionDownload) {
+    steps.push({
+      id: 'vision-dl',
+      label: `Downloading ${state.vision}...`,
+      run: () => ensureModelDownloaded(state.vision, 'vision-download-log', 'vision-download-label'),
+      nonFatal: true,
+    })
+  }
+
+  steps.push({ id: 'docker', label: 'Starting services...', run: runDockerStep })
+
+  // Ensure step elements exist for dynamic steps (model/vision downloads)
+  const stepsContainer = document.querySelector('.install-steps')
+  for (const step of steps) {
+    if (!document.getElementById(`step-${step.id}`)) {
+      const div = document.createElement('div')
+      div.className = 'install-step'
+      div.id = `step-${step.id}`
+      div.innerHTML = `<span class="step-icon">⏳</span><span class="step-label">${step.label}</span>`
+      // Insert before the docker step if it exists, otherwise append
+      const dockerEl = document.getElementById('step-docker')
+      if (dockerEl) {
+        stepsContainer.insertBefore(div, dockerEl)
+      } else {
+        stepsContainer.appendChild(div)
+      }
+    }
+  }
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i]
@@ -749,6 +807,38 @@ document.getElementById('btn-run-update').addEventListener('click', async () => 
     log.textContent += '\nUpdate failed. Try running git pull manually.\n'
     btn.textContent = 'Failed'
   }
+})
+
+// ---------------------------------------------------------------------------
+// Welcome: Check for installer updates (manual button)
+// ---------------------------------------------------------------------------
+
+document.getElementById('btn-check-installer-update').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-check-installer-update')
+  const status = document.getElementById('installer-update-status')
+  btn.disabled = true
+  btn.textContent = 'Checking...'
+  status.textContent = ''
+
+  try {
+    // Use the check-for-update IPC which hits GitHub releases
+    const result = await window.ember.checkForUpdate()
+    if (result.hasUpdate) {
+      status.textContent = `v${result.latestTag} available!`
+      // Show the auto-update banner
+      const banner = document.getElementById('installer-update-banner')
+      const text = document.getElementById('installer-update-text')
+      text.textContent = `Ember Setup ${result.latestTag} is available.`
+      banner.classList.remove('hidden')
+    } else {
+      status.textContent = 'You have the latest version.'
+    }
+  } catch {
+    status.textContent = 'Could not check for updates.'
+  }
+
+  btn.disabled = false
+  btn.textContent = 'Check for installer updates'
 })
 
 // ---------------------------------------------------------------------------
