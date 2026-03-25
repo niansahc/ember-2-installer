@@ -591,7 +591,7 @@ function runSpawn(cmd, args, cwd, step) {
       resolve({ ok: false, error: err.message })
     })
   })
-})
+}
 
 // ---------------------------------------------------------------------------
 // IPC — Update check
