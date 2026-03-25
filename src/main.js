@@ -8,12 +8,6 @@
  */
 
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
-let autoUpdater = null
-try {
-  autoUpdater = require('electron-updater').autoUpdater
-} catch {
-  // electron-updater fails in unpackaged dev mode — that's fine
-}
 const path = require('path')
 const fs = require('fs')
 const { spawn } = require('child_process')
@@ -86,14 +80,47 @@ function createWindow() {
   mainWindow.setMenuBarVisibility(false)
 }
 
+let autoUpdater = null
+
 app.whenReady().then(() => {
   initPaths()
   createWindow()
 
-  // Check for installer self-updates (only when packaged + updater available)
-  if (IS_PACKAGED && autoUpdater) {
+  // Load electron-updater lazily — it crashes at require time in dev mode
+  try {
+    autoUpdater = require('electron-updater').autoUpdater
+  } catch {}
+
+  // Set up installer self-updates (only when packaged + updater available)
+  if (autoUpdater) {
     autoUpdater.autoDownload = false
-    autoUpdater.checkForUpdates().catch(() => {})
+
+    autoUpdater.on('update-available', (info) => {
+      if (mainWindow) {
+        mainWindow.webContents.send('installer-update-available', {
+          version: info.version,
+          releaseNotes: info.releaseNotes || '',
+        })
+      }
+    })
+
+    autoUpdater.on('download-progress', (progress) => {
+      if (mainWindow) {
+        mainWindow.webContents.send('installer-download-progress', {
+          percent: Math.round(progress.percent),
+        })
+      }
+    })
+
+    autoUpdater.on('update-downloaded', () => {
+      if (mainWindow) {
+        mainWindow.webContents.send('installer-update-downloaded')
+      }
+    })
+
+    if (IS_PACKAGED) {
+      autoUpdater.checkForUpdates().catch(() => {})
+    }
   }
 
   app.on('activate', () => {
@@ -106,35 +133,12 @@ app.on('window-all-closed', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Installer self-update (electron-updater)
+// Installer self-update IPC
 // ---------------------------------------------------------------------------
-
-if (autoUpdater) autoUpdater.on('update-available', (info) => {
-  if (mainWindow) {
-    mainWindow.webContents.send('installer-update-available', {
-      version: info.version,
-      releaseNotes: info.releaseNotes || '',
-    })
-  }
-})
 
 ipcMain.handle('download-installer-update', async () => {
   if (autoUpdater) autoUpdater.downloadUpdate()
   return true
-})
-
-if (autoUpdater) autoUpdater.on('download-progress', (progress) => {
-  if (mainWindow) {
-    mainWindow.webContents.send('installer-download-progress', {
-      percent: Math.round(progress.percent),
-    })
-  }
-})
-
-if (autoUpdater) autoUpdater.on('update-downloaded', () => {
-  if (mainWindow) {
-    mainWindow.webContents.send('installer-update-downloaded')
-  }
 })
 
 ipcMain.handle('install-installer-update', () => {
