@@ -435,36 +435,52 @@ ipcMain.handle('write-env', (_e, { emberPath, vault, model, vision, host }) => {
 // Each step sends progress events: install-log, install-step-done
 // step: 'pip' | 'apikey' | 'docker'
 
-ipcMain.handle('run-install-step', (_e, { step, emberPath }) => {
-  return new Promise((resolve) => {
-    let cmd, args, cwd
+ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
+  const isWin = process.platform === 'win32'
+  const pyBin = isWin
+    ? `"${path.join(emberPath, '.venv', 'Scripts', 'python.exe')}"`
+    : path.join(emberPath, '.venv', 'bin', 'python')
 
-    if (step === 'venv') {
-      cwd = emberPath
-      cmd = 'python'
-      args = ['-m', 'venv', '.venv']
-    } else if (step === 'pip') {
-      cwd = emberPath
-      const isWin = process.platform === 'win32'
-      cmd = isWin
-        ? `"${path.join(emberPath, '.venv', 'Scripts', 'python.exe')}"`
-        : path.join(emberPath, '.venv', 'bin', 'python')
-      args = ['-m', 'pip', 'install', '-r', 'requirements.txt']
-    } else if (step === 'apikey') {
-      cwd = emberPath
-      const isWin = process.platform === 'win32'
-      cmd = isWin
-        ? `"${path.join(emberPath, '.venv', 'Scripts', 'python.exe')}"`
-        : path.join(emberPath, '.venv', 'bin', 'python')
-      args = ['scripts/set_api_key.py']
-    } else if (step === 'docker') {
-      cwd = emberPath
-      cmd = 'docker'
-      args = ['compose', 'up', '-d', '--build']
-    } else {
-      return resolve({ ok: false, error: `Unknown step: ${step}` })
+  // --- API key: check first, skip if exists, run non-interactive if not ---
+  if (step === 'apikey') {
+    const keyExists = await new Promise((resolve) => {
+      const proc = spawn(pyBin, ['scripts/set_api_key.py', '--check'], {
+        cwd: emberPath, shell: true,
+      })
+      proc.on('close', (code) => resolve(code === 0))
+      proc.on('error', () => resolve(false))
+    })
+
+    if (keyExists) {
+      mainWindow.webContents.send('install-log', { step, text: 'API key already configured ✓\n' })
+      mainWindow.webContents.send('install-step-done', { step, ok: true })
+      return { ok: true }
     }
 
+    // No key — generate non-interactively
+    return runSpawn(pyBin, ['scripts/set_api_key.py', '--non-interactive'], emberPath, step)
+  }
+
+  // --- All other steps ---
+  let cmd, args
+  if (step === 'venv') {
+    cmd = 'python'
+    args = ['-m', 'venv', '.venv']
+  } else if (step === 'pip') {
+    cmd = pyBin
+    args = ['-m', 'pip', 'install', '-r', 'requirements.txt']
+  } else if (step === 'docker') {
+    cmd = 'docker'
+    args = ['compose', 'up', '-d', '--build']
+  } else {
+    return { ok: false, error: `Unknown step: ${step}` }
+  }
+
+  return runSpawn(cmd, args, emberPath, step)
+})
+
+function runSpawn(cmd, args, cwd, step) {
+  return new Promise((resolve) => {
     const proc = spawn(cmd, args, { cwd, shell: true })
 
     proc.stdout.on('data', (d) => {
