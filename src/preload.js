@@ -73,6 +73,9 @@ contextBridge.exposeInMainWorld('ember', {
   onEmberUpdateLog: (fn) =>
     ipcRenderer.on('ember-update-log', (_e, text) => fn(text)),
 
+  // Docker daemon
+  checkDockerDaemon: () => ipcRenderer.invoke('check-docker-daemon'),
+
   // UI choice
   checkOpenWebUI: () => ipcRenderer.invoke('check-open-webui'),
   saveUiChoice: (choice) => ipcRenderer.invoke('save-ui-choice', { choice }),

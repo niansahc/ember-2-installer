@@ -310,6 +310,12 @@ ipcMain.handle('clone-ember-repo', (_e, { parentDir }) => {
     if (fs.existsSync(targetDir)) {
       return resolve({ ok: true, path: targetDir, message: 'Already exists' })
     }
+    // Create parent directory if it doesn't exist
+    try {
+      fs.mkdirSync(parentDir, { recursive: true })
+    } catch (err) {
+      return resolve({ ok: false, error: `Cannot create directory: ${err.message}` })
+    }
     const proc = spawn('git', ['clone', 'https://github.com/niansahc/ember-2.git'], {
       cwd: parentDir,
       shell: true,
@@ -616,6 +622,18 @@ ipcMain.handle('run-git-pull', (_e) => {
 })
 
 // ---------------------------------------------------------------------------
+// IPC — Docker daemon check
+// ---------------------------------------------------------------------------
+
+ipcMain.handle('check-docker-daemon', () => {
+  return new Promise((resolve) => {
+    const proc = spawn('docker', ['info'], { shell: true })
+    proc.on('close', (code) => resolve({ ok: code === 0 }))
+    proc.on('error', () => resolve({ ok: false }))
+  })
+})
+
+// ---------------------------------------------------------------------------
 // IPC — Misc
 // ---------------------------------------------------------------------------
 
@@ -869,6 +887,10 @@ if (DEMO_MODE) {
     }
     return { ok: true, tag: 'v0.9.3' }
   })
+
+  // Override docker daemon check
+  ipcMain.removeHandler('check-docker-daemon')
+  ipcMain.handle('check-docker-daemon', async () => ({ ok: true }))
 
   // Override UI choice checks
   ipcMain.removeHandler('check-open-webui')

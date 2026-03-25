@@ -458,6 +458,13 @@ document.getElementById('btn-start-install').addEventListener('click', async () 
 })
 
 async function runInstall() {
+  // Guard: emberPath must be set
+  if (!state.emberPath) {
+    alert('No install path set. Please go back and choose where to install Ember.')
+    showScreen('screen-ember-path')
+    return
+  }
+
   const logBox = document.getElementById('install-log')
   logBox.textContent = ''
 
@@ -471,25 +478,38 @@ async function runInstall() {
     { id: 'env',    label: 'Writing configuration...',          run: writeEnv },
     { id: 'venv',   label: 'Creating Python environment...',    run: () => runStep('venv') },
     { id: 'pip',    label: 'Installing dependencies...',        run: () => runStep('pip') },
-    { id: 'apikey', label: 'Setting up API key...',             run: () => runStep('apikey') },
-    { id: 'docker', label: 'Starting services...',              run: () => runStep('docker') },
+    { id: 'apikey', label: 'Setting up API key...',             run: () => runStep('apikey'), nonFatal: true },
+    { id: 'docker', label: 'Starting services...',              run: runDockerStep },
   ]
 
-  for (const step of steps) {
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i]
     const el = document.getElementById(`step-${step.id}`)
     const icon = el.querySelector('.step-icon')
+    const label = el.querySelector('.step-label')
 
     el.classList.add('active')
     icon.textContent = '⏳'
+    label.textContent = `${step.label} (${i + 1} of ${steps.length})`
 
     const ok = await step.run()
 
     icon.textContent = ok ? '✅' : '❌'
+    label.textContent = step.label
     el.classList.remove('active')
 
-    if (!ok && step.id !== 'apikey') {
-      // apikey failure is non-fatal (user can run it later)
+    if (!ok && !step.nonFatal) {
       logBox.textContent += `\n⚠ Step "${step.id}" failed. Check the log above.\n`
+      logBox.textContent += '\nYou can fix the issue and try again.\n'
+      showRetryButton(() => {
+        // Reset icons and retry
+        steps.forEach((s) => {
+          const stepEl = document.getElementById(`step-${s.id}`)
+          stepEl.querySelector('.step-icon').textContent = '⏳'
+          stepEl.querySelector('.step-label').textContent = s.label
+        })
+        runInstall()
+      })
       return
     }
   }
@@ -503,6 +523,25 @@ async function runInstall() {
   loadEmberVersion()
 }
 
+function showRetryButton(onRetry) {
+  const logBox = document.getElementById('install-log')
+  // Check if retry button already exists
+  let retryBtn = document.getElementById('btn-install-retry')
+  if (!retryBtn) {
+    retryBtn = document.createElement('button')
+    retryBtn.id = 'btn-install-retry'
+    retryBtn.className = 'btn-secondary'
+    retryBtn.style.marginTop = '0.75rem'
+    logBox.parentElement.appendChild(retryBtn)
+  }
+  retryBtn.textContent = 'Retry'
+  retryBtn.disabled = false
+  retryBtn.onclick = () => {
+    retryBtn.remove()
+    onRetry()
+  }
+}
+
 async function writeEnv() {
   const result = await window.ember.writeEnv({
     emberPath: state.emberPath,
@@ -512,12 +551,30 @@ async function writeEnv() {
     host: state.host,
   })
 
-  // Also create the vault directory
-  if (result.ok) {
-    await window.ember.createVault(state.vaultPath)
+  if (!result.ok) return false
+
+  // Create the vault directory
+  const vaultResult = await window.ember.createVault(state.vaultPath)
+  if (!vaultResult.ok) {
+    const logBox = document.getElementById('install-log')
+    logBox.textContent += `⚠ Could not create vault at ${state.vaultPath}: ${vaultResult.error || 'unknown error'}\n`
+    logBox.textContent += 'Check that the path is valid and you have write permissions.\n'
+    return false
   }
 
-  return result.ok
+  return true
+}
+
+async function runDockerStep() {
+  // Pre-check: is Docker daemon running?
+  const daemon = await window.ember.checkDockerDaemon()
+  if (!daemon.ok) {
+    const logBox = document.getElementById('install-log')
+    logBox.textContent += '⚠ Docker Desktop is not running.\n'
+    logBox.textContent += 'Please start Docker Desktop, wait for "Engine running", then retry.\n'
+    return false
+  }
+  return runStep('docker')
 }
 
 async function runStep(step) {
@@ -533,10 +590,14 @@ async function runStep(step) {
 document.getElementById('btn-open-ember').addEventListener('click', async () => {
   const choice = document.querySelector('input[name="ui-choice"]:checked')?.value || 'ember-ui'
   await window.ember.saveUiChoice(choice)
+  const host = state.host || '127.0.0.1'
   if (choice === 'open-webui') {
-    window.ember.openUrl('http://localhost:3000')
+    // Open WebUI runs on port 3000
+    window.ember.openUrl(`http://${host}:3000`)
   } else {
-    window.ember.openUrl('http://localhost:5173')
+    // Ember UI — use localhost for dev server, or host for Tailscale
+    const uiHost = host === '127.0.0.1' ? 'localhost' : host
+    window.ember.openUrl(`http://${uiHost}:5173`)
   }
 })
 
