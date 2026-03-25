@@ -660,6 +660,11 @@ p {
 .step-voice {
   width: 100%;
   padding-left: 34px;
+  display: none;
+}
+
+.install-step.active .step-voice {
+  display: block;
 }
 
 /* ── Log box ───────────────────────────────────────────────────────── */
