@@ -46,39 +46,61 @@
     <p class="ember-voice">"Let me make sure everything's in place..."</p>
 
     <div class="prereq-list">
-      <div class="prereq-row" id="prereq-docker">
+      <div class="prereq-row" id="prereq-git">
         <span class="prereq-icon">⏳</span>
-        <span class="prereq-label">Docker</span>
+        <span class="prereq-label">Git <span class="prereq-size">~50 MB</span></span>
         <span class="prereq-version"></span>
-        <a class="prereq-link hidden" href="#" data-url="https://www.docker.com/products/docker-desktop/">Download</a>
+        <button class="prereq-install-btn hidden" data-prereq="git">Install</button>
+        <a class="prereq-link hidden" href="#" data-url="https://git-scm.com/downloads">Download manually</a>
       </div>
       <div class="prereq-row" id="prereq-python">
         <span class="prereq-icon">⏳</span>
-        <span class="prereq-label">Python</span>
+        <span class="prereq-label">Python <span class="prereq-size">~100 MB</span></span>
         <span class="prereq-version"></span>
-        <a class="prereq-link hidden" href="#" data-url="https://www.python.org/downloads/">Download</a>
-      </div>
-      <div class="prereq-row" id="prereq-ollama">
-        <span class="prereq-icon">⏳</span>
-        <span class="prereq-label">Ollama</span>
-        <span class="prereq-version"></span>
-        <a class="prereq-link hidden" href="#" data-url="https://ollama.com/download">Download</a>
-      </div>
-      <div class="prereq-row" id="prereq-git">
-        <span class="prereq-icon">⏳</span>
-        <span class="prereq-label">Git</span>
-        <span class="prereq-version"></span>
-        <a class="prereq-link hidden" href="#" data-url="https://git-scm.com/downloads">Download</a>
+        <button class="prereq-install-btn hidden" data-prereq="python">Install</button>
+        <a class="prereq-link hidden" href="#" data-url="https://www.python.org/downloads/">Download manually</a>
       </div>
       <div class="prereq-row" id="prereq-node">
         <span class="prereq-icon">⏳</span>
-        <span class="prereq-label">Node.js</span>
+        <span class="prereq-label">Node.js <span class="prereq-size">~75 MB</span></span>
         <span class="prereq-version"></span>
-        <a class="prereq-link hidden" href="#" data-url="https://nodejs.org/en/download">Download</a>
+        <button class="prereq-install-btn hidden" data-prereq="node">Install</button>
+        <a class="prereq-link hidden" href="#" data-url="https://nodejs.org/en/download">Download manually</a>
+      </div>
+      <div class="prereq-row" id="prereq-ollama">
+        <span class="prereq-icon">⏳</span>
+        <span class="prereq-label">Ollama <span class="prereq-size">~100 MB</span></span>
+        <span class="prereq-version"></span>
+        <button class="prereq-install-btn hidden" data-prereq="ollama">Install</button>
+        <a class="prereq-link hidden" href="#" data-url="https://ollama.com/download">Download manually</a>
+      </div>
+      <div class="prereq-row" id="prereq-docker">
+        <span class="prereq-icon">⏳</span>
+        <span class="prereq-label">Docker <span class="prereq-size">~600 MB • requires restart</span></span>
+        <span class="prereq-version"></span>
+        <button class="prereq-install-btn hidden" data-prereq="docker">Install</button>
+        <a class="prereq-link hidden" href="#" data-url="https://www.docker.com/products/docker-desktop/">Download manually</a>
       </div>
     </div>
 
-    <div class="btn-row">
+    <p class="hint" id="prereq-total-hint" style="margin-top: 8px;"></p>
+    </div>
+
+    <div id="prereq-install-all-wrap" class="hidden">
+      <button class="btn-primary" id="btn-install-all">Install All Missing</button>
+    </div>
+
+    <div id="prereq-install-log" class="log-box hidden"></div>
+
+    <div id="prereq-restart-notice" class="hidden">
+      <p class="ember-voice">"Docker needs a restart to finish setting up. Save your work, then come back — I'll be here."</p>
+      <div class="btn-row">
+        <button class="btn-secondary" id="btn-restart-later">I'll restart later</button>
+        <button class="btn-primary" id="btn-restart-now">Restart Now</button>
+      </div>
+    </div>
+
+    <div class="btn-row" id="prereq-nav-row">
       <button class="btn-secondary" id="btn-recheck">Re-check</button>
       <button class="btn-primary" id="btn-prereqs-next" data-next="screen-ember-path" disabled>Next</button>
     </div>

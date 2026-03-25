@@ -291,6 +291,43 @@ function probe(cmd) {
   })
 }
 
+// Winget package IDs for each prerequisite
+const WINGET_PACKAGES = {
+  git: 'Git.Git',
+  python: 'Python.Python.3.12',
+  node: 'OpenJS.NodeJS.LTS',
+  ollama: 'Ollama.Ollama',
+  docker: 'Docker.DockerDesktop',
+}
+
+ipcMain.handle('install-prerequisite', (_e, { name }) => {
+  const packageId = WINGET_PACKAGES[name]
+  if (!packageId) return Promise.resolve({ ok: false, error: `Unknown: ${name}` })
+
+  return new Promise((resolve) => {
+    const proc = spawn('winget', ['install', '--id', packageId, '--silent', '--accept-package-agreements', '--accept-source-agreements'], {
+      shell: true,
+    })
+    proc.stdout.on('data', (d) => {
+      mainWindow.webContents.send('prereq-install-progress', { name, text: d.toString() })
+    })
+    proc.stderr.on('data', (d) => {
+      mainWindow.webContents.send('prereq-install-progress', { name, text: d.toString() })
+    })
+    proc.on('close', (code) => {
+      // winget returns 0 on success, -1978335189 if already installed
+      const ok = code === 0 || code === -1978335189
+      resolve({ ok, needsRestart: name === 'docker' })
+    })
+    proc.on('error', (err) => resolve({ ok: false, error: err.message }))
+  })
+})
+
+ipcMain.handle('check-winget', async () => {
+  const result = await probe(['winget', '--version'])
+  return { available: result.ok }
+})
+
 // ---------------------------------------------------------------------------
 // IPC — Ember path
 // ---------------------------------------------------------------------------
@@ -769,6 +806,10 @@ ipcMain.handle('get-default-vault', () => {
 
 ipcMain.handle('get-platform', () => process.platform)
 
+ipcMain.handle('restart-computer', () => {
+  spawn('shutdown', ['/r', '/t', '30', '/c', 'Restarting for Docker Desktop setup. Run Ember Setup again after restart.'], { shell: true })
+})
+
 ipcMain.handle('get-demo-mode', () => DEMO_MODE)
 
 // ---------------------------------------------------------------------------
@@ -857,6 +898,18 @@ if (DEMO_MODE) {
     git: { ok: true, version: 'git version 2.47.0 (demo)' },
     node: { ok: true, version: 'v24.14.0 (demo)' },
   }))
+
+  // Override winget check
+  ipcMain.removeHandler('check-winget')
+  ipcMain.handle('check-winget', async () => ({ available: true }))
+
+  // Override prerequisite install
+  ipcMain.removeHandler('install-prerequisite')
+  ipcMain.handle('install-prerequisite', async (_e, { name }) => {
+    await sleep(1500)
+    mainWindow.webContents.send('prereq-install-progress', { name, text: `Installing ${name}... done (demo)\n` })
+    return { ok: true, needsRestart: name === 'docker' }
+  })
 
   // Override ollama models — return fake list
   ipcMain.removeHandler('get-ollama-models')

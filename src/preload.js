@@ -11,6 +11,12 @@ contextBridge.exposeInMainWorld('ember', {
   // Prerequisites
   checkPrerequisites: () => ipcRenderer.invoke('check-prerequisites'),
 
+  // Prerequisite installation
+  installPrerequisite: (name) => ipcRenderer.invoke('install-prerequisite', { name }),
+  checkWinget: () => ipcRenderer.invoke('check-winget'),
+  onPrereqInstallProgress: (fn) =>
+    ipcRenderer.on('prereq-install-progress', (_e, data) => fn(data)),
+
   // Ember repo path
   getEmberPath: () => ipcRenderer.invoke('get-ember-path'),
   saveEmberPath: (p) => ipcRenderer.invoke('save-ember-path', p),
@@ -45,6 +51,7 @@ contextBridge.exposeInMainWorld('ember', {
   openWebUI: () => ipcRenderer.invoke('open-webui'),
   openUrl: (url) => ipcRenderer.invoke('open-url', url),
   getPlatform: () => ipcRenderer.invoke('get-platform'),
+  restartComputer: () => ipcRenderer.invoke('restart-computer'),
 
   // Event listeners (streaming)
   onInstallLog: (fn) => ipcRenderer.on('install-log', (_e, data) => fn(data)),

@@ -51,32 +51,159 @@ document.querySelectorAll('[data-prev]').forEach((btn) => {
 // Screen: Prerequisites
 // ---------------------------------------------------------------------------
 
+let hasWinget = false
+let missingPrereqs = []
+
 async function checkPrerequisites() {
   const checks = await window.ember.checkPrerequisites()
+  const winget = await window.ember.checkWinget()
+  hasWinget = winget.available
+  missingPrereqs = []
   let allGood = true
 
   for (const [name, result] of Object.entries(checks)) {
     const row = document.getElementById(`prereq-${name}`)
+    if (!row) continue
     const icon = row.querySelector('.prereq-icon')
     const version = row.querySelector('.prereq-version')
+    const installBtn = row.querySelector('.prereq-install-btn')
     const link = row.querySelector('.prereq-link')
 
     if (result.ok) {
       icon.textContent = '✅'
       version.textContent = result.version || 'Installed'
-      link.classList.add('hidden')
+      if (installBtn) installBtn.classList.add('hidden')
+      if (link) link.classList.add('hidden')
     } else {
       icon.textContent = '❌'
       version.textContent = 'Not found'
-      link.classList.remove('hidden')
       allGood = false
+      missingPrereqs.push(name)
+
+      if (hasWinget && installBtn) {
+        installBtn.classList.remove('hidden')
+        if (link) link.classList.remove('hidden')
+      } else if (link) {
+        link.classList.remove('hidden')
+        if (installBtn) installBtn.classList.add('hidden')
+      }
     }
   }
 
   document.getElementById('btn-prereqs-next').disabled = !allGood
+
+  // Show "Install All" if multiple missing and winget available
+  const installAllWrap = document.getElementById('prereq-install-all-wrap')
+  if (hasWinget && missingPrereqs.length > 1) {
+    installAllWrap.classList.remove('hidden')
+  } else {
+    installAllWrap.classList.add('hidden')
+  }
+
+  // Show total size estimate for missing items
+  const sizeMap = { git: 50, python: 100, node: 75, ollama: 100, docker: 600 }
+  const totalHint = document.getElementById('prereq-total-hint')
+  if (missingPrereqs.length > 0) {
+    const totalMB = missingPrereqs.reduce((sum, name) => sum + (sizeMap[name] || 0), 0)
+    const note = missingPrereqs.includes('docker') ? ' (Docker requires a restart after install)' : ''
+    totalHint.textContent = `Total download: ~${totalMB >= 1000 ? (totalMB / 1000).toFixed(1) + ' GB' : totalMB + ' MB'}${note}`
+  } else {
+    totalHint.textContent = ''
+  }
 }
 
-// Download links open external browser
+// Individual install buttons
+document.querySelectorAll('.prereq-install-btn').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    const name = btn.dataset.prereq
+    await installOnePrereq(name, btn)
+  })
+})
+
+async function installOnePrereq(name, btn) {
+  const logBox = document.getElementById('prereq-install-log')
+  logBox.classList.remove('hidden')
+
+  if (btn) {
+    btn.disabled = true
+    btn.textContent = 'Installing...'
+  }
+
+  logBox.textContent += `Installing ${name}...\n`
+
+  window.ember.onPrereqInstallProgress(({ name: n, text }) => {
+    if (n === name) {
+      logBox.textContent += text
+      logBox.scrollTop = logBox.scrollHeight
+    }
+  })
+
+  const result = await window.ember.installPrerequisite(name)
+  window.ember.removeAllListeners('prereq-install-progress')
+
+  if (result.ok) {
+    logBox.textContent += `${name} installed ✓\n\n`
+    if (btn) btn.textContent = 'Installed ✓'
+
+    if (result.needsRestart) {
+      showRestartNotice()
+      return true
+    }
+
+    // Re-check to update the UI
+    await checkPrerequisites()
+  } else {
+    logBox.textContent += `Failed to install ${name}. ${result.error || 'Try the manual download link.'}\n\n`
+    if (btn) {
+      btn.disabled = false
+      btn.textContent = 'Retry'
+    }
+  }
+  return result.ok
+}
+
+// Install All Missing button
+document.getElementById('btn-install-all').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-install-all')
+  btn.disabled = true
+  btn.textContent = 'Installing...'
+
+  // Install Docker last (may need restart)
+  const sorted = [...missingPrereqs].sort((a, b) => {
+    if (a === 'docker') return 1
+    if (b === 'docker') return -1
+    return 0
+  })
+
+  for (const name of sorted) {
+    const row = document.getElementById(`prereq-${name}`)
+    const prereqBtn = row?.querySelector('.prereq-install-btn')
+    const ok = await installOnePrereq(name, prereqBtn)
+    if (!ok) {
+      btn.disabled = false
+      btn.textContent = 'Retry Remaining'
+      return
+    }
+  }
+
+  btn.textContent = 'All installed ✓'
+})
+
+function showRestartNotice() {
+  document.getElementById('prereq-restart-notice').classList.remove('hidden')
+  document.getElementById('prereq-nav-row').classList.add('hidden')
+}
+
+document.getElementById('btn-restart-now').addEventListener('click', () => {
+  window.ember.restartComputer()
+})
+
+document.getElementById('btn-restart-later').addEventListener('click', () => {
+  document.getElementById('prereq-restart-notice').classList.add('hidden')
+  document.getElementById('prereq-nav-row').classList.remove('hidden')
+})
+
+// Download links open external browser (fallback)
 document.querySelectorAll('.prereq-link').forEach((link) => {
   link.addEventListener('click', (e) => {
     e.preventDefault()
@@ -85,9 +212,11 @@ document.querySelectorAll('.prereq-link').forEach((link) => {
 })
 
 document.getElementById('btn-recheck').addEventListener('click', () => {
-  // Reset icons to loading
   document.querySelectorAll('.prereq-icon').forEach((i) => (i.textContent = '⏳'))
   document.querySelectorAll('.prereq-version').forEach((v) => (v.textContent = ''))
+  document.querySelectorAll('.prereq-install-btn').forEach((b) => b.classList.add('hidden'))
+  document.querySelectorAll('.prereq-link').forEach((l) => l.classList.add('hidden'))
+  document.getElementById('prereq-install-all-wrap').classList.add('hidden')
   checkPrerequisites()
 })
 
