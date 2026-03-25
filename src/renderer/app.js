@@ -520,7 +520,8 @@ async function runInstall() {
     })
   }
 
-  steps.push({ id: 'docker', label: 'Starting services...', run: runDockerStep })
+  steps.push({ id: 'build-ui', label: "Building Ember's interface...", run: () => runStep('build-ui') })
+  steps.push({ id: 'docker', label: 'Starting search engine...', run: runDockerStep })
 
   // Ensure step elements exist for dynamic steps (model/vision downloads)
   const stepsContainer = document.querySelector('.install-steps')
@@ -644,39 +645,12 @@ async function runStep(step) {
 // Screen: Done
 // ---------------------------------------------------------------------------
 
-// UI Choice — detect Open WebUI, save preference, open chosen UI
-document.getElementById('btn-open-ember').addEventListener('click', async () => {
-  const choice = document.querySelector('input[name="ui-choice"]:checked')?.value || 'ember-ui'
-  await window.ember.saveUiChoice(choice)
+// Open Ember — UI is served by FastAPI on the same host/port
+document.getElementById('btn-open-ember').addEventListener('click', () => {
   const host = state.host || '127.0.0.1'
-  if (choice === 'open-webui') {
-    // Open WebUI runs on port 3000
-    window.ember.openUrl(`http://${host}:3000`)
-  } else {
-    // Ember UI — use localhost for dev server, or host for Tailscale
-    const uiHost = host === '127.0.0.1' ? 'localhost' : host
-    window.ember.openUrl(`http://${uiHost}:5173`)
-  }
+  const uiHost = host === '127.0.0.1' ? 'localhost' : host
+  window.ember.openUrl(`http://${uiHost}:8000`)
 })
-
-// Check for Open WebUI and load saved choice when Done screen appears
-async function initUiChoice() {
-  const notice = document.getElementById('ui-choice-notice')
-
-  // Check if Open WebUI is running
-  const webui = await window.ember.checkOpenWebUI()
-  if (webui.running) {
-    notice.textContent = "We noticed you have Open WebUI running. You can keep using it or switch to Ember's interface — your choice."
-    notice.classList.remove('hidden')
-  }
-
-  // Restore saved choice
-  const saved = await window.ember.getUiChoice()
-  if (saved) {
-    const radio = document.querySelector(`input[name="ui-choice"][value="${saved}"]`)
-    if (radio) radio.checked = true
-  }
-}
 
 // Ember-2 backend version check
 document.getElementById('btn-check-ember-update').addEventListener('click', async () => {
@@ -738,7 +712,6 @@ document.getElementById('btn-run-ember-update').addEventListener('click', async 
 async function loadEmberVersion() {
   const result = await window.ember.checkEmberUpdate()
   document.getElementById('ember-version-label').textContent = result.installed || 'unknown'
-  initUiChoice()
 }
 
 // ---------------------------------------------------------------------------

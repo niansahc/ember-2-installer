@@ -572,7 +572,73 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     args = ['-m', 'pip', 'install', '-r', 'requirements.txt']
   } else if (step === 'docker') {
     cmd = 'docker'
-    args = ['compose', 'up', '-d', '--build']
+    args = ['compose', 'up', '-d']
+  } else if (step === 'build-ui') {
+    // Clone ember-2-ui, install, build, copy to ember-2/ui/
+    const uiDir = path.join(path.dirname(emberPath), 'ember-2-ui')
+    const uiDistDir = path.join(uiDir, 'dist')
+    const targetUiDir = path.join(emberPath, 'ui')
+
+    // Clone if not exists
+    if (!fs.existsSync(uiDir)) {
+      const cloneOk = await new Promise((resolve) => {
+        const proc = spawn('git', ['clone', 'https://github.com/niansahc/ember-2-ui.git'], {
+          cwd: path.dirname(emberPath), shell: true,
+        })
+        proc.stdout.on('data', (d) => mainWindow.webContents.send('install-log', { step, text: d.toString() }))
+        proc.stderr.on('data', (d) => mainWindow.webContents.send('install-log', { step, text: d.toString() }))
+        proc.on('close', (code) => resolve(code === 0))
+        proc.on('error', () => resolve(false))
+      })
+      if (!cloneOk) {
+        mainWindow.webContents.send('install-step-done', { step, ok: false })
+        return { ok: false }
+      }
+    }
+
+    // npm install
+    mainWindow.webContents.send('install-log', { step, text: 'Installing UI dependencies...\n' })
+    const npmOk = await new Promise((resolve) => {
+      const proc = spawn('npm', ['install'], { cwd: uiDir, shell: true })
+      proc.stdout.on('data', (d) => mainWindow.webContents.send('install-log', { step, text: d.toString() }))
+      proc.stderr.on('data', (d) => mainWindow.webContents.send('install-log', { step, text: d.toString() }))
+      proc.on('close', (code) => resolve(code === 0))
+      proc.on('error', () => resolve(false))
+    })
+    if (!npmOk) {
+      mainWindow.webContents.send('install-step-done', { step, ok: false })
+      return { ok: false }
+    }
+
+    // npm run build
+    mainWindow.webContents.send('install-log', { step, text: 'Building Ember UI...\n' })
+    const buildOk = await new Promise((resolve) => {
+      const proc = spawn('npm', ['run', 'build'], { cwd: uiDir, shell: true })
+      proc.stdout.on('data', (d) => mainWindow.webContents.send('install-log', { step, text: d.toString() }))
+      proc.stderr.on('data', (d) => mainWindow.webContents.send('install-log', { step, text: d.toString() }))
+      proc.on('close', (code) => resolve(code === 0))
+      proc.on('error', () => resolve(false))
+    })
+    if (!buildOk) {
+      mainWindow.webContents.send('install-step-done', { step, ok: false })
+      return { ok: false }
+    }
+
+    // Copy dist/ to ember-2/ui/
+    try {
+      if (fs.existsSync(targetUiDir)) {
+        fs.rmSync(targetUiDir, { recursive: true })
+      }
+      fs.cpSync(uiDistDir, targetUiDir, { recursive: true })
+      mainWindow.webContents.send('install-log', { step, text: 'UI installed ✓\n' })
+    } catch (err) {
+      mainWindow.webContents.send('install-log', { step, text: `Failed to copy UI: ${err.message}\n` })
+      mainWindow.webContents.send('install-step-done', { step, ok: false })
+      return { ok: false }
+    }
+
+    mainWindow.webContents.send('install-step-done', { step, ok: true })
+    return { ok: true }
   } else {
     return { ok: false, error: `Unknown step: ${step}` }
   }
@@ -902,16 +968,21 @@ if (DEMO_MODE) {
           'Key: ember_demo_xxxxxxxxxxxx\n',
         ],
       },
-      docker: {
+      'build-ui': {
         delay: 3000,
         logs: [
-          'Creating network "ember-2_default"\n',
-          'Building ember-webui...\n',
-          'Step 1/3 : FROM ghcr.io/open-webui/open-webui:main\n',
-          'Step 2/3 : COPY webui/static/ /app/build/static/\n',
-          'Step 3/3 : COPY webui/assets/images/ /app/build/assets/images/\n',
+          'Cloning ember-2-ui...\n',
+          'Installing UI dependencies...\n',
+          'Building Ember UI...\n',
+          'vite v6.4.1 building for production...\n',
+          '✓ 306 modules transformed.\n',
+          'UI installed ✓\n',
+        ],
+      },
+      docker: {
+        delay: 1500,
+        logs: [
           'Creating ember-searxng ... done\n',
-          'Creating ember-webui  ... done\n',
         ],
       },
     }
