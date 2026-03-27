@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.3.0 — 2026-03-27
+- Venv lock detection with friendly error message
+- Auto-start API after install completes
+- Health check before enabling Open Ember button
+- Pip time warning callout (1-2 hours, warm tone)
+- Progress bar + 95 AI fun facts during install
+- Tailscale serve fixed to localhost binding
+- Tailscale IP displayed to user during setup
+- Consistent Ember-2 branding throughout
+- Auto-install prerequisites via winget
+- Curated model cards with disk sizes
+- Disk space summary before install
+- Node.js added to prerequisites
+
 ## v0.2.1 — 2026-03-24
 
 ### Installer is now the entry point
