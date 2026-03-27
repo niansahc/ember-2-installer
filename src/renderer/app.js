@@ -972,7 +972,10 @@ async function runVenvStep() {
 async function runPipStep() {
   const unlocked = await checkVenvLock()
   if (!unlocked) return false
-  return runStep('pip')
+  document.getElementById('pip-time-warning').classList.remove('hidden')
+  const ok = await runStep('pip')
+  document.getElementById('pip-time-warning').classList.add('hidden')
+  return ok
 }
 
 async function runDockerStep() {
