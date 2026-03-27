@@ -824,8 +824,8 @@ async function runInstall() {
 
   const steps = [
     { id: 'env',    label: 'Writing configuration...',          run: writeEnv },
-    { id: 'venv',   label: 'Creating Python environment...',    run: () => runStep('venv') },
-    { id: 'pip',    label: 'Installing dependencies...',        run: () => runStep('pip') },
+    { id: 'venv',   label: 'Creating Python environment...',    run: runVenvStep },
+    { id: 'pip',    label: 'Installing dependencies...',        run: runPipStep },
     { id: 'apikey', label: 'Setting up API key...',             run: () => runStep('apikey'), nonFatal: true },
   ]
 
@@ -951,6 +951,28 @@ async function writeEnv() {
   }
 
   return true
+}
+
+async function checkVenvLock() {
+  const result = await window.ember.checkVenvLock(state.emberPath)
+  if (result.locked) {
+    const logBox = document.getElementById('install-log')
+    logBox.textContent += '\n⚠ ' + result.message + '\n'
+    return false
+  }
+  return true
+}
+
+async function runVenvStep() {
+  const unlocked = await checkVenvLock()
+  if (!unlocked) return false
+  return runStep('venv')
+}
+
+async function runPipStep() {
+  const unlocked = await checkVenvLock()
+  if (!unlocked) return false
+  return runStep('pip')
 }
 
 async function runDockerStep() {

@@ -792,6 +792,41 @@ ipcMain.handle('check-docker-daemon', () => {
 })
 
 // ---------------------------------------------------------------------------
+// IPC — Venv lock check
+// ---------------------------------------------------------------------------
+
+ipcMain.handle('check-venv-lock', (_e, { emberPath }) => {
+  if (!emberPath) return { locked: false }
+
+  const isWin = process.platform === 'win32'
+  const pythonExe = isWin
+    ? path.join(emberPath, '.venv', 'Scripts', 'python.exe')
+    : path.join(emberPath, '.venv', 'bin', 'python')
+
+  // If .venv doesn't exist yet, no lock possible
+  if (!fs.existsSync(pythonExe)) return { locked: false }
+
+  // On Windows, try to rename the file to itself — locked files throw EPERM/EBUSY
+  try {
+    fs.renameSync(pythonExe, pythonExe)
+    return { locked: false }
+  } catch (err) {
+    if (err.code === 'EPERM' || err.code === 'EBUSY') {
+      return {
+        locked: true,
+        message: "Ember's API appears to be running. Please stop it before continuing:\n\n" +
+          "1. Find the terminal running start_api.bat\n" +
+          "2. Press Ctrl+C to stop it\n" +
+          "3. Close any other terminals with (.venv) in the prompt\n" +
+          "4. Then click Retry",
+      }
+    }
+    // Some other error — don't block, let it fail naturally
+    return { locked: false }
+  }
+})
+
+// ---------------------------------------------------------------------------
 // IPC — Misc
 // ---------------------------------------------------------------------------
 
@@ -1089,6 +1124,10 @@ if (DEMO_MODE) {
   // Override docker daemon check
   ipcMain.removeHandler('check-docker-daemon')
   ipcMain.handle('check-docker-daemon', async () => ({ ok: true }))
+
+  // Override venv lock check
+  ipcMain.removeHandler('check-venv-lock')
+  ipcMain.handle('check-venv-lock', async () => ({ locked: false }))
 
   // (Open WebUI overrides removed — Ember UI only)
 
