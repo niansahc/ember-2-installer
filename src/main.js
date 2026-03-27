@@ -67,7 +67,7 @@ function createWindow() {
     height: 700,
     resizable: true,
     center: true,
-    title: 'Ember Setup',
+    title: 'Ember-2 Setup',
     backgroundColor: '#1a0a2e',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
-  <title>Ember Setup</title>
+  <title>Ember-2 Setup</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -14,7 +14,7 @@
 
   <!-- ── Installer self-update banner ── -->
   <div id="installer-update-banner" class="hidden">
-    <span id="installer-update-text">A new version of Ember Setup is available.</span>
+    <span id="installer-update-text">A new version of Ember-2 Setup is available.</span>
     <button class="btn-banner" id="btn-installer-update">Update &amp; Restart</button>
   </div>
 
@@ -110,7 +110,7 @@
   <!-- Screen 2 — Install location (clone)                              -->
   <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-ember-path" class="screen">
-    <h2>Where should I install Ember?</h2>
+    <h2>Where should I install Ember-2?</h2>
     <p>Choose a folder. I'll create an <strong>ember-2</strong> subfolder inside it.</p>
     <p class="hint">Default works great for most people.</p>
 
@@ -128,7 +128,7 @@
     </div>
 
     <div id="clone-status" class="hidden">
-      <p class="ember-voice">"Downloading Ember — this takes about a minute..."</p>
+      <p class="ember-voice">"Downloading Ember-2 — this takes about a minute..."</p>
       <div id="clone-log" class="log-box"></div>
     </div>
 
@@ -143,14 +143,14 @@
   <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-vault" class="screen">
     <h2>Memory Vault</h2>
-    <p>This is where Ember stores your memories, journal entries, and reflections.</p>
+    <p>This is where Ember-2 stores your memories, journal entries, and reflections.</p>
     <p class="hint">Choose a local drive — not OneDrive or Dropbox.</p>
 
     <div class="path-row">
       <input type="text" id="vault-path-input" class="path-input" placeholder="C:\EmberVault">
       <button class="btn-secondary" id="btn-pick-vault">Browse...</button>
     </div>
-    <p id="vault-cloud-warning" class="cloud-warning hidden">⚠️ This folder looks like it's inside a cloud sync service. Ember works best on a local drive to keep your memories private.</p>
+    <p id="vault-cloud-warning" class="cloud-warning hidden">⚠️ This folder looks like it's inside a cloud sync service. Ember-2 works best on a local drive to keep your memories private.</p>
 
     <div class="btn-row">
       <button class="btn-secondary" data-prev="screen-ember-path">Back</button>
@@ -162,8 +162,8 @@
   <!-- Screen 4 — Model selection (curated cards)                       -->
   <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-model" class="screen">
-    <h2>Choose Ember's Brain</h2>
-    <p>This is the model Ember uses to think and talk. Pick one to start — you can change it later.</p>
+    <h2>Choose Ember-2's Brain</h2>
+    <p>This is the model Ember-2 uses to think and talk. Pick one to start — you can change it later.</p>
 
     <div id="model-cards" class="model-cards">
       <p class="hint">Loading models...</p>
@@ -192,8 +192,8 @@
   <!-- Screen 5 — Vision model (curated cards)                          -->
   <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-vision" class="screen">
-    <h2>Can Ember See Images?</h2>
-    <p>A vision model lets Ember analyze photos and screenshots you share. This is optional.</p>
+    <h2>Can Ember-2 See Images?</h2>
+    <p>A vision model lets Ember-2 analyze photos and screenshots you share. This is optional.</p>
 
     <div class="toggle-row">
       <label class="toggle">
@@ -221,17 +221,17 @@
   <!-- Screen 6 — API host                                              -->
   <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-host" class="screen">
-    <h2>How will you use Ember?</h2>
+    <h2>How will you use Ember-2?</h2>
     <p>Choose how you want to connect.</p>
 
     <div class="radio-group">
       <label class="radio-row">
         <input type="radio" name="host" value="127.0.0.1" checked>
-        <span><strong>This computer only</strong> — access Ember from this machine</span>
+        <span><strong>This computer only</strong> — access Ember-2 from this machine</span>
       </label>
       <label class="radio-row">
         <input type="radio" name="host" value="tailscale">
-        <span><strong>Phone + other devices</strong> — access Ember from anywhere via Tailscale</span>
+        <span><strong>Phone + other devices</strong> — access Ember-2 from anywhere via Tailscale</span>
       </label>
     </div>
 
@@ -267,7 +267,7 @@
           <span class="ts-step-title">HTTPS access</span>
         </div>
         <div class="ts-step-body" id="ts-serve-body">
-          <p>Give Ember a clean HTTPS address so you can bookmark it on your phone.</p>
+          <p>Give Ember-2 a clean HTTPS address so you can bookmark it on your phone.</p>
           <button class="btn-secondary" id="btn-ts-serve">Set up HTTPS</button>
           <p id="ts-serve-result" class="hidden"></p>
         </div>
@@ -378,7 +378,7 @@
       </div>
       <div class="install-step" id="step-build-ui">
         <span class="step-icon">⏳</span>
-        <span class="step-label">Building Ember's interface...</span>
+        <span class="step-label">Building Ember-2's interface...</span>
         <p class="ember-voice step-voice">"Putting on my face..."</p>
       </div>
       <div class="install-step" id="step-docker">
