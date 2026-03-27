@@ -402,11 +402,12 @@
   <!-- Screen 8 — Done                                                   -->
   <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-done" class="screen">
-    <h1>You're all set.</h1>
-    <p class="ember-voice">"I'm ready. Let's begin."</p>
+    <h1 id="done-title">Starting Ember...</h1>
+    <p class="ember-voice" id="done-voice">"Almost there..."</p>
+    <p class="hint" id="done-status">Starting the API...</p>
 
     <div class="done-actions">
-      <button class="btn-primary" id="btn-open-ember">Open Ember</button>
+      <button class="btn-primary" id="btn-open-ember" disabled>Open Ember</button>
     </div>
 
     <!-- Ember-2 backend version & updates -->

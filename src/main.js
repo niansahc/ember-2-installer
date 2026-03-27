@@ -792,6 +792,48 @@ ipcMain.handle('check-docker-daemon', () => {
 })
 
 // ---------------------------------------------------------------------------
+// IPC — Start API + health check
+// ---------------------------------------------------------------------------
+
+ipcMain.handle('start-api', (_e, { emberPath }) => {
+  const isWin = process.platform === 'win32'
+  let proc
+
+  if (isWin) {
+    // Spawn start_api.bat detached so it survives the installer closing
+    proc = spawn('cmd', ['/c', 'start_api.bat'], {
+      cwd: emberPath,
+      shell: true,
+      detached: true,
+      stdio: 'ignore',
+    })
+  } else {
+    const pyBin = path.join(emberPath, '.venv', 'bin', 'python')
+    proc = spawn(pyBin, ['-m', 'uvicorn', 'src.api.main:app', '--host', '127.0.0.1', '--port', '8000'], {
+      cwd: emberPath,
+      detached: true,
+      stdio: 'ignore',
+    })
+  }
+
+  // Unref so the installer can close without killing the API
+  proc.unref()
+  return { ok: true }
+})
+
+ipcMain.handle('check-api-health', (_e, { host }) => {
+  const targetHost = host || '127.0.0.1'
+  const http = require('http')
+  return new Promise((resolve) => {
+    const req = http.get(`http://${targetHost}:8000/api/health`, { timeout: 3000 }, (res) => {
+      resolve({ ok: res.statusCode === 200 })
+    })
+    req.on('error', () => resolve({ ok: false }))
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false }) })
+  })
+})
+
+// ---------------------------------------------------------------------------
 // IPC — Venv lock check
 // ---------------------------------------------------------------------------
 
@@ -1128,6 +1170,15 @@ if (DEMO_MODE) {
   // Override venv lock check
   ipcMain.removeHandler('check-venv-lock')
   ipcMain.handle('check-venv-lock', async () => ({ locked: false }))
+
+  // Override API start + health
+  ipcMain.removeHandler('start-api')
+  ipcMain.handle('start-api', async () => ({ ok: true }))
+  ipcMain.removeHandler('check-api-health')
+  ipcMain.handle('check-api-health', async () => {
+    await sleep(2000)
+    return { ok: true }
+  })
 
   // (Open WebUI overrides removed — Ember UI only)
 

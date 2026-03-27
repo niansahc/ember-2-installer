@@ -1059,8 +1059,45 @@ document.getElementById('btn-run-ember-update').addEventListener('click', async 
   }
 })
 
-// Auto-check version and UI choice when Done screen appears
+// Auto-start API, poll health, then load version when Done screen appears
 async function loadEmberVersion() {
+  const title = document.getElementById('done-title')
+  const voice = document.getElementById('done-voice')
+  const status = document.getElementById('done-status')
+  const btn = document.getElementById('btn-open-ember')
+
+  // Start the API
+  status.textContent = 'Starting the API...'
+  await window.ember.startApi(state.emberPath)
+
+  // Poll health check every 2 seconds, up to 30 seconds
+  const host = state.host || '127.0.0.1'
+  const maxAttempts = 15
+  let healthy = false
+
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise((r) => setTimeout(r, 2000))
+    const check = await window.ember.checkApiHealth(host)
+    if (check.ok) {
+      healthy = true
+      break
+    }
+    status.textContent = `Waiting for Ember to start... (${(i + 1) * 2}s)`
+  }
+
+  if (healthy) {
+    title.textContent = "You're all set."
+    voice.textContent = '"I\'m ready. Let\'s begin."'
+    status.textContent = 'Ember is running.'
+    btn.disabled = false
+  } else {
+    title.textContent = "You're all set."
+    voice.textContent = '"I\'m ready — I just need a little help starting up."'
+    status.textContent = "Ember didn't start automatically. Run start_api.bat manually, then click Open Ember."
+    btn.disabled = false
+  }
+
+  // Load version info
   const result = await window.ember.checkEmberUpdate()
   document.getElementById('ember-version-label').textContent = result.installed || 'unknown'
 }

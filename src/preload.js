@@ -87,6 +87,10 @@ contextBridge.exposeInMainWorld('ember', {
   // Docker daemon
   checkDockerDaemon: () => ipcRenderer.invoke('check-docker-daemon'),
 
+  // API start + health
+  startApi: (emberPath) => ipcRenderer.invoke('start-api', { emberPath }),
+  checkApiHealth: (host) => ipcRenderer.invoke('check-api-health', { host }),
+
   // Venv lock check
   checkVenvLock: (emberPath) => ipcRenderer.invoke('check-venv-lock', { emberPath }),
 
