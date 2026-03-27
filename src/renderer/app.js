@@ -523,10 +523,11 @@ async function tsCheckConnected() {
   icon.textContent = '⏳'
   body.innerHTML = '<p class="ts-checking">Checking...</p>'
 
-  const [status, ip] = await Promise.all([
+  const [status, ipResult] = await Promise.all([
     window.ember.checkTailscaleStatus(),
     window.ember.getTailscaleIp(),
   ])
+  const ip = ipResult?.ok ? ipResult.ip : null
 
   if (status.ok && ip) {
     icon.textContent = '✅'

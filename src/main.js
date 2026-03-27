@@ -943,19 +943,32 @@ ipcMain.handle('get-tailscale-ip', async () => {
     let out = ''
     proc.stdout.on('data', (d) => (out += d))
     proc.on('close', (code) => {
-      resolve(code === 0 ? out.trim() : null)
+      const ip = out.trim()
+      resolve(code === 0 && ip ? { ok: true, ip } : { ok: false })
     })
-    proc.on('error', () => resolve(null))
+    proc.on('error', () => resolve({ ok: false }))
   })
 })
 
 ipcMain.handle('run-tailscale-serve', async () => {
+  // Get the Tailscale IP to use as the serve target
+  const ipResult = await new Promise((resolve) => {
+    const proc = spawn('tailscale', ['ip', '-4'], { shell: true })
+    let out = ''
+    proc.stdout.on('data', (d) => (out += d))
+    proc.on('close', (code) => resolve(code === 0 ? out.trim() : null))
+    proc.on('error', () => resolve(null))
+  })
+
+  // Use the Tailscale IP if available, fall back to localhost
+  const target = ipResult ? `http://${ipResult}:8000` : 'http://localhost:8000'
+
   return new Promise((resolve) => {
-    const proc = spawn('tailscale', ['serve', '--bg', 'http://localhost:3000'], { shell: true })
+    const proc = spawn('tailscale', ['serve', '--bg', target], { shell: true })
     let out = ''
     proc.stdout.on('data', (d) => (out += d))
     proc.stderr.on('data', (d) => (out += d))
-    proc.on('close', (code) => resolve({ ok: code === 0, output: out.trim() }))
+    proc.on('close', (code) => resolve({ ok: code === 0, output: out.trim(), ip: ipResult }))
     proc.on('error', (err) => resolve({ ok: false, output: err.message }))
   })
 })
@@ -1127,13 +1140,13 @@ if (DEMO_MODE) {
   ipcMain.removeHandler('get-tailscale-ip')
   ipcMain.handle('get-tailscale-ip', async () => {
     await sleep(300)
-    return '100.72.128.44'
+    return { ok: true, ip: '100.72.128.44' }
   })
 
   ipcMain.removeHandler('run-tailscale-serve')
   ipcMain.handle('run-tailscale-serve', async () => {
     await sleep(1000)
-    return { ok: true, output: 'Available at https://ember-desktop.exocomet-alpha.ts.net' }
+    return { ok: true, output: 'Available at https://ember-desktop.exocomet-alpha.ts.net', ip: '100.72.128.44' }
   })
 
   ipcMain.removeHandler('get-tailscale-dns')
