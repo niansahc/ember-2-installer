@@ -951,24 +951,14 @@ ipcMain.handle('get-tailscale-ip', async () => {
 })
 
 ipcMain.handle('run-tailscale-serve', async () => {
-  // Get the Tailscale IP to use as the serve target
-  const ipResult = await new Promise((resolve) => {
-    const proc = spawn('tailscale', ['ip', '-4'], { shell: true })
-    let out = ''
-    proc.stdout.on('data', (d) => (out += d))
-    proc.on('close', (code) => resolve(code === 0 ? out.trim() : null))
-    proc.on('error', () => resolve(null))
-  })
-
-  // Use the Tailscale IP if available, fall back to localhost
-  const target = ipResult ? `http://${ipResult}:8000` : 'http://localhost:8000'
-
+  // Always proxy to localhost — Tailscale handles external routing itself.
+  // The API binds to 127.0.0.1 and Tailscale serve forwards traffic to it.
   return new Promise((resolve) => {
-    const proc = spawn('tailscale', ['serve', '--bg', target], { shell: true })
+    const proc = spawn('tailscale', ['serve', '--bg', '--https=443', 'http://127.0.0.1:8000'], { shell: true })
     let out = ''
     proc.stdout.on('data', (d) => (out += d))
     proc.stderr.on('data', (d) => (out += d))
-    proc.on('close', (code) => resolve({ ok: code === 0, output: out.trim(), ip: ipResult }))
+    proc.on('close', (code) => resolve({ ok: code === 0, output: out.trim() }))
     proc.on('error', (err) => resolve({ ok: false, output: err.message }))
   })
 })
@@ -1146,7 +1136,7 @@ if (DEMO_MODE) {
   ipcMain.removeHandler('run-tailscale-serve')
   ipcMain.handle('run-tailscale-serve', async () => {
     await sleep(1000)
-    return { ok: true, output: 'Available at https://ember-desktop.exocomet-alpha.ts.net', ip: '100.72.128.44' }
+    return { ok: true, output: 'Available at https://ember-desktop.exocomet-alpha.ts.net' }
   })
 
   ipcMain.removeHandler('get-tailscale-dns')

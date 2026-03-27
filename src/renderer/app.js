@@ -17,6 +17,8 @@ const state = {
   model: 'qwen2.5:14b',
   vision: null,
   host: '127.0.0.1',
+  tailscaleIp: null,
+  tailscaleDns: null,
   models: [],
   ollamaModelsPath: null,
 }
@@ -531,7 +533,9 @@ async function tsCheckConnected() {
 
   if (status.ok && ip) {
     icon.textContent = '✅'
-    state.host = ip
+    // API always binds to localhost — Tailscale handles external routing
+    state.host = '127.0.0.1'
+    state.tailscaleIp = ip
     body.innerHTML = `
       <p>Connected as <strong>${status.hostname || 'this machine'}</strong></p>
       <p>Your Tailscale IP: <span class="ts-ip-display">${ip}</span></p>
@@ -565,7 +569,8 @@ document.getElementById('btn-ts-serve').addEventListener('click', async () => {
 
   if (serveResult.ok) {
     icon.textContent = '✅'
-    const url = dnsName ? `https://${dnsName}` : `http://${state.host}:3000`
+    if (dnsName) state.tailscaleDns = dnsName
+    const url = dnsName ? `https://${dnsName}` : `http://${state.tailscaleIp || '127.0.0.1'}:8000`
     btn.classList.add('hidden')
     resultEl.classList.remove('hidden')
     resultEl.innerHTML = `Your Ember URL: <span class="ts-url-display">${url}</span>`
@@ -1000,11 +1005,15 @@ async function runStep(step) {
 // Screen: Done
 // ---------------------------------------------------------------------------
 
-// Open Ember — UI is served by FastAPI on the same host/port
+// Open Ember — use Tailscale DNS if available, otherwise localhost
 document.getElementById('btn-open-ember').addEventListener('click', () => {
-  const host = state.host || '127.0.0.1'
-  const uiHost = host === '127.0.0.1' ? 'localhost' : host
-  window.ember.openUrl(`http://${uiHost}:8000`)
+  if (state.tailscaleDns) {
+    window.ember.openUrl(`https://${state.tailscaleDns}`)
+  } else if (state.tailscaleIp) {
+    window.ember.openUrl(`http://${state.tailscaleIp}:8000`)
+  } else {
+    window.ember.openUrl('http://localhost:8000')
+  }
 })
 
 // Ember-2 backend version check
