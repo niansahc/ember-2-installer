@@ -1236,7 +1236,7 @@ document.getElementById('btn-check-installer-update').addEventListener('click', 
     // Use the check-for-update IPC which hits GitHub releases
     const result = await window.ember.checkForUpdate()
     if (result.hasUpdate) {
-      status.textContent = `v${result.latestTag} available!`
+      status.textContent = `${result.latestTag} available!`
       // Show the auto-update banner
       const banner = document.getElementById('installer-update-banner')
       const text = document.getElementById('installer-update-text')
