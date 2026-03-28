@@ -1236,12 +1236,7 @@ document.getElementById('btn-check-installer-update').addEventListener('click', 
     // Use the check-for-update IPC which hits GitHub releases
     const result = await window.ember.checkForUpdate()
     if (result.hasUpdate) {
-      status.textContent = `${result.latestTag} available!`
-      // Show the auto-update banner
-      const banner = document.getElementById('installer-update-banner')
-      const text = document.getElementById('installer-update-text')
-      text.textContent = `Ember Setup ${result.latestTag} is available.`
-      banner.classList.remove('hidden')
+      status.textContent = `Ember ${result.latestTag} available!`
     } else {
       status.textContent = 'You have the latest version.'
     }
@@ -1250,7 +1245,7 @@ document.getElementById('btn-check-installer-update').addEventListener('click', 
   }
 
   btn.disabled = false
-  btn.textContent = 'Check for installer updates'
+  btn.textContent = 'Check for Ember updates'
 })
 
 // ---------------------------------------------------------------------------
