@@ -195,9 +195,9 @@ ipcMain.handle('run-ember-update', async () => {
   const emberPath = getEmberPath()
   if (!emberPath) return { ok: false }
 
-  // Step 1: git pull
+  // Step 1: git pull origin main (explicit remote/branch avoids tracking issues)
   const pullOk = await new Promise((resolve) => {
-    const proc = spawn('git', ['pull'], { cwd: emberPath, shell: true })
+    const proc = spawn('git', ['pull', 'origin', 'main'], { cwd: emberPath, shell: true })
     proc.stdout.on('data', (d) => {
       mainWindow.webContents.send('ember-update-log', d.toString())
     })
@@ -767,7 +767,7 @@ ipcMain.handle('run-git-pull', (_e) => {
   const emberPath = getEmberPath()
   if (!emberPath) return { ok: false }
   return new Promise((resolve) => {
-    const proc = spawn('git', ['pull'], { cwd: emberPath, shell: true })
+    const proc = spawn('git', ['pull', 'origin', 'main'], { cwd: emberPath, shell: true })
     proc.stdout.on('data', (d) => {
       mainWindow.webContents.send('install-log', { step: 'update', text: d.toString() })
     })
