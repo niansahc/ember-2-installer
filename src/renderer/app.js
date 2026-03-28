@@ -14,7 +14,7 @@
 const state = {
   emberPath: null,
   vaultPath: null,
-  model: 'qwen2.5:14b',
+  model: 'qwen3:8b',
   vision: null,
   host: '127.0.0.1',
   tailscaleIp: null,
@@ -1016,6 +1016,40 @@ document.getElementById('btn-open-ember').addEventListener('click', () => {
   }
 })
 
+// Retry API start
+document.getElementById('btn-retry-api').addEventListener('click', async () => {
+  const retryBtn = document.getElementById('btn-retry-api')
+  const status = document.getElementById('done-status')
+  retryBtn.disabled = true
+  retryBtn.textContent = 'Retrying...'
+  status.textContent = 'Restarting the API...'
+  document.getElementById('done-troubleshooting').classList.add('hidden')
+
+  await window.ember.startApi(state.emberPath)
+
+  const host = state.host || '127.0.0.1'
+  let healthy = false
+  for (let i = 0; i < 15; i++) {
+    await new Promise((r) => setTimeout(r, 2000))
+    const check = await window.ember.checkApiHealth(host)
+    if (check.ok) { healthy = true; break }
+    status.textContent = `Waiting for Ember to start... (${(i + 1) * 2}s)`
+  }
+
+  retryBtn.disabled = false
+  retryBtn.textContent = 'Try Again'
+
+  if (healthy) {
+    document.getElementById('done-title').textContent = "You're all set."
+    document.getElementById('done-voice').textContent = '"I\'m ready. Let\'s begin."'
+    status.textContent = 'Ember is running.'
+    retryBtn.style.display = 'none'
+  } else {
+    status.textContent = "Still not responding. Check the hints below and try again."
+    document.getElementById('done-troubleshooting').classList.remove('hidden')
+  }
+})
+
 // Ember-2 backend version check
 document.getElementById('btn-check-ember-update').addEventListener('click', async () => {
   const btn = document.getElementById('btn-check-ember-update')
@@ -1103,11 +1137,15 @@ async function loadEmberVersion() {
     voice.textContent = '"I\'m ready. Let\'s begin."'
     status.textContent = 'Ember is running.'
     btn.disabled = false
+    document.getElementById('btn-retry-api').style.display = 'none'
+    document.getElementById('done-troubleshooting').classList.add('hidden')
   } else {
-    title.textContent = "You're all set."
+    title.textContent = "Almost there."
     voice.textContent = '"I\'m ready — I just need a little help starting up."'
-    status.textContent = "Ember didn't start automatically. Run start_api.bat manually, then click Open Ember."
+    status.textContent = "Ember didn't start automatically. Check the hints below, then hit Try Again."
     btn.disabled = false
+    document.getElementById('btn-retry-api').style.display = ''
+    document.getElementById('done-troubleshooting').classList.remove('hidden')
   }
 
   // Load version info

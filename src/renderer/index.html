@@ -163,7 +163,7 @@
   <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-model" class="screen">
     <h2>Choose Ember-2's Brain</h2>
-    <p>This is the model Ember-2 uses to think and talk. Pick one to start — you can change it later.</p>
+    <p>This is the model Ember-2 uses to think and talk. Pick one to start — you can change it later. <a href="https://github.com/niansahc/ember-2/blob/main/docs/model_guide.md" target="_blank">Read the Model Selection Guide</a> for detailed scores and recommendations.</p>
 
     <div id="model-cards" class="model-cards">
       <p class="hint">Loading models...</p>
@@ -414,7 +414,16 @@
 
     <div class="done-actions">
       <button class="btn-primary" id="btn-open-ember" disabled>Open Ember</button>
-      <p class="hint" style="margin-top: 0.75rem;">Not sure which model to use? <a href="https://github.com/niansahc/ember-2/blob/main/docs/model_guide.md" target="_blank">Read the Model Selection Guide</a></p>
+      <button class="btn-secondary" id="btn-retry-api" style="display: none;">Try Again</button>
+    </div>
+
+    <div id="done-troubleshooting" class="hidden" style="margin-top: 1rem;">
+      <p class="hint" style="margin-bottom: 0.5rem;">A few things to check:</p>
+      <ul class="hint" style="margin: 0; padding-left: 1.5rem; line-height: 1.6;">
+        <li>Is Ember already running? Check your taskbar for a terminal window.</li>
+        <li>Did a terminal window with <code>(.venv)</code> stay open? Close it and try again.</li>
+        <li>Is port 8000 in use by something else? Close other servers and retry.</li>
+      </ul>
     </div>
 
     <!-- Ember-2 backend version & updates -->
