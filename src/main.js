@@ -456,11 +456,11 @@ ipcMain.handle('get-recommended-models', async () => {
   } catch {}
 
   const recommended = [
-    { id: 'qwen2.5:14b', name: 'Qwen 2.5 14B', desc: 'Best balance of speed and intelligence', size: '~9 GB', recommended: true },
-    { id: 'llama3.1:8b', name: 'Llama 3.1 8B', desc: 'Fast and lightweight', size: '~4.7 GB' },
-    { id: 'mistral:7b', name: 'Mistral 7B', desc: 'Good for general conversation', size: '~4.1 GB' },
-    { id: 'qwen3:8b', name: 'Qwen 3 8B', desc: 'Newest, strong reasoning', size: '~4.9 GB' },
-    { id: 'deepseek-r1:8b', name: 'DeepSeek R1 8B', desc: 'Strong at analysis and code', size: '~4.9 GB' },
+    { id: 'qwen3:8b', name: 'Qwen 3 8B', desc: 'Best overall — strongest voice and reasoning', size: '~4.9 GB', recommended: true },
+    { id: 'qwen2.5:14b', name: 'Qwen 2.5 14B', desc: 'Larger model, best self-attribution', size: '~9 GB' },
+    { id: 'gemma3:12b', name: 'Gemma 3 12B', desc: 'Best constitutional resistance', size: '~8.1 GB' },
+    { id: 'phi4:14b', name: 'Phi 4 14B', desc: 'Good state awareness', size: '~9.1 GB' },
+    { id: 'mistral:7b', name: 'Mistral 7B', desc: 'Lightweight, fast', size: '~4.1 GB' },
   ]
 
   const visionModels = [
@@ -1212,10 +1212,10 @@ if (DEMO_MODE) {
   ipcMain.removeHandler('get-recommended-models')
   ipcMain.handle('get-recommended-models', async () => ({
     recommended: [
-      { id: 'qwen2.5:14b', name: 'Qwen 2.5 14B', desc: 'Best balance of speed and intelligence', size: '~9 GB', recommended: true, installed: true },
-      { id: 'llama3.1:8b', name: 'Llama 3.1 8B', desc: 'Fast and lightweight', size: '~4.7 GB', installed: false },
-      { id: 'mistral:7b', name: 'Mistral 7B', desc: 'Good for general conversation', size: '~4.1 GB', installed: true },
-      { id: 'qwen3:8b', name: 'Qwen 3 8B', desc: 'Newest, strong reasoning', size: '~4.9 GB', installed: false },
+      { id: 'qwen3:8b', name: 'Qwen 3 8B', desc: 'Best overall — strongest voice and reasoning', size: '~4.9 GB', recommended: true, installed: true },
+      { id: 'qwen2.5:14b', name: 'Qwen 2.5 14B', desc: 'Larger model, best self-attribution', size: '~9 GB', installed: true },
+      { id: 'gemma3:12b', name: 'Gemma 3 12B', desc: 'Best constitutional resistance', size: '~8.1 GB', installed: false },
+      { id: 'mistral:7b', name: 'Mistral 7B', desc: 'Lightweight, fast', size: '~4.1 GB', installed: true },
       { id: 'deepseek-r1:8b', name: 'DeepSeek R1 8B', desc: 'Strong at analysis and code', size: '~4.9 GB', installed: false },
     ],
     vision: [
