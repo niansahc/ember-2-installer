@@ -889,3 +889,57 @@ p {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--accent);
 }
+
+/* ── Hardware summary ────────────────────────────────────────── */
+
+.hardware-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 16px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.hw-rec {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+/* ── AGPL acknowledgment card ────────────────────────────────── */
+
+.agpl-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px 24px;
+  margin: 16px 0;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.agpl-card h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: var(--text);
+}
+
+.agpl-card ul {
+  margin: 10px 0 10px 20px;
+  color: var(--text-dim);
+}
+
+.agpl-card p {
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.agpl-link-row a {
+  color: var(--accent);
+  font-size: 0.85rem;
+}
