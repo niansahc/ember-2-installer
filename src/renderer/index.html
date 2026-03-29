@@ -165,6 +165,12 @@
     <h2>Choose Ember-2's Brain</h2>
     <p>This is the model Ember-2 uses to think and talk. Pick one to start — you can change it later. <a href="https://github.com/niansahc/ember-2/blob/main/docs/model_guide.md" target="_blank">Read the Model Selection Guide</a> for detailed scores and recommendations.</p>
 
+    <div id="hardware-summary" class="hardware-summary">
+      <span id="hw-ram">Detecting hardware...</span>
+      <span id="hw-gpu"></span>
+      <span id="hw-recommendation" class="hw-rec"></span>
+    </div>
+
     <div id="model-cards" class="model-cards">
       <p class="hint">Loading models...</p>
     </div>
@@ -405,7 +411,33 @@
   </section>
 
   <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- Screen 8 — Done                                                   -->
+  <!-- Screen — AGPL Acknowledgment                                       -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <section id="screen-agpl" class="screen">
+    <h2>Before you finish</h2>
+    <p class="ember-voice">"I want to make sure you know something important."</p>
+
+    <div class="agpl-card">
+      <h3>Ember is free and open source</h3>
+      <p>Ember-2 is licensed under the <strong>GNU Affero General Public License v3 (AGPL-3.0)</strong>.</p>
+      <p>This means:</p>
+      <ul>
+        <li>You can use, modify, and share Ember freely</li>
+        <li>If you distribute Ember or run it as a network service, you must share your source code under the same license</li>
+        <li>Ember's visual identity and assets are licensed separately under <strong>CC BY-NC 4.0</strong> — free for personal use, not for commercial products</li>
+      </ul>
+      <p class="agpl-link-row">
+        <a href="https://github.com/niansahc/ember-2/blob/main/LICENSE" target="_blank">Read the full license</a>
+      </p>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn-primary" id="btn-agpl-acknowledge">I understand</button>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- Screen — Done                                                      -->
   <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-done" class="screen">
     <h1 id="done-title">Starting Ember...</h1>
