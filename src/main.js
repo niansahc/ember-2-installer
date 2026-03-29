@@ -437,6 +437,41 @@ ipcMain.handle('scan-for-ember', () => {
   return { found: false }
 })
 
+// Hardware detection
+ipcMain.handle('detect-hardware', async () => {
+  const totalRamGB = Math.round(os.totalmem() / (1024 ** 3))
+
+  let gpu = 'Unknown'
+  try {
+    const { execSync } = require('child_process')
+    if (process.platform === 'win32') {
+      const out = execSync('wmic path win32_VideoController get name', { timeout: 3000 }).toString()
+      const lines = out.split('\n').map((l) => l.trim()).filter((l) => l && l !== 'Name')
+      gpu = lines[0] || 'Unknown'
+    } else if (process.platform === 'darwin') {
+      const out = execSync('system_profiler SPDisplaysDataType | grep Chipset', { timeout: 3000 }).toString()
+      gpu = out.split(':')[1]?.trim() || 'Unknown'
+    } else {
+      const out = execSync('lspci | grep -i vga', { timeout: 3000 }).toString()
+      gpu = out.split(':').pop()?.trim() || 'Unknown'
+    }
+  } catch {
+    gpu = 'Unknown'
+  }
+
+  let recommendation
+  if (totalRamGB >= 32) {
+    recommendation = { model: 'qwen2.5:14b', reason: `${totalRamGB} GB RAM — larger model fits comfortably` }
+  } else if (totalRamGB >= 12) {
+    recommendation = { model: 'qwen3:8b', reason: `${totalRamGB} GB RAM — best overall for Ember` }
+  } else {
+    recommendation = { model: 'mistral:7b', reason: `${totalRamGB} GB RAM — lightweight model recommended` }
+  }
+
+  return { ram: totalRamGB, gpu, recommendation }
+})
+
+
 // Curated model recommendations
 ipcMain.handle('get-recommended-models', async () => {
   // Get installed models from Ollama
@@ -989,6 +1024,14 @@ ipcMain.handle('get-tailscale-dns', async () => {
 
 if (DEMO_MODE) {
   console.log('[DEMO MODE] Running with simulated install steps')
+
+  // Override hardware detection
+  ipcMain.removeHandler('detect-hardware')
+  ipcMain.handle('detect-hardware', async () => ({
+    ram: 32,
+    gpu: 'NVIDIA RTX 4090 (demo)',
+    recommendation: { model: 'qwen3:8b', reason: '32 GB RAM — best overall for Ember (demo)' },
+  }))
 
   // Override prerequisites — all pass
   ipcMain.removeHandler('check-prerequisites')
