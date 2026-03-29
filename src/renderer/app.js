@@ -339,6 +339,24 @@ async function loadModels() {
   modelData = await window.ember.getRecommendedModels()
   renderModelCards()
   renderVisionCards()
+  loadHardwareInfo()
+}
+
+async function loadHardwareInfo() {
+  try {
+    const hw = await window.ember.detectHardware()
+    document.getElementById('hw-ram').textContent = `RAM: ${hw.ram} GB`
+    document.getElementById('hw-gpu').textContent = hw.gpu !== 'Unknown' ? `GPU: ${hw.gpu}` : ''
+    document.getElementById('hw-recommendation').textContent =
+      `Recommended: ${hw.recommendation.model} — ${hw.recommendation.reason}`
+    // Pre-select recommended model if user hasn't manually changed it
+    if (state.model === 'qwen3:8b') {
+      state.model = hw.recommendation.model
+      renderModelCards()
+    }
+  } catch {
+    document.getElementById('hw-ram').textContent = ''
+  }
 }
 
 function renderModelCards() {
@@ -912,9 +930,8 @@ async function runInstall() {
   stopFunFacts()
   updateProgressBar(steps.length, steps.length)
 
-  // All done — show done screen and load version
-  showScreen('screen-done')
-  loadEmberVersion()
+  // All done — show AGPL acknowledgment before done screen
+  showScreen('screen-agpl')
 }
 
 function showRetryButton(onRetry) {
@@ -1004,6 +1021,12 @@ async function runStep(step) {
 // ---------------------------------------------------------------------------
 // Screen: Done
 // ---------------------------------------------------------------------------
+
+// AGPL acknowledgment — proceed to Done screen
+document.getElementById('btn-agpl-acknowledge').addEventListener('click', () => {
+  showScreen('screen-done')
+  loadEmberVersion()
+})
 
 // Open Ember — use Tailscale DNS if available, otherwise localhost
 document.getElementById('btn-open-ember').addEventListener('click', () => {
