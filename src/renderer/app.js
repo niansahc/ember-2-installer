@@ -909,16 +909,28 @@ async function runInstall() {
     el.classList.remove('active')
 
     if (!ok && !step.nonFatal) {
-      logBox.textContent += `\n⚠ Step "${step.id}" failed. Check the log above.\n`
-      logBox.textContent += '\nYou can fix the issue and try again.\n'
+      const friendlyNames = {
+        env: 'writing configuration',
+        venv: 'creating Python environment',
+        pip: 'installing dependencies',
+        apikey: 'setting up API key',
+        model: 'downloading model',
+        'vision-dl': 'downloading vision model',
+        'build-ui': "building Ember's interface",
+        docker: 'starting search engine',
+      }
+      const stepName = friendlyNames[step.id] || step.id
+      logBox.textContent += `\nSomething went wrong during ${stepName}.\n`
+      logBox.textContent += 'Want to try again?\n'
+      const failedIndex = i
       showRetryButton(() => {
-        // Reset icons and retry
-        steps.forEach((s) => {
-          const stepEl = document.getElementById(`step-${s.id}`)
+        // Reset only failed and remaining steps, retry from failed step
+        for (let j = failedIndex; j < steps.length; j++) {
+          const stepEl = document.getElementById(`step-${steps[j].id}`)
           stepEl.querySelector('.step-icon').textContent = '⏳'
-          stepEl.querySelector('.step-label').textContent = s.label
-        })
-        runInstall()
+          stepEl.querySelector('.step-label').textContent = steps[j].label
+        }
+        runInstallFrom(steps, failedIndex)
       })
       return
     }
@@ -931,6 +943,57 @@ async function runInstall() {
   updateProgressBar(steps.length, steps.length)
 
   // All done — show AGPL acknowledgment before done screen
+  showScreen('screen-agpl')
+}
+
+async function runInstallFrom(steps, startIndex) {
+  const logBox = document.getElementById('install-log')
+  // Hide retry button
+  const retryBtn = document.getElementById('btn-install-retry')
+  if (retryBtn) retryBtn.style.display = 'none'
+
+  for (let i = startIndex; i < steps.length; i++) {
+    const step = steps[i]
+    const el = document.getElementById(`step-${step.id}`)
+    const icon = el.querySelector('.step-icon')
+    const label = el.querySelector('.step-label')
+
+    el.classList.add('active')
+    icon.textContent = '⏳'
+    label.textContent = `${step.label} (${i + 1} of ${steps.length})`
+    updateProgressBar(i, steps.length)
+
+    const ok = await step.run()
+
+    icon.textContent = ok ? '✅' : '❌'
+    label.textContent = step.label
+    el.classList.remove('active')
+
+    if (!ok && !step.nonFatal) {
+      const friendlyNames = {
+        env: 'writing configuration', venv: 'creating Python environment',
+        pip: 'installing dependencies', 'build-ui': "building Ember's interface",
+        docker: 'starting search engine',
+      }
+      logBox.textContent += `\nSomething went wrong during ${friendlyNames[step.id] || step.id}.\n`
+      logBox.textContent += 'Want to try again?\n'
+      const failedIndex = i
+      showRetryButton(() => {
+        for (let j = failedIndex; j < steps.length; j++) {
+          const stepEl = document.getElementById(`step-${steps[j].id}`)
+          stepEl.querySelector('.step-icon').textContent = '⏳'
+          stepEl.querySelector('.step-label').textContent = steps[j].label
+        }
+        runInstallFrom(steps, failedIndex)
+      })
+      return
+    }
+  }
+
+  window.ember.removeAllListeners('install-log')
+  window.ember.removeAllListeners('install-step-done')
+  stopFunFacts()
+  updateProgressBar(steps.length, steps.length)
   showScreen('screen-agpl')
 }
 
