@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.4.1 — 2026-03-30
+
+### Features
+- Update path now pulls and rebuilds ember-2-ui automatically (clone if missing, pull if exists, npm install, build, copy)
+- Done screen verifies UI is built before enabling Open Ember — auto-rebuilds if missing
+- Install retry resumes from failed step instead of restarting entire install
+- Release notes rendered as markdown instead of raw text (headings, bold, bullets, horizontal rules)
+- Playwright e2e test infrastructure added (tests written, blocked on Electron 28 compatibility)
+
+### Fixes
+- Reverted `app?.isPackaged` guard that changed runtime behavior
+
+### Known Issues
+- Playwright e2e tests require Electron 29+ for `--remote-debugging-pipe` support. Current version is Electron 28.3.3. Tests written and correct, blocked on upgrade. Tracked for v0.12.0.
+
+## v0.4.0 — 2026-03-29
+
+### Features
+- Hardware detection at setup (RAM, GPU) with automatic model recommendation
+- AGPL acknowledgment screen before setup completion
+- Default model changed to qwen3:8b
+- Model descriptions updated with real eval data and RAM requirements
+- Model Selection Guide linked from model selection screen
+- Retry button on Done screen with troubleshooting hints
+- git pull uses origin main explicitly
+- Update check label corrected
+- Double-v prefix fix
+
 ## v0.3.0 — 2026-03-27
 - Venv lock detection with friendly error message
 - Auto-start API after install completes
