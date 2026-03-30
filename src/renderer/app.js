@@ -1136,8 +1136,26 @@ async function loadEmberVersion() {
   const status = document.getElementById('done-status')
   const btn = document.getElementById('btn-open-ember')
 
+  // Check UI is built before starting
+  status.textContent = 'Checking Ember interface...'
+  const uiCheck = await window.ember.checkUiBuilt()
+  if (!uiCheck.ok) {
+    title.textContent = "Almost there."
+    voice.textContent = '"My interface didn\'t build correctly. Let me try again."'
+    status.textContent = "Ember's interface is missing. Rebuilding..."
+    // Attempt to rebuild
+    const rebuildResult = await window.ember.runInstallStep('build-ui', state.emberPath)
+    if (!rebuildResult.ok) {
+      status.textContent = "Interface build failed. Try reinstalling or check that Node.js is installed."
+      btn.disabled = false
+      document.getElementById('btn-retry-api').style.display = ''
+      document.getElementById('done-troubleshooting').classList.remove('hidden')
+      return
+    }
+  }
+
   // Start the API
-  status.textContent = 'Starting the API...'
+  status.textContent = 'Starting Ember...'
   await window.ember.startApi(state.emberPath)
 
   // Poll health check every 2 seconds, up to 30 seconds

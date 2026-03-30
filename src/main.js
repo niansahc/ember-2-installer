@@ -798,20 +798,92 @@ function fetchLatestRelease(repo = 'niansahc/ember-2') {
 // (Open WebUI check and UI choice removed — Ember UI is now the only option,
 //  served directly by FastAPI from the ui/ folder)
 
-ipcMain.handle('run-git-pull', (_e) => {
+ipcMain.handle('run-git-pull', async (_e) => {
   const emberPath = getEmberPath()
   if (!emberPath) return { ok: false }
-  return new Promise((resolve) => {
+
+  const log = (text) => mainWindow.webContents.send('install-log', { step: 'update', text })
+
+  // Step 1: Pull ember-2
+  log('Pulling ember-2...\n')
+  const pullOk = await new Promise((resolve) => {
     const proc = spawn('git', ['pull', 'origin', 'main'], { cwd: emberPath, shell: true })
-    proc.stdout.on('data', (d) => {
-      mainWindow.webContents.send('install-log', { step: 'update', text: d.toString() })
-    })
-    proc.stderr.on('data', (d) => {
-      mainWindow.webContents.send('install-log', { step: 'update', text: d.toString() })
-    })
-    proc.on('close', (code) => resolve({ ok: code === 0 }))
-    proc.on('error', () => resolve({ ok: false }))
+    proc.stdout.on('data', (d) => log(d.toString()))
+    proc.stderr.on('data', (d) => log(d.toString()))
+    proc.on('close', (code) => resolve(code === 0))
+    proc.on('error', () => resolve(false))
   })
+  if (!pullOk) return { ok: false }
+
+  // Step 2: Pull and rebuild ember-2-ui
+  const uiDir = path.join(path.dirname(emberPath), 'ember-2-ui')
+  const targetUiDir = path.join(emberPath, 'ui')
+
+  if (!fs.existsSync(uiDir)) {
+    log('Cloning ember-2-ui...\n')
+    const cloneOk = await new Promise((resolve) => {
+      const proc = spawn('git', ['clone', 'https://github.com/niansahc/ember-2-ui.git'], {
+        cwd: path.dirname(emberPath), shell: true,
+      })
+      proc.stdout.on('data', (d) => log(d.toString()))
+      proc.stderr.on('data', (d) => log(d.toString()))
+      proc.on('close', (code) => resolve(code === 0))
+      proc.on('error', () => resolve(false))
+    })
+    if (!cloneOk) { log('Failed to clone ember-2-ui.\n'); return { ok: false } }
+  } else {
+    log('Pulling ember-2-ui...\n')
+    const uiPullOk = await new Promise((resolve) => {
+      const proc = spawn('git', ['pull', 'origin', 'main'], { cwd: uiDir, shell: true })
+      proc.stdout.on('data', (d) => log(d.toString()))
+      proc.stderr.on('data', (d) => log(d.toString()))
+      proc.on('close', (code) => resolve(code === 0))
+      proc.on('error', () => resolve(false))
+    })
+    if (!uiPullOk) { log('Failed to pull ember-2-ui.\n'); return { ok: false } }
+  }
+
+  log('Installing UI dependencies...\n')
+  const npmOk = await new Promise((resolve) => {
+    const proc = spawn('npm', ['install'], { cwd: uiDir, shell: true })
+    proc.stdout.on('data', (d) => log(d.toString()))
+    proc.stderr.on('data', (d) => log(d.toString()))
+    proc.on('close', (code) => resolve(code === 0))
+    proc.on('error', () => resolve(false))
+  })
+  if (!npmOk) { log('npm install failed.\n'); return { ok: false } }
+
+  log('Building Ember UI...\n')
+  const buildOk = await new Promise((resolve) => {
+    const proc = spawn('npm', ['run', 'build'], { cwd: uiDir, shell: true })
+    proc.stdout.on('data', (d) => log(d.toString()))
+    proc.stderr.on('data', (d) => log(d.toString()))
+    proc.on('close', (code) => resolve(code === 0))
+    proc.on('error', () => resolve(false))
+  })
+  if (!buildOk) { log('UI build failed.\n'); return { ok: false } }
+
+  try {
+    if (fs.existsSync(targetUiDir)) fs.rmSync(targetUiDir, { recursive: true })
+    fs.cpSync(path.join(uiDir, 'dist'), targetUiDir, { recursive: true })
+    log('UI updated.\n')
+  } catch (err) {
+    log(`Failed to copy UI: ${err.message}\n`)
+    return { ok: false }
+  }
+
+  return { ok: true }
+})
+
+// ---------------------------------------------------------------------------
+// IPC — UI built check
+// ---------------------------------------------------------------------------
+
+ipcMain.handle('check-ui-built', () => {
+  const emberPath = getEmberPath()
+  if (!emberPath) return { ok: false }
+  const indexPath = path.join(emberPath, 'ui', 'index.html')
+  return { ok: fs.existsSync(indexPath) }
 })
 
 // ---------------------------------------------------------------------------
@@ -1024,6 +1096,10 @@ ipcMain.handle('get-tailscale-dns', async () => {
 
 if (DEMO_MODE) {
   console.log('[DEMO MODE] Running with simulated install steps')
+
+  // Override UI built check
+  ipcMain.removeHandler('check-ui-built')
+  ipcMain.handle('check-ui-built', async () => ({ ok: true }))
 
   // Override hardware detection
   ipcMain.removeHandler('detect-hardware')
