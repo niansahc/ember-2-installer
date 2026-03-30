@@ -24,6 +24,32 @@ const state = {
 }
 
 // ---------------------------------------------------------------------------
+// Simple markdown renderer (## headings, **bold**, - bullets, newlines)
+// ---------------------------------------------------------------------------
+
+function simpleMarkdown(text) {
+  if (!text) return ''
+  return text
+    .split('\n')
+    .map((line) => {
+      const trimmed = line.trim()
+      if (trimmed.startsWith('## ')) return `<h3 class="md-h3">${trimmed.slice(3)}</h3>`
+      if (trimmed.startsWith('# ')) return `<h2 class="md-h2">${trimmed.slice(2)}</h2>`
+      if (trimmed.startsWith('- ')) return `<li class="md-li">${inlineMd(trimmed.slice(2))}</li>`
+      if (trimmed === '---') return '<hr class="md-hr">'
+      if (trimmed === '') return '<br>'
+      return `<p class="md-p">${inlineMd(trimmed)}</p>`
+    })
+    .join('')
+}
+
+function inlineMd(text) {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`(.+?)`/g, '<code>$1</code>')
+}
+
+// ---------------------------------------------------------------------------
 // Navigation
 // ---------------------------------------------------------------------------
 
@@ -1154,7 +1180,7 @@ document.getElementById('btn-check-ember-update').addEventListener('click', asyn
 
   if (result.hasUpdate) {
     info.classList.remove('hidden')
-    msg.innerHTML = `Update available: <strong>${result.latest}</strong>${result.changelog ? '<br><br>' + result.changelog.substring(0, 200) : ''}`
+    msg.innerHTML = `Update available: <strong>${result.latest}</strong>${result.changelog ? '<br><br>' + simpleMarkdown(result.changelog) : ''}`
     document.getElementById('btn-run-ember-update').classList.remove('hidden')
   } else {
     info.classList.remove('hidden')
@@ -1371,7 +1397,7 @@ async function init() {
     if (update.hasUpdate) {
       document.getElementById('update-installed').textContent = update.installedTag
       document.getElementById('update-latest').textContent = update.latestTag
-      document.getElementById('update-changelog').textContent = update.changelog || 'No changelog provided.'
+      document.getElementById('update-changelog').innerHTML = simpleMarkdown(update.changelog || 'No changelog provided.')
       showScreen('screen-update')
       return
     }

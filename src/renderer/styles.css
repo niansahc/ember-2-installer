@@ -890,6 +890,54 @@ p {
   background: var(--accent);
 }
 
+/* ── Markdown rendering in release notes ─────────────────────── */
+
+.md-h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--accent);
+  margin: 12px 0 6px;
+}
+
+.md-h3 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent);
+  margin: 10px 0 4px;
+}
+
+.md-p {
+  margin: 2px 0;
+  line-height: 1.5;
+}
+
+.md-li {
+  list-style: none;
+  padding-left: 12px;
+  position: relative;
+  margin: 2px 0;
+  line-height: 1.5;
+}
+
+.md-li::before {
+  content: '•';
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+}
+
+.md-hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 8px 0;
+}
+
+#update-changelog {
+  max-height: 300px;
+  overflow-y: auto;
+  font-size: 0.85rem;
+}
+
 /* ── Hardware summary ────────────────────────────────────────── */
 
 .hardware-summary {
