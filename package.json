@@ -10,6 +10,8 @@
     "start:real": "electron . --real",
     "build": "electron-builder",
     "build:win": "electron-builder --win",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux"
   },
@@ -17,6 +19,7 @@
     "electron-updater": "^6.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "electron": "^28.3.3",
     "electron-builder": "latest"
   }
