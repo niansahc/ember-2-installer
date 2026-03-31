@@ -17,7 +17,8 @@ test.describe('Navigation', () => {
   })
 
   test('welcome screen renders', async () => {
-    const heading = window.locator('h1')
+    await window.waitForSelector('h1', { timeout: 5000 })
+    const heading = window.locator('h1').first()
     await expect(heading).toContainText("Ember")
   })
 
