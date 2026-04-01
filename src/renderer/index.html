@@ -81,6 +81,13 @@
         <button class="prereq-install-btn hidden" data-prereq="docker">Install</button>
         <a class="prereq-link hidden" href="#" data-url="https://www.docker.com/products/docker-desktop/">Download manually</a>
       </div>
+      <!-- Homebrew — Mac only, soft check (not a blocker) -->
+      <div class="prereq-row hidden" id="prereq-brew">
+        <span class="prereq-icon">⏳</span>
+        <span class="prereq-label">Homebrew <span class="prereq-size">recommended</span></span>
+        <span class="prereq-version"></span>
+        <a class="prereq-link hidden" href="#" data-url="https://brew.sh">Install from brew.sh</a>
+      </div>
     </div>
 
     <p class="hint" id="prereq-total-hint" style="margin-top: 8px;"></p>
@@ -456,6 +463,11 @@
         <li>Did a terminal window with <code>(.venv)</code> stay open? Close it and try again.</li>
         <li>Is port 8000 in use by something else? Close other servers and retry.</li>
       </ul>
+    </div>
+
+    <!-- Mac Gatekeeper note — shown only on macOS -->
+    <div id="done-gatekeeper-note" class="hidden" style="margin-top: 1rem;">
+      <p class="hint">On Mac, you may see a security warning the first time you open Ember. Right-click the app and select <strong>Open</strong>, then click <strong>Open</strong> again to bypass Gatekeeper. This is a one-time step.</p>
     </div>
 
     <!-- Ember-2 backend version & updates -->

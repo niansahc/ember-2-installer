@@ -82,15 +82,59 @@ document.querySelectorAll('[data-prev]').forEach((btn) => {
 
 let hasWinget = false
 let missingPrereqs = []
+let currentPlatform = 'win32'
+
+// Platform-specific install hints for missing prerequisites
+const INSTALL_HINTS = {
+  darwin: {
+    python: 'Install via Homebrew: brew install python3',
+    ollama: 'Install from ollama.com or run: brew install ollama',
+    docker: 'Install Docker Desktop from docker.com',
+    git: 'Install Xcode Command Line Tools: xcode-select --install',
+    node: 'Install via Homebrew: brew install node',
+  },
+  linux: {
+    python: 'Install via your package manager (e.g. apt install python3)',
+    ollama: 'Install from ollama.com/download/linux',
+    docker: 'Install Docker Engine: docs.docker.com/engine/install',
+    git: 'Install via your package manager (e.g. apt install git)',
+    node: 'Install from nodejs.org or via your package manager',
+  },
+}
 
 async function checkPrerequisites() {
   const checks = await window.ember.checkPrerequisites()
   const winget = await window.ember.checkWinget()
+  currentPlatform = await window.ember.getPlatform()
   hasWinget = winget.available
   missingPrereqs = []
   let allGood = true
 
+  // Show Homebrew row on Mac
+  if (currentPlatform === 'darwin') {
+    const brewRow = document.getElementById('prereq-brew')
+    if (brewRow) {
+      brewRow.classList.remove('hidden')
+      if (checks.brew) {
+        const brewIcon = brewRow.querySelector('.prereq-icon')
+        const brewVersion = brewRow.querySelector('.prereq-version')
+        const brewLink = brewRow.querySelector('.prereq-link')
+        if (checks.brew.ok) {
+          brewIcon.textContent = '✅'
+          brewVersion.textContent = checks.brew.version || 'Installed'
+          if (brewLink) brewLink.classList.add('hidden')
+        } else {
+          brewIcon.textContent = '⚠️'
+          brewVersion.textContent = 'Not found (optional)'
+          if (brewLink) brewLink.classList.remove('hidden')
+          // Brew is not a blocker — do not add to missingPrereqs
+        }
+      }
+    }
+  }
+
   for (const [name, result] of Object.entries(checks)) {
+    if (name === 'brew') continue // Handled separately above
     const row = document.getElementById(`prereq-${name}`)
     if (!row) continue
     const icon = row.querySelector('.prereq-icon')
@@ -105,10 +149,18 @@ async function checkPrerequisites() {
       if (link) link.classList.add('hidden')
     } else {
       icon.textContent = '❌'
-      version.textContent = 'Not found'
       allGood = false
       missingPrereqs.push(name)
 
+      // Platform-specific install hint
+      const hints = INSTALL_HINTS[currentPlatform]
+      if (hints && hints[name]) {
+        version.textContent = hints[name]
+      } else {
+        version.textContent = 'Not found'
+      }
+
+      // Windows: show winget install button; Mac/Linux: show manual download link only
       if (hasWinget && installBtn) {
         installBtn.classList.remove('hidden')
         if (link) link.classList.remove('hidden')
@@ -121,7 +173,7 @@ async function checkPrerequisites() {
 
   document.getElementById('btn-prereqs-next').disabled = !allGood
 
-  // Show "Install All" if multiple missing and winget available
+  // Show "Install All" if multiple missing and winget available (Windows only)
   const installAllWrap = document.getElementById('prereq-install-all-wrap')
   if (hasWinget && missingPrereqs.length > 1) {
     installAllWrap.classList.remove('hidden')
@@ -1276,6 +1328,13 @@ async function loadEmberVersion() {
     btn.disabled = false
     document.getElementById('btn-retry-api').style.display = ''
     document.getElementById('done-troubleshooting').classList.remove('hidden')
+  }
+
+  // Show Mac Gatekeeper note
+  const platform = await window.ember.getPlatform()
+  const gatekeeperNote = document.getElementById('done-gatekeeper-note')
+  if (gatekeeperNote && platform === 'darwin') {
+    gatekeeperNote.classList.remove('hidden')
   }
 
   // Load version info

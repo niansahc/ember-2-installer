@@ -267,13 +267,30 @@ ipcMain.handle('run-ember-update', async () => {
 // ---------------------------------------------------------------------------
 
 ipcMain.handle('check-prerequisites', async () => {
+  const isWin = process.platform === 'win32'
+
+  // On Mac/Linux, prefer python3; fall back to python
+  let python
+  if (isWin) {
+    python = await probe(['python', '--version'])
+  } else {
+    python = await probe(['python3', '--version'])
+    if (!python.ok) python = await probe(['python', '--version'])
+  }
+
   const checks = {
     docker: await probe(['docker', '--version']),
-    python: await probe(['python', '--version']),
+    python,
     ollama: await probe(['ollama', '--version']),
     git: await probe(['git', '--version']),
     node: await probe(['node', '--version']),
   }
+
+  // On Mac, check for Homebrew (soft check — not a blocker)
+  if (process.platform === 'darwin') {
+    checks.brew = await probe(['brew', '--version'])
+  }
+
   return checks
 })
 
@@ -301,6 +318,11 @@ const WINGET_PACKAGES = {
 }
 
 ipcMain.handle('install-prerequisite', (_e, { name }) => {
+  // Auto-install via winget is Windows-only
+  if (process.platform !== 'win32') {
+    return Promise.resolve({ ok: false, error: 'Auto-install is only available on Windows. Please install manually.' })
+  }
+
   const packageId = WINGET_PACKAGES[name]
   if (!packageId) return Promise.resolve({ ok: false, error: `Unknown: ${name}` })
 
@@ -324,6 +346,8 @@ ipcMain.handle('install-prerequisite', (_e, { name }) => {
 })
 
 ipcMain.handle('check-winget', async () => {
+  // winget is Windows-only
+  if (process.platform !== 'win32') return { available: false }
   const result = await probe(['winget', '--version'])
   return { available: result.ok }
 })
@@ -589,10 +613,16 @@ ipcMain.handle('write-env', (_e, { emberPath, vault, model, vision, host }) => {
     } else {
       lines.push('# EMBER_VISION_MODEL=  (vision disabled)\n')
     }
+    const credStoreNames = {
+      win32: 'Windows Credential Manager',
+      darwin: 'macOS Keychain',
+      linux: 'system keyring (SecretService)',
+    }
+    const credStore = credStoreNames[process.platform] || 'OS credential store'
     lines.push(
       '\n',
       '# ── API Key ────────────────────────────────────────────────────────\n',
-      '# API key is stored in Windows Credential Manager — not here.\n',
+      `# API key is stored in ${credStore} — not here.\n`,
       '# Run: python scripts/set_api_key.py\n',
     )
     fs.writeFileSync(path.join(emberPath, '.env'), lines.join(''), 'utf-8')
@@ -638,7 +668,7 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
   // --- All other steps ---
   let cmd, args
   if (step === 'venv') {
-    cmd = 'python'
+    cmd = isWin ? 'python' : 'python3'
     args = ['-m', 'venv', '.venv']
   } else if (step === 'pip') {
     cmd = pyBin
@@ -985,7 +1015,9 @@ ipcMain.handle('open-url', (_e, url) => {
 })
 
 ipcMain.handle('get-default-vault', () => {
-  return process.platform === 'win32' ? 'C:\\EmberVault' : '/data/embervault'
+  return process.platform === 'win32'
+    ? 'C:\\EmberVault'
+    : path.join(os.homedir(), 'EmberVault')
 })
 
 ipcMain.handle('get-default-ollama-models', () => {
@@ -998,21 +1030,45 @@ ipcMain.handle('get-default-ollama-models', () => {
 })
 
 ipcMain.handle('set-ollama-models-path', (_e, modelsPath) => {
-  // Set OLLAMA_MODELS environment variable system-wide (Windows)
   if (process.platform === 'win32') {
+    // Set OLLAMA_MODELS environment variable system-wide via setx
     return new Promise((resolve) => {
       const proc = spawn('setx', ['OLLAMA_MODELS', modelsPath], { shell: true })
       proc.on('close', (code) => resolve({ ok: code === 0 }))
       proc.on('error', () => resolve({ ok: false }))
     })
   }
-  return Promise.resolve({ ok: false, error: 'Manual setup needed on this platform' })
+
+  // Mac/Linux: write to shell profile
+  const profilePath = process.platform === 'darwin'
+    ? path.join(os.homedir(), '.zprofile')
+    : path.join(os.homedir(), '.profile')
+  const exportLine = `export OLLAMA_MODELS="${modelsPath}"`
+
+  try {
+    const existing = fs.existsSync(profilePath) ? fs.readFileSync(profilePath, 'utf-8') : ''
+    if (existing.includes('OLLAMA_MODELS=')) {
+      // Replace existing line
+      const updated = existing.replace(/^export OLLAMA_MODELS=.*$/m, exportLine)
+      fs.writeFileSync(profilePath, updated, 'utf-8')
+    } else {
+      fs.appendFileSync(profilePath, `\n${exportLine}\n`, 'utf-8')
+    }
+    return Promise.resolve({ ok: true })
+  } catch (err) {
+    return Promise.resolve({ ok: false, error: err.message })
+  }
 })
 
 ipcMain.handle('get-platform', () => process.platform)
 
 ipcMain.handle('restart-computer', () => {
-  spawn('shutdown', ['/r', '/t', '30', '/c', 'Restarting for Docker Desktop setup. Run Ember Setup again after restart.'], { shell: true })
+  if (process.platform === 'win32') {
+    spawn('shutdown', ['/r', '/t', '30', '/c', 'Restarting for Docker Desktop setup. Run Ember Setup again after restart.'], { shell: true })
+  } else {
+    // Mac/Linux: schedule a reboot in 1 minute
+    spawn('sudo', ['shutdown', '-r', '+1', 'Restarting for Docker setup. Run Ember Setup again after restart.'], { shell: true })
+  }
 })
 
 ipcMain.handle('get-demo-mode', () => DEMO_MODE)
@@ -1321,7 +1377,9 @@ if (DEMO_MODE) {
   })
 
   ipcMain.removeHandler('get-default-install-dir')
-  ipcMain.handle('get-default-install-dir', () => 'C:\\Ember-2')
+  ipcMain.handle('get-default-install-dir', () => {
+    return process.platform === 'win32' ? 'C:\\Ember-2' : path.join(os.homedir(), 'Ember-2')
+  })
 
   // Override ember scan
   ipcMain.removeHandler('scan-for-ember')
