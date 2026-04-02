@@ -1,22 +1,25 @@
 # Changelog
 
-## v0.5.0 — 2026-04-02
+## v0.12.0 — 2026-04-02
 
 ### Features
-- **Mac/Linux support** — platform-aware prerequisite checks, default paths, and startup scripts for Mac (DMG) and Linux (AppImage)
-- **Electron upgrade 28.3.3 → 33.4.11** — unblocks Playwright e2e tests
-- **Playwright e2e tests now running** — 12 tests passing (was blocked on Electron 28)
-- **Gatekeeper bypass note** on Done screen for Mac users
-- **Homebrew soft check** on Mac prerequisites screen (not a blocker)
-- **Platform-specific install hints** — brew install, apt install messages for missing prereqs on Mac/Linux
-- **Platform-agnostic credential store** — .env comment reflects macOS Keychain or Linux SecretService
-- **Ollama models path** on Mac/Linux writes to .zprofile or .profile instead of setx
+- Mac/Linux support — platform-aware prerequisite checks, default paths, and startup scripts for Mac (DMG) and Linux (AppImage)
+- Gatekeeper bypass instructions on Done screen for Mac users
+- Linux keyring fallback — if SecretService unavailable, falls back to local file with 600 permissions and warning
+- Homebrew check on Mac — soft warning if not installed, not a blocker
 
-### Dependency Security
-- No axios dependency — native fetch used throughout; confirmed safe during March 2026 supply chain attack
+### Infrastructure
+- Electron upgrade 28.3.3 → 29+ — unblocks Playwright e2e tests
+- Playwright e2e tests now running — 12 tests passing (was blocked on Electron 28)
 
-### Resolved
-- Playwright e2e tests no longer blocked on Electron version
+### Security
+- No axios dependency — native fetch used throughout; confirmed unaffected by March 2026 axios supply chain attack
+
+### Known Gaps
+- Mac and Linux installer flows not yet tested on real hardware — Windows tested and confirmed working; Mac/Linux require community verification
+
+### Tests
+12 Playwright passing (up from 0 runnable at v0.4.1 due to Electron 28 block)
 
 ## v0.4.1 — 2026-03-30
 
