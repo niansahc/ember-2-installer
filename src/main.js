@@ -713,6 +713,31 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
       return { ok: false }
     }
 
+    // Retrieve API key from credential store and write UI .env so Vite can
+    // bake it into the bundle.  Without this the built frontend ships with an
+    // empty API key and every authenticated request to the backend fails.
+    mainWindow.webContents.send('install-log', { step, text: 'Injecting API key into UI build...\n' })
+    const apiKey = await new Promise((resolve) => {
+      let out = ''
+      const proc = spawn(pyBin, ['scripts/set_api_key.py', '--non-interactive'], {
+        cwd: emberPath, shell: true,
+      })
+      proc.stdout.on('data', (d) => (out += d))
+      proc.stderr.on('data', (d) => mainWindow.webContents.send('install-log', { step, text: d.toString() }))
+      proc.on('close', () => {
+        const match = out.match(/Key:\s*(.+)/)
+        resolve(match ? match[1].trim() : null)
+      })
+      proc.on('error', () => resolve(null))
+    })
+    if (apiKey) {
+      const uiEnvPath = path.join(uiDir, '.env')
+      fs.writeFileSync(uiEnvPath, `VITE_EMBER_API_URL=/v1\nVITE_EMBER_API_KEY=${apiKey}\n`, 'utf-8')
+      mainWindow.webContents.send('install-log', { step, text: 'API key written to UI .env ✓\n' })
+    } else {
+      mainWindow.webContents.send('install-log', { step, text: 'Warning: could not retrieve API key — UI will build without auth\n' })
+    }
+
     // npm run build
     mainWindow.webContents.send('install-log', { step, text: 'Building Ember UI...\n' })
     const buildOk = await new Promise((resolve) => {
