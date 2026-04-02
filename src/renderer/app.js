@@ -103,6 +103,12 @@ const INSTALL_HINTS = {
 }
 
 async function checkPrerequisites() {
+  // Disable Next immediately so users cannot advance while checks are in flight.
+  // This closes a race condition: if Next was enabled from a prior passing check
+  // and the user clicks Re-check then quickly clicks Next, they could bypass a
+  // now-failing prerequisite (reported for Node.js in v0.12.0).
+  document.getElementById('btn-prereqs-next').disabled = true
+
   const checks = await window.ember.checkPrerequisites()
   const winget = await window.ember.checkWinget()
   currentPlatform = await window.ember.getPlatform()
