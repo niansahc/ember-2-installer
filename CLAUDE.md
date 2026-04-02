@@ -72,6 +72,7 @@ npm start
 - [ ] No uncommitted changes
 - [ ] CHANGELOG.md updated
 - [ ] version bumped in package.json
+- [ ] GitHub Release published with installer .exe attached
 - [ ] Git tag created
 
 ---
