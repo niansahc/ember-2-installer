@@ -889,7 +889,7 @@ function startFunFacts() {
       el.textContent = FUN_FACTS[idx]
       el.style.opacity = '1'
     }, 300)
-  }, 8000)
+  }, 14000)
 }
 
 function stopFunFacts() {
