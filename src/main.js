@@ -674,6 +674,40 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     cmd = pyBin
     args = ['-m', 'pip', 'install', '-r', 'requirements.txt']
   } else if (step === 'docker') {
+    // Start Docker Desktop if the daemon isn't running
+    const daemonUp = await new Promise((resolve) => {
+      const proc = spawn('docker', ['info'], { shell: true })
+      proc.on('close', (code) => resolve(code === 0))
+      proc.on('error', () => resolve(false))
+    })
+    if (!daemonUp) {
+      mainWindow.webContents.send('install-log', { step, text: 'Docker daemon not running — starting Docker Desktop...\n' })
+      if (isWin) {
+        spawn('cmd', ['/c', 'start', '', 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe'], { shell: true })
+      } else if (process.platform === 'darwin') {
+        spawn('open', ['-a', 'Docker'], { shell: true })
+      } else {
+        spawn('systemctl', ['--user', 'start', 'docker-desktop'], { shell: true })
+      }
+      // Wait for daemon to become ready (poll every 3s, up to 60s)
+      let ready = false
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 3000))
+        ready = await new Promise((resolve) => {
+          const proc = spawn('docker', ['info'], { shell: true })
+          proc.on('close', (code) => resolve(code === 0))
+          proc.on('error', () => resolve(false))
+        })
+        if (ready) break
+        mainWindow.webContents.send('install-log', { step, text: 'Waiting for Docker daemon...\n' })
+      }
+      if (!ready) {
+        mainWindow.webContents.send('install-log', { step, text: 'Docker daemon did not start in time. Please start Docker Desktop manually and retry.\n' })
+        mainWindow.webContents.send('install-step-done', { step, ok: false })
+        return { ok: false }
+      }
+      mainWindow.webContents.send('install-log', { step, text: 'Docker daemon ready ✓\n' })
+    }
     cmd = 'docker'
     args = ['compose', 'up', '-d']
   } else if (step === 'build-ui') {

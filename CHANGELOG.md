@@ -2,6 +2,9 @@
 
 ## v0.5.1 — 2026-04-03
 
+### Features
+- Auto-start Docker Desktop if daemon not running — polls up to 60s for readiness before running docker compose
+
 ### Fixes
 - Inject API key into UI .env before Vite build — fresh installs were shipping with an empty VITE_EMBER_API_KEY, breaking all authenticated API calls
 - Fun facts display duration increased from 8s to 14s — users couldn't finish reading them
