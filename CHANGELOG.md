@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.5.1 — 2026-04-03
+
+### Fixes
+- Inject API key into UI .env before Vite build — fresh installs were shipping with an empty VITE_EMBER_API_KEY, breaking all authenticated API calls
+- Fun facts display duration increased from 8s to 14s — users couldn't finish reading them
+
+### Infrastructure
+- Prerequisite re-check race condition fixed — Next button now disabled during async checks
+- GitHub Release publishing step added to release checklist
+
+---
+
 ## v0.12.0 — 2026-04-02
 
 ### Features
