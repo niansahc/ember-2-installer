@@ -71,8 +71,12 @@ npm start
 - [ ] Install flow tested end-to-end on Windows
 - [ ] No uncommitted changes
 - [ ] CHANGELOG.md updated
-- [ ] version bumped in package.json
+- [ ] Version number bumped in package.json before build -- same version number means electron-updater reports no update available
+- [ ] Frontend dist freshly built from correct tagged source before packaging -- never package a stale frontend build; electron-updater cannot rebuild on user's machine
+- [ ] app-update.yml present in build output -- check resources/ after build; missing means that installed version can never auto-update and user must reinstall manually
+- [ ] GitHub Release published (not draft) -- electron-updater only sees published releases; tags and drafts are invisible to update checker
 - [ ] GitHub Release published with installer .exe attached
+- [ ] latest.yml attached to release assets -- verify after publish; missing means users never see update notifications
 - [ ] Git tag created
 
 ---
