@@ -512,10 +512,9 @@ function renderVisionCards() {
     container.appendChild(card)
   }
 
-  // Auto-select first vision model
-  if (!state.vision && modelData.vision.length > 0) {
-    state.vision = modelData.vision[0].id
-  }
+  // Don't auto-select a vision model — only set state.vision when the user
+  // explicitly enables the vision toggle.  Otherwise a ~6 GB download happens
+  // without the user opting in.
 }
 
 // Download model if not installed (called during install step)
