@@ -981,8 +981,20 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
   const installerInstalled = app.getVersion()
   const installerLatest = installerRelease?.tag_name?.replace(/^v/, '') || null
 
-  // Backend version from running API health endpoint
-  const backendInstalled = healthData?.version || null
+  // Backend version: prefer running API, fall back to version.json on disk.
+  // If neither is available, we can't verify — flag as needing update.
+  let backendInstalled = healthData?.version || null
+  const backendApiRunning = !!healthData
+  if (!backendInstalled && emberPath) {
+    try {
+      const vf = path.join(emberPath, 'version.json')
+      if (fs.existsSync(vf)) {
+        const parsed = JSON.parse(fs.readFileSync(vf, 'utf-8'))
+        backendInstalled = parsed.version || parsed.tag || null
+        if (backendInstalled && !backendInstalled.startsWith('v')) backendInstalled = `v${backendInstalled}`
+      }
+    } catch {}
+  }
   const backendLatest = backendRelease?.tag_name || null
 
   // UI version from local package.json
@@ -1003,14 +1015,14 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
       latest: installerLatest,
     },
     backend: {
-      hasUpdate: backendInstalled && backendLatest && backendInstalled !== backendLatest,
-      installed: backendInstalled || 'API not running',
+      hasUpdate: backendLatest && (!backendInstalled || backendInstalled !== backendLatest),
+      installed: backendInstalled || 'unknown',
       latest: backendLatest,
-      apiRunning: !!healthData,
+      apiRunning: backendApiRunning,
     },
     ui: {
-      hasUpdate: uiInstalled && uiLatest && uiInstalled !== uiLatest,
-      installed: uiInstalled || 'not found',
+      hasUpdate: uiLatest && (!uiInstalled || uiInstalled !== uiLatest),
+      installed: uiInstalled || 'unknown',
       latest: uiLatest,
     },
   }
