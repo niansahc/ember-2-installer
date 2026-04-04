@@ -177,6 +177,30 @@ async function checkPrerequisites() {
     }
   }
 
+  // If Docker is installed, check whether the daemon is actually running.
+  // Docker installed + daemon stopped = SearXNG fails silently.
+  const daemonRow = document.getElementById('prereq-docker-daemon')
+  if (checks.docker?.ok && daemonRow) {
+    daemonRow.classList.remove('hidden')
+    const daemonIcon = daemonRow.querySelector('.prereq-icon')
+    const daemonVersion = daemonRow.querySelector('.prereq-version')
+    const daemonRecheck = document.getElementById('btn-docker-daemon-recheck')
+
+    const daemon = await window.ember.checkDockerDaemon()
+    if (daemon.ok) {
+      daemonIcon.textContent = '✅'
+      daemonVersion.textContent = 'Running'
+      if (daemonRecheck) daemonRecheck.classList.add('hidden')
+    } else {
+      daemonIcon.textContent = '⚠️'
+      daemonVersion.textContent = 'Docker is installed but not running. Please start Docker Desktop and try again.'
+      allGood = false
+      if (daemonRecheck) daemonRecheck.classList.remove('hidden')
+    }
+  } else if (daemonRow) {
+    daemonRow.classList.add('hidden')
+  }
+
   document.getElementById('btn-prereqs-next').disabled = !allGood
 
   // Show "Install All" if multiple missing and winget available (Windows only)
@@ -288,6 +312,12 @@ document.getElementById('btn-restart-now').addEventListener('click', () => {
 document.getElementById('btn-restart-later').addEventListener('click', () => {
   document.getElementById('prereq-restart-notice').classList.add('hidden')
   document.getElementById('prereq-nav-row').classList.remove('hidden')
+})
+
+// Docker daemon "Check again" button — re-runs full prereq check
+document.getElementById('btn-docker-daemon-recheck').addEventListener('click', () => {
+  document.getElementById('btn-docker-daemon-recheck').classList.add('hidden')
+  checkPrerequisites()
 })
 
 // Download links open external browser (fallback)
