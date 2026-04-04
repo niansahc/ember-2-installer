@@ -506,13 +506,32 @@
   <!-- Screen — Update available                                         -->
   <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-update" class="screen">
-    <h2>Update Available</h2>
-    <p>Installed: <span id="update-installed"></span></p>
-    <p>Latest: <span id="update-latest"></span></p>
-    <div id="update-changelog" class="log-box"></div>
+    <h2>Updates Available</h2>
+    <p class="ember-voice" id="update-voice">"I found some updates."</p>
+
+    <div class="update-checklist" id="update-checklist">
+      <div class="update-row hidden" id="update-row-backend">
+        <span class="update-icon">📦</span>
+        <span class="update-label">Ember backend</span>
+        <span class="update-versions"><span id="update-backend-installed"></span> → <span id="update-backend-latest"></span></span>
+      </div>
+      <div class="update-row hidden" id="update-row-ui">
+        <span class="update-icon">🎨</span>
+        <span class="update-label">Ember UI</span>
+        <span class="update-versions"><span id="update-ui-installed"></span> → <span id="update-ui-latest"></span></span>
+      </div>
+      <div class="update-row hidden" id="update-row-installer">
+        <span class="update-icon">⚙️</span>
+        <span class="update-label">Installer</span>
+        <span class="update-versions"><span id="update-installer-installed"></span> → <span id="update-installer-latest"></span></span>
+      </div>
+    </div>
+
+    <div id="update-all-log" class="log-box hidden"></div>
+
     <div class="btn-row">
       <button class="btn-secondary" id="btn-skip-update">Skip</button>
-      <button class="btn-primary" id="btn-run-update">Update</button>
+      <button class="btn-primary" id="btn-run-update-all">Update All</button>
     </div>
   </section>
 

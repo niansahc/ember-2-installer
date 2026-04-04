@@ -935,8 +935,216 @@ function fetchLatestRelease(repo = 'niansahc/ember-2') {
   })
 }
 
-// (Open WebUI check and UI choice removed — Ember UI is now the only option,
-//  served directly by FastAPI from the ui/ folder)
+// ---------------------------------------------------------------------------
+// IPC — Unified update checker (all three repos)
+// ---------------------------------------------------------------------------
+
+function fetchLatestReleaseWithTimeout(repo, timeoutMs = 4000) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), timeoutMs)
+    fetchLatestRelease(repo).then((result) => {
+      clearTimeout(timer)
+      resolve(result)
+    }).catch(() => {
+      clearTimeout(timer)
+      resolve(null)
+    })
+  })
+}
+
+ipcMain.handle('check-all-updates', async (_e, { host }) => {
+  const emberPath = getEmberPath()
+  const uiDir = emberPath ? path.join(path.dirname(emberPath), 'ember-2-ui') : null
+
+  // Run all checks in parallel with 4-second timeout each
+  const [installerRelease, backendRelease, uiRelease, healthData] = await Promise.all([
+    fetchLatestReleaseWithTimeout('niansahc/ember-2-installer'),
+    fetchLatestReleaseWithTimeout('niansahc/ember-2'),
+    fetchLatestReleaseWithTimeout('niansahc/ember-2-ui'),
+    // Get backend version from running API, not version.json
+    new Promise((resolve) => {
+      const targetHost = host || '127.0.0.1'
+      const http = require('http')
+      const req = http.get(`http://${targetHost}:8000/api/health`, { timeout: 3000 }, (res) => {
+        let data = ''
+        res.on('data', (d) => (data += d))
+        res.on('end', () => {
+          try { resolve(JSON.parse(data)) } catch { resolve(null) }
+        })
+      })
+      req.on('error', () => resolve(null))
+      req.on('timeout', () => { req.destroy(); resolve(null) })
+    }),
+  ])
+
+  // Installer version
+  const installerInstalled = app.getVersion()
+  const installerLatest = installerRelease?.tag_name?.replace(/^v/, '') || null
+
+  // Backend version from running API health endpoint
+  const backendInstalled = healthData?.version || null
+  const backendLatest = backendRelease?.tag_name || null
+
+  // UI version from local package.json
+  let uiInstalled = null
+  if (uiDir) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(uiDir, 'package.json'), 'utf-8'))
+      uiInstalled = pkg.version || null
+    } catch {}
+  }
+  const uiLatest = uiRelease?.tag_name?.replace(/^v/, '') || null
+
+  return {
+    reachable: !!(installerRelease || backendRelease || uiRelease),
+    installer: {
+      hasUpdate: installerLatest && installerInstalled !== installerLatest,
+      installed: installerInstalled,
+      latest: installerLatest,
+    },
+    backend: {
+      hasUpdate: backendInstalled && backendLatest && backendInstalled !== backendLatest,
+      installed: backendInstalled || 'API not running',
+      latest: backendLatest,
+      apiRunning: !!healthData,
+    },
+    ui: {
+      hasUpdate: uiInstalled && uiLatest && uiInstalled !== uiLatest,
+      installed: uiInstalled || 'not found',
+      latest: uiLatest,
+    },
+  }
+})
+
+ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
+  const emberPath = getEmberPath()
+  if (!emberPath) return { ok: false, error: 'No ember-2 path configured' }
+
+  const isWin = process.platform === 'win32'
+  const pyBin = isWin
+    ? `"${path.join(emberPath, '.venv', 'Scripts', 'python.exe')}"`
+    : path.join(emberPath, '.venv', 'bin', 'python')
+  const uiDir = path.join(path.dirname(emberPath), 'ember-2-ui')
+  const log = (text) => mainWindow.webContents.send('update-all-log', text)
+
+  // 1. Backend update
+  if (updates.backend) {
+    log('Updating Ember backend...\n')
+    const pullOk = await new Promise((resolve) => {
+      const proc = spawn('git', ['pull', 'origin', 'main'], { cwd: emberPath, shell: true })
+      proc.stdout.on('data', (d) => log(d.toString()))
+      proc.stderr.on('data', (d) => log(d.toString()))
+      proc.on('close', (code) => resolve(code === 0))
+      proc.on('error', () => resolve(false))
+    })
+    if (!pullOk) { log('Backend update failed.\n'); return { ok: false, stage: 'backend-pull' } }
+
+    log('Installing Python dependencies...\n')
+    const pipOk = await new Promise((resolve) => {
+      const proc = spawn(pyBin, ['-m', 'pip', 'install', '-r', 'requirements.txt'], {
+        cwd: emberPath, shell: true,
+      })
+      proc.stdout.on('data', (d) => log(d.toString()))
+      proc.stderr.on('data', (d) => log(d.toString()))
+      proc.on('close', (code) => resolve(code === 0))
+      proc.on('error', () => resolve(false))
+    })
+    if (!pipOk) log('Warning: pip install had issues, continuing...\n')
+
+    log('Restarting Docker services...\n')
+    await new Promise((resolve) => {
+      const proc = spawn('docker', ['compose', 'up', '-d', '--build'], {
+        cwd: emberPath, shell: true,
+      })
+      proc.stdout.on('data', (d) => log(d.toString()))
+      proc.stderr.on('data', (d) => log(d.toString()))
+      proc.on('close', () => resolve())
+      proc.on('error', () => resolve())
+    })
+    log('Backend updated ✓\n\n')
+  }
+
+  // 2. UI update
+  if (updates.ui) {
+    log('Updating Ember UI...\n')
+    if (!fs.existsSync(uiDir)) {
+      log('Cloning ember-2-ui...\n')
+      const cloneOk = await new Promise((resolve) => {
+        const proc = spawn('git', ['clone', 'https://github.com/niansahc/ember-2-ui.git'], {
+          cwd: path.dirname(emberPath), shell: true,
+        })
+        proc.stdout.on('data', (d) => log(d.toString()))
+        proc.stderr.on('data', (d) => log(d.toString()))
+        proc.on('close', (code) => resolve(code === 0))
+        proc.on('error', () => resolve(false))
+      })
+      if (!cloneOk) { log('UI clone failed.\n'); return { ok: false, stage: 'ui-clone' } }
+    } else {
+      const pullOk = await new Promise((resolve) => {
+        const proc = spawn('git', ['pull', 'origin', 'main'], { cwd: uiDir, shell: true })
+        proc.stdout.on('data', (d) => log(d.toString()))
+        proc.stderr.on('data', (d) => log(d.toString()))
+        proc.on('close', (code) => resolve(code === 0))
+        proc.on('error', () => resolve(false))
+      })
+      if (!pullOk) { log('UI pull failed.\n'); return { ok: false, stage: 'ui-pull' } }
+    }
+
+    log('Installing UI dependencies...\n')
+    const npmOk = await new Promise((resolve) => {
+      const proc = spawn('npm', ['ci'], { cwd: uiDir, shell: true })
+      proc.stdout.on('data', (d) => log(d.toString()))
+      proc.stderr.on('data', (d) => log(d.toString()))
+      proc.on('close', (code) => resolve(code === 0))
+      proc.on('error', () => resolve(false))
+    })
+    if (!npmOk) { log('npm ci failed.\n'); return { ok: false, stage: 'ui-npm' } }
+
+    // Inject API key before building
+    log('Injecting API key...\n')
+    const apiKey = await new Promise((resolve) => {
+      let out = ''
+      const proc = spawn(pyBin, ['scripts/set_api_key.py', '--non-interactive'], {
+        cwd: emberPath, shell: true,
+      })
+      proc.stdout.on('data', (d) => (out += d))
+      proc.on('close', () => {
+        const match = out.match(/Key:\s*(.+)/)
+        resolve(match ? match[1].trim() : null)
+      })
+      proc.on('error', () => resolve(null))
+    })
+    if (apiKey) {
+      fs.writeFileSync(path.join(uiDir, '.env'), `VITE_EMBER_API_URL=/v1\nVITE_EMBER_API_KEY=${apiKey}\n`, 'utf-8')
+    }
+
+    log('Building UI...\n')
+    const buildOk = await new Promise((resolve) => {
+      const proc = spawn('npm', ['run', 'build'], { cwd: uiDir, shell: true })
+      proc.stdout.on('data', (d) => log(d.toString()))
+      proc.stderr.on('data', (d) => log(d.toString()))
+      proc.on('close', (code) => resolve(code === 0))
+      proc.on('error', () => resolve(false))
+    })
+    if (!buildOk) { log('UI build failed.\n'); return { ok: false, stage: 'ui-build' } }
+
+    // Copy dist to ember-2/ui/
+    const targetUiDir = path.join(emberPath, 'ui')
+    try {
+      if (fs.existsSync(targetUiDir)) fs.rmSync(targetUiDir, { recursive: true })
+      fs.cpSync(path.join(uiDir, 'dist'), targetUiDir, { recursive: true })
+      log('UI updated ✓\n\n')
+    } catch (err) {
+      log(`Failed to copy UI: ${err.message}\n`)
+      return { ok: false, stage: 'ui-copy' }
+    }
+  }
+
+  // 3. Installer update — handled separately via electron-updater (quit-and-install)
+  // The renderer will trigger this after backend/UI updates complete.
+
+  return { ok: true, needsInstallerUpdate: !!updates.installer }
+})
 
 ipcMain.handle('run-git-pull', async (_e) => {
   const emberPath = getEmberPath()
@@ -1399,6 +1607,18 @@ if (DEMO_MODE) {
   // Override update check — no update in demo
   ipcMain.removeHandler('check-for-update')
   ipcMain.handle('check-for-update', async () => ({ hasUpdate: false }))
+
+  // Override unified update checker — no updates in demo
+  ipcMain.removeHandler('check-all-updates')
+  ipcMain.handle('check-all-updates', async () => ({
+    reachable: true,
+    installer: { hasUpdate: false, installed: app.getVersion(), latest: app.getVersion() },
+    backend: { hasUpdate: false, installed: 'v0.13.1 (demo)', latest: 'v0.13.1', apiRunning: true },
+    ui: { hasUpdate: false, installed: '0.5.3 (demo)', latest: '0.5.3' },
+  }))
+
+  ipcMain.removeHandler('run-all-updates')
+  ipcMain.handle('run-all-updates', async () => ({ ok: true, needsInstallerUpdate: false }))
 
   // Override Tailscale checks — simulate installed + connected
   ipcMain.removeHandler('check-tailscale-installed')

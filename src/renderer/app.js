@@ -1348,29 +1348,55 @@ document.getElementById('btn-retry-api').addEventListener('click', async () => {
   }
 })
 
-// Ember-2 backend version check
+// Unified update check from Done screen
 document.getElementById('btn-check-ember-update').addEventListener('click', async () => {
   const btn = document.getElementById('btn-check-ember-update')
-  const label = document.getElementById('ember-version-label')
   const info = document.getElementById('ember-update-info')
   const msg = document.getElementById('ember-update-msg')
 
   btn.disabled = true
   btn.textContent = 'Checking...'
 
-  const result = await window.ember.checkEmberUpdate()
+  const updates = await window.ember.checkAllUpdates(state.host)
 
-  label.textContent = result.installed || 'unknown'
   btn.disabled = false
   btn.textContent = 'Check for updates'
 
-  if (result.hasUpdate) {
+  if (!updates.reachable) {
     info.classList.remove('hidden')
-    msg.innerHTML = `Update available: <strong>${result.latest}</strong>${result.changelog ? '<br><br>' + simpleMarkdown(result.changelog) : ''}`
-    document.getElementById('btn-run-ember-update').classList.remove('hidden')
+    msg.textContent = 'Update check unavailable — could not reach GitHub.'
+    document.getElementById('btn-run-ember-update').classList.add('hidden')
+    return
+  }
+
+  const anyUpdate = updates.installer.hasUpdate || updates.backend.hasUpdate || updates.ui.hasUpdate
+
+  if (anyUpdate) {
+    // Navigate to update screen with the unified checklist
+    if (updates.backend.hasUpdate) {
+      document.getElementById('update-row-backend').classList.remove('hidden')
+      document.getElementById('update-backend-installed').textContent = updates.backend.installed
+      document.getElementById('update-backend-latest').textContent = updates.backend.latest
+    }
+    if (updates.ui.hasUpdate) {
+      document.getElementById('update-row-ui').classList.remove('hidden')
+      document.getElementById('update-ui-installed').textContent = updates.ui.installed
+      document.getElementById('update-ui-latest').textContent = updates.ui.latest
+    }
+    if (updates.installer.hasUpdate) {
+      document.getElementById('update-row-installer').classList.remove('hidden')
+      document.getElementById('update-installer-installed').textContent = updates.installer.installed
+      document.getElementById('update-installer-latest').textContent = updates.installer.latest
+    }
+    pendingUpdates = {
+      backend: updates.backend.hasUpdate,
+      ui: updates.ui.hasUpdate,
+      installer: updates.installer.hasUpdate,
+    }
+    showScreen('screen-update')
   } else {
     info.classList.remove('hidden')
-    msg.textContent = 'You\'re on the latest version.'
+    msg.textContent = 'Everything is up to date.'
     document.getElementById('btn-run-ember-update').classList.add('hidden')
   }
 })
@@ -1519,33 +1545,43 @@ document.getElementById('btn-skip-update').addEventListener('click', () => {
   showScreen('screen-welcome')
 })
 
-document.getElementById('btn-run-update').addEventListener('click', async () => {
-  const btn = document.getElementById('btn-run-update')
+// Unified update — stores pending update info for the Update All button
+let pendingUpdates = null
+
+document.getElementById('btn-run-update-all').addEventListener('click', async () => {
+  if (!pendingUpdates) return
+  const btn = document.getElementById('btn-run-update-all')
   btn.disabled = true
   btn.textContent = 'Updating...'
 
-  const log = document.getElementById('update-changelog')
-  log.textContent = 'Running git pull...\n'
+  const logBox = document.getElementById('update-all-log')
+  logBox.classList.remove('hidden')
+  logBox.textContent = ''
 
-  window.ember.onInstallLog(({ step, text }) => {
-    if (step === 'update') {
-      log.textContent += text
-      log.scrollTop = log.scrollHeight
-    }
+  window.ember.onUpdateAllLog((text) => {
+    logBox.textContent += text
+    logBox.scrollTop = logBox.scrollHeight
   })
 
-  const result = await window.ember.runGitPull()
-  window.ember.removeAllListeners('install-log')
+  const result = await window.ember.runAllUpdates(pendingUpdates, state.host)
+  window.ember.removeAllListeners('update-all-log')
 
   if (result.ok) {
-    log.textContent += '\nUpdate complete! Starting Ember...\n'
-    btn.textContent = 'Done'
-    // Navigate to Done screen and start the API automatically
-    showScreen('screen-done')
-    loadEmberVersion()
+    if (result.needsInstallerUpdate) {
+      logBox.textContent += '\nBackend and UI updated. Downloading installer update...\n'
+      btn.textContent = 'Restarting...'
+      await window.ember.downloadInstallerUpdate()
+      // electron-updater will quit-and-install when download completes
+    } else {
+      logBox.textContent += '\nAll updates applied. Starting Ember...\n'
+      btn.textContent = 'Done'
+      showScreen('screen-done')
+      loadEmberVersion()
+    }
   } else {
-    log.textContent += '\nUpdate failed. Try running git pull manually.\n'
+    logBox.textContent += `\nUpdate failed at stage: ${result.stage || 'unknown'}\n`
     btn.textContent = 'Failed'
+    btn.disabled = false
   }
 })
 
@@ -1587,18 +1623,45 @@ async function init() {
     document.getElementById('demo-badge').classList.remove('hidden')
   }
 
-  // Check for updates first (if already installed)
+  // Check for updates across all three repos (if already installed)
   const emberPath = await window.ember.getEmberPath()
 
   if (emberPath) {
-    const update = await window.ember.checkForUpdate()
-    if (update.hasUpdate) {
-      document.getElementById('update-installed').textContent = update.installedTag
-      document.getElementById('update-latest').textContent = update.latestTag
-      document.getElementById('update-changelog').innerHTML = simpleMarkdown(update.changelog || 'No changelog provided.')
-      showScreen('screen-update')
-      return
+    const updates = await window.ember.checkAllUpdates(state.host)
+
+    if (updates.reachable) {
+      const anyUpdate = updates.installer.hasUpdate || updates.backend.hasUpdate || updates.ui.hasUpdate
+
+      if (anyUpdate) {
+        // Populate update checklist
+        if (updates.backend.hasUpdate) {
+          document.getElementById('update-row-backend').classList.remove('hidden')
+          document.getElementById('update-backend-installed').textContent = updates.backend.installed
+          document.getElementById('update-backend-latest').textContent = updates.backend.latest
+        }
+        if (updates.ui.hasUpdate) {
+          document.getElementById('update-row-ui').classList.remove('hidden')
+          document.getElementById('update-ui-installed').textContent = updates.ui.installed
+          document.getElementById('update-ui-latest').textContent = updates.ui.latest
+        }
+        if (updates.installer.hasUpdate) {
+          document.getElementById('update-row-installer').classList.remove('hidden')
+          document.getElementById('update-installer-installed').textContent = updates.installer.installed
+          document.getElementById('update-installer-latest').textContent = updates.installer.latest
+        }
+
+        // Store what needs updating for the Update All button
+        pendingUpdates = {
+          backend: updates.backend.hasUpdate,
+          ui: updates.ui.hasUpdate,
+          installer: updates.installer.hasUpdate,
+        }
+
+        showScreen('screen-update')
+        return
+      }
     }
+    // If GitHub unreachable or no updates, fall through to normal flow
   }
 
   // Normal flow — check prerequisites
