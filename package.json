@@ -1,7 +1,7 @@
 {
   "name": "ember-2-installer",
   "productName": "Ember Setup",
-  "version": "0.5.2",
+  "version": "0.5.4",
   "description": "Installer and setup wizard for Ember-2",
   "author": "niansahc",
   "main": "src/main.js",
