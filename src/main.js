@@ -1077,6 +1077,17 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     })
     if (!pipOk) log('Warning: pip install had issues, continuing...\n')
 
+    // Verify the pull landed the expected version
+    let pulledVersion = null
+    try {
+      const vf = path.join(emberPath, 'version.json')
+      if (fs.existsSync(vf)) {
+        const parsed = JSON.parse(fs.readFileSync(vf, 'utf-8'))
+        pulledVersion = parsed.version || parsed.tag || null
+        log(`Pulled version: ${pulledVersion}\n`)
+      }
+    } catch {}
+
     log('Restarting Docker services...\n')
     await new Promise((resolve) => {
       const proc = spawn('docker', ['compose', 'up', '-d', '--build'], {
@@ -1087,6 +1098,82 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
       proc.on('close', () => resolve())
       proc.on('error', () => resolve())
     })
+
+    // Kill the old API process so the new code loads on restart
+    log('Stopping old API process...\n')
+    if (isWin) {
+      await new Promise((resolve) => {
+        const proc = spawn('taskkill', ['/F', '/FI', 'WINDOWTITLE eq start_api*'], { shell: true })
+        proc.on('close', () => resolve())
+        proc.on('error', () => resolve())
+      })
+      // Also kill any uvicorn on port 8000
+      await new Promise((resolve) => {
+        const proc = spawn('cmd', ['/c', 'for /f "tokens=5" %a in (\'netstat -aon ^| findstr :8000 ^| findstr LISTENING\') do taskkill /F /PID %a'], { shell: true })
+        proc.on('close', () => resolve())
+        proc.on('error', () => resolve())
+      })
+    } else {
+      await new Promise((resolve) => {
+        const proc = spawn('pkill', ['-f', 'uvicorn.*src.api.main'], { shell: true })
+        proc.on('close', () => resolve())
+        proc.on('error', () => resolve())
+      })
+    }
+
+    // Wait a moment for the port to free up
+    await new Promise((r) => setTimeout(r, 2000))
+
+    // Restart the API
+    log('Starting updated API...\n')
+    if (isWin) {
+      const apiProc = spawn('cmd', ['/c', 'start_api.bat'], {
+        cwd: emberPath, shell: true, detached: true, stdio: 'ignore',
+      })
+      apiProc.unref()
+    } else {
+      const pyBinPath = path.join(emberPath, '.venv', 'bin', 'python')
+      const apiProc = spawn(pyBinPath, ['-m', 'uvicorn', 'src.api.main:app', '--host', '127.0.0.1', '--port', '8000'], {
+        cwd: emberPath, detached: true, stdio: 'ignore',
+      })
+      apiProc.unref()
+    }
+
+    // Poll health and verify version matches what was pulled
+    log('Waiting for API to start...\n')
+    const http = require('http')
+    const targetHost = host || '127.0.0.1'
+    let apiReady = false
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 3000))
+      const healthOk = await new Promise((resolve) => {
+        const req = http.get(`http://${targetHost}:8000/api/health`, { timeout: 3000 }, (res) => {
+          let data = ''
+          res.on('data', (d) => (data += d))
+          res.on('end', () => {
+            try {
+              const health = JSON.parse(data)
+              resolve(health)
+            } catch { resolve(null) }
+          })
+        })
+        req.on('error', () => resolve(null))
+        req.on('timeout', () => { req.destroy(); resolve(null) })
+      })
+      if (healthOk) {
+        const runningVersion = healthOk.version || 'unknown'
+        log(`API running: ${runningVersion}\n`)
+        if (pulledVersion && runningVersion !== pulledVersion && runningVersion !== `v${pulledVersion}`) {
+          log(`Warning: expected ${pulledVersion} but API reports ${runningVersion}\n`)
+        }
+        apiReady = true
+        break
+      }
+      log(`Waiting... (${(i + 1) * 3}s)\n`)
+    }
+    if (!apiReady) {
+      log('Warning: API did not start within 60 seconds. You may need to start it manually.\n')
+    }
     log('Backend updated ✓\n\n')
   }
 
