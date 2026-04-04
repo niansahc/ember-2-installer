@@ -67,17 +67,64 @@ npm start
 
 ## Release Checklist
 
-- [ ] Installer builds cleanly
-- [ ] Install flow tested end-to-end on Windows
-- [ ] No uncommitted changes
+**Critical principle: CC runs the full release process. Nothing is "done" until it is publicly downloadable. Never assume the human is cutting the release unless they explicitly say so.**
+
+A release is not complete at commit. A release is not complete at tag. A release is complete when:
+- The GitHub Release is published (not draft)
+- Artifacts are attached (installer .exe / source)
+- latest.yml is present in release assets (installer only)
+- The release is visible and downloadable at the GitHub Releases URL
+- CC has verified the above and reported the URL
+
+### Pre-release (run before every release)
+
+**ember-2 (backend):**
+- [ ] All tests passing: pytest tests/
+- [ ] Retrieval eval passing: python tools/eval_retrieval.py -- no regression
+- [ ] Conversation eval run: python tools/eval_conversations.py -- document results
 - [ ] CHANGELOG.md updated
-- [ ] Version number bumped in package.json before build -- same version number means electron-updater reports no update available
-- [ ] Frontend dist freshly built from correct tagged source before packaging -- never package a stale frontend build; electron-updater cannot rebuild on user's machine
-- [ ] app-update.yml present in build output -- check resources/ after build; missing means that installed version can never auto-update and user must reinstall manually
-- [ ] GitHub Release published (not draft) -- electron-updater only sees published releases; tags and drafts are invisible to update checker
-- [ ] GitHub Release published with installer .exe attached
-- [ ] latest.yml attached to release assets -- verify after publish; missing means users never see update notifications
-- [ ] Git tag created
+- [ ] version.json bumped
+- [ ] All changes committed and pushed to main: git push origin main
+- [ ] Constitution, nature, and Lodestone layers reviewed for coherence
+- [ ] Research review: any watch items ready to graduate to roadmap?
+
+**ember-2-ui (frontend):**
+- [ ] All Playwright tests passing: npm run test:e2e
+- [ ] CHANGELOG.md updated
+- [ ] package.json version bumped
+- [ ] All changes committed and pushed to main: git push origin main
+- [ ] UI rebuilt from correct source: npm ci && npm run build
+
+**ember-2-installer (installer):**
+- [ ] All Playwright tests passing
+- [ ] CHANGELOG.md updated
+- [ ] package.json version bumped
+- [ ] All changes committed and pushed to main: git push origin main
+- [ ] Frontend freshly built from pinned ember-2-ui tag before packaging
+- [ ] Backend version pinned and documented in release notes
+- [ ] Installer built: npm run dist
+- [ ] app-update.yml present in dist/win-unpacked/resources/ -- verify before publishing
+- [ ] latest.yml will be attached to release by electron-builder -- verify after publishing
+
+### Release (CC runs this, not the human)
+
+- [ ] Git tag created: git tag vX.X.X
+- [ ] Tag pushed: git push origin vX.X.X
+- [ ] GitHub Release created (NOT draft): gh release create vX.X.X --title "vX.X.X" --notes "..." --latest
+- [ ] Artifacts attached to release (installer .exe for yellow, source zip for green)
+- [ ] Release verified as published and visible: gh release view vX.X.X
+- [ ] Release URL reported to human: https://github.com/niansahc/ember-2-installer/releases/tag/vX.X.X
+
+### Post-release verification (CC runs this)
+
+- [ ] Confirm release appears at https://github.com/niansahc/ember-2-installer/releases
+- [ ] Confirm latest.yml is present in release assets (installer only)
+- [ ] Confirm version matches package.json / version.json
+- [ ] Report to human: "Release vX.X.X is live at [URL]. Users can download/update now."
+
+### Patch releases
+
+Patch releases follow the same checklist. There are no shortcuts for patches. A patch that is committed but not published is not a patch -- it is unpublished work. Every patch must complete the full release process before being called done.
 
 ---
 
