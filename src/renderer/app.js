@@ -1397,6 +1397,8 @@ document.getElementById('btn-run-ember-update').addEventListener('click', async 
     btn.textContent = 'Done'
     logBox.textContent += `\nUpdate complete — now on ${result.tag || 'latest'}\n`
     document.getElementById('ember-version-label').textContent = result.tag || 'latest'
+    // Re-run the start API + health check flow so the user doesn't have to figure it out
+    loadEmberVersion()
   } else {
     btn.textContent = 'Failed'
     logBox.textContent += '\nUpdate failed. Try running git pull manually.\n'
@@ -1536,8 +1538,11 @@ document.getElementById('btn-run-update').addEventListener('click', async () => 
   window.ember.removeAllListeners('install-log')
 
   if (result.ok) {
-    log.textContent += '\nUpdate complete! Restart Ember to apply changes.\n'
+    log.textContent += '\nUpdate complete! Starting Ember...\n'
     btn.textContent = 'Done'
+    // Navigate to Done screen and start the API automatically
+    showScreen('screen-done')
+    loadEmberVersion()
   } else {
     log.textContent += '\nUpdate failed. Try running git pull manually.\n'
     btn.textContent = 'Failed'
