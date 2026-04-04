@@ -1461,19 +1461,19 @@ async function loadEmberVersion() {
   status.textContent = 'Starting Ember...'
   await window.ember.startApi(state.emberPath)
 
-  // Poll health check every 2 seconds, up to 30 seconds
+  // Poll health check every 3 seconds, up to 60 seconds
   const host = state.host || '127.0.0.1'
-  const maxAttempts = 15
+  const maxAttempts = 20
   let healthy = false
 
   for (let i = 0; i < maxAttempts; i++) {
-    await new Promise((r) => setTimeout(r, 2000))
+    await new Promise((r) => setTimeout(r, 3000))
     const check = await window.ember.checkApiHealth(host)
     if (check.ok) {
       healthy = true
       break
     }
-    status.textContent = `Waiting for Ember to start... (${(i + 1) * 2}s)`
+    status.textContent = `Waiting for Ember to start... (${(i + 1) * 3}s)`
   }
 
   if (healthy) {
@@ -1483,13 +1483,18 @@ async function loadEmberVersion() {
     btn.disabled = false
     document.getElementById('btn-retry-api').style.display = 'none'
     document.getElementById('done-troubleshooting').classList.add('hidden')
+
+    // Load version info only after API is confirmed running
+    const result = await window.ember.checkEmberUpdate()
+    document.getElementById('ember-version-label').textContent = result.installed || 'unknown'
   } else {
     title.textContent = "Almost there."
     voice.textContent = '"I\'m ready — I just need a little help starting up."'
-    status.textContent = "Ember didn't start automatically. Check the hints below, then hit Try Again."
+    status.textContent = "Ember didn't start within 60 seconds. You can try starting it manually, then hit Try Again."
     btn.disabled = false
     document.getElementById('btn-retry-api').style.display = ''
     document.getElementById('done-troubleshooting').classList.remove('hidden')
+    document.getElementById('ember-version-label').textContent = 'not started'
   }
 
   // Show Mac Gatekeeper note
@@ -1498,10 +1503,6 @@ async function loadEmberVersion() {
   if (gatekeeperNote && platform === 'darwin') {
     gatekeeperNote.classList.remove('hidden')
   }
-
-  // Load version info
-  const result = await window.ember.checkEmberUpdate()
-  document.getElementById('ember-version-label').textContent = result.installed || 'unknown'
 }
 
 // ---------------------------------------------------------------------------

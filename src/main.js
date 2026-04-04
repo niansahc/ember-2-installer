@@ -195,6 +195,13 @@ ipcMain.handle('run-ember-update', async () => {
   const emberPath = getEmberPath()
   if (!emberPath) return { ok: false }
 
+  // Step 0: Reset version.json — it gets modified locally and blocks git pull
+  await new Promise((resolve) => {
+    const proc = spawn('git', ['checkout', '--', 'version.json'], { cwd: emberPath, shell: true })
+    proc.on('close', () => resolve())
+    proc.on('error', () => resolve())
+  })
+
   // Step 1: git pull origin main (explicit remote/branch avoids tracking issues)
   const pullOk = await new Promise((resolve) => {
     const proc = spawn('git', ['pull', 'origin', 'main'], { cwd: emberPath, shell: true })
@@ -1042,6 +1049,13 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
   // 1. Backend update
   if (updates.backend) {
     log('Updating Ember backend...\n')
+    // Reset version.json before pull — it gets modified locally by the
+    // installer/API and causes "Your local changes would be overwritten"
+    await new Promise((resolve) => {
+      const proc = spawn('git', ['checkout', '--', 'version.json'], { cwd: emberPath, shell: true })
+      proc.on('close', () => resolve())
+      proc.on('error', () => resolve())
+    })
     const pullOk = await new Promise((resolve) => {
       const proc = spawn('git', ['pull', 'origin', 'main'], { cwd: emberPath, shell: true })
       proc.stdout.on('data', (d) => log(d.toString()))
@@ -1163,6 +1177,13 @@ ipcMain.handle('run-git-pull', async (_e) => {
   if (!emberPath) return { ok: false }
 
   const log = (text) => mainWindow.webContents.send('install-log', { step: 'update', text })
+
+  // Reset version.json before pull — modified locally, blocks git pull
+  await new Promise((resolve) => {
+    const proc = spawn('git', ['checkout', '--', 'version.json'], { cwd: emberPath, shell: true })
+    proc.on('close', () => resolve())
+    proc.on('error', () => resolve())
+  })
 
   // Step 1: Pull ember-2
   log('Pulling ember-2...\n')
