@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.5.5 — 2026-04-04
+
+### Fixes
+- Docker daemon running check — prereqs now verify the daemon is up, not just that Docker is installed; shows "Check again" button if stopped
+- Existing installation detection — when target path already contains ember-2, offers Update (git pull), Fresh install (remove and re-clone), or Choose different location
+
+### Infrastructure
+- Release checklist hardened — CC owns full release process end to end; nothing is "done" until publicly downloadable
+
+---
+
 ## v0.5.1 — 2026-04-03
 
 ### Features
