@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.5.6 — 2026-04-04
+
+### Features
+- Unified update checker — checks installer, backend, and UI versions in parallel on startup and from Done screen
+- "Update All" button with progress log — updates backend (git pull + pip + docker), UI (git pull + npm ci + build), and installer (electron-updater) in correct order
+- Backend version now read from running API health endpoint, not version.json on disk
+- Auto-restart API after backend/UI updates complete
+
+### Fixes
+- Auto-restart API after update instead of telling user to restart manually
+
+### Infrastructure
+- GitHub API calls time out after 4 seconds — offline or unreachable GitHub skips update check gracefully
+
+---
+
 ## v0.5.5 — 2026-04-04
 
 ### Fixes
