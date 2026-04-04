@@ -140,8 +140,20 @@
       <button class="btn-secondary" id="btn-pick-ember">Browse...</button>
     </div>
 
+    <div id="existing-install-notice" class="detected-notice hidden">
+      <span class="detected-icon">📦</span>
+      <div class="detected-info">
+        <p id="existing-install-text"></p>
+        <div class="btn-row" style="margin-top: 0.5rem; gap: 0.5rem;">
+          <button class="btn-primary btn-sm" id="btn-existing-update">Update existing</button>
+          <button class="btn-secondary btn-sm" id="btn-existing-fresh">Fresh install</button>
+          <button class="btn-secondary btn-sm" id="btn-existing-cancel">Choose different location</button>
+        </div>
+      </div>
+    </div>
+
     <div id="clone-status" class="hidden">
-      <p class="ember-voice">"Downloading Ember-2 — this takes about a minute..."</p>
+      <p class="ember-voice" id="clone-voice">"Downloading Ember-2 — this takes about a minute..."</p>
       <div id="clone-log" class="log-box"></div>
     </div>
 

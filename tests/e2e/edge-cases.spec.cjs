@@ -256,11 +256,9 @@ test.describe('Edge Cases', () => {
     await window.locator('button[data-next="screen-prereqs"]').click()
     await window.locator('#btn-prereqs-next').click({ timeout: 5000 })
 
-    // Click Install Here and immediately check disabled state
-    const disabled = await window.evaluate(() => {
-      document.getElementById('btn-install-ember').click()
-      return document.getElementById('btn-install-ember').disabled
-    })
-    expect(disabled).toBe(true)
+    // Click Install Here — target path check runs async, then clone starts
+    await window.locator('#btn-install-ember').click()
+    // Button should be disabled once clone begins
+    await expect(window.locator('#btn-install-ember')).toBeDisabled({ timeout: 5000 })
   })
 })

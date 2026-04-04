@@ -374,11 +374,31 @@ document.getElementById('btn-install-ember').addEventListener('click', async () 
   if (!parentDir) return
 
   const btn = document.getElementById('btn-install-ember')
+  const existingNotice = document.getElementById('existing-install-notice')
+  const existingText = document.getElementById('existing-install-text')
+
+  // Check if target path already contains an ember-2 installation
+  const check = await window.ember.checkTargetPath(parentDir)
+  if (check.exists && check.isEmber) {
+    existingText.textContent = `Ember-2 found at this location (${check.version}). What would you like to do?`
+    existingNotice.classList.remove('hidden')
+    btn.disabled = true
+    return
+  }
+
+  // No existing install — proceed with fresh clone
+  await runClone(parentDir, btn)
+})
+
+async function runClone(parentDir, btn) {
   btn.disabled = true
   btn.textContent = 'Installing...'
+  document.getElementById('existing-install-notice').classList.add('hidden')
 
   const cloneStatus = document.getElementById('clone-status')
   const cloneLog = document.getElementById('clone-log')
+  const cloneVoice = document.getElementById('clone-voice')
+  cloneVoice.textContent = '"Downloading Ember-2 — this takes about a minute..."'
   cloneStatus.classList.remove('hidden')
   cloneLog.textContent = ''
 
@@ -397,13 +417,92 @@ document.getElementById('btn-install-ember').addEventListener('click', async () 
       ? '\nEmber is already installed here. Moving on...\n'
       : '\nDone!\n'
     btn.textContent = 'Installed ✓'
-    // Auto-advance after brief pause
     setTimeout(() => showScreen('screen-vault'), 800)
   } else {
     cloneLog.textContent += '\nFailed to clone. Check your internet connection and try again.\n'
     btn.disabled = false
     btn.textContent = 'Try Again'
   }
+}
+
+// Existing install: Update (git pull)
+document.getElementById('btn-existing-update').addEventListener('click', async () => {
+  const parentDir = document.getElementById('ember-path-input').value.trim()
+  const btn = document.getElementById('btn-install-ember')
+  btn.disabled = true
+  btn.textContent = 'Updating...'
+  document.getElementById('existing-install-notice').classList.add('hidden')
+
+  const cloneStatus = document.getElementById('clone-status')
+  const cloneLog = document.getElementById('clone-log')
+  const cloneVoice = document.getElementById('clone-voice')
+  cloneVoice.textContent = '"Updating your existing Ember-2 installation..."'
+  cloneStatus.classList.remove('hidden')
+  cloneLog.textContent = ''
+
+  const emberPath = parentDir + (parentDir.endsWith('ember-2') ? '' : '/ember-2')
+
+  window.ember.onCloneProgress((text) => {
+    cloneLog.textContent += text
+    cloneLog.scrollTop = cloneLog.scrollHeight
+  })
+
+  const result = await window.ember.updateExistingEmber(emberPath)
+  window.ember.removeAllListeners('clone-progress')
+
+  if (result.ok) {
+    state.emberPath = result.path
+    await window.ember.saveEmberPath(result.path)
+    cloneLog.textContent += '\nUpdated ✓\n'
+    btn.textContent = 'Updated ✓'
+    setTimeout(() => showScreen('screen-vault'), 800)
+  } else {
+    cloneLog.textContent += '\nUpdate failed. Check your internet connection and try again.\n'
+    btn.disabled = false
+    btn.textContent = 'Try Again'
+  }
+})
+
+// Existing install: Fresh install (remove and re-clone)
+document.getElementById('btn-existing-fresh').addEventListener('click', async () => {
+  const parentDir = document.getElementById('ember-path-input').value.trim()
+  const btn = document.getElementById('btn-install-ember')
+  btn.disabled = true
+  btn.textContent = 'Installing...'
+  document.getElementById('existing-install-notice').classList.add('hidden')
+
+  const cloneStatus = document.getElementById('clone-status')
+  const cloneLog = document.getElementById('clone-log')
+  const cloneVoice = document.getElementById('clone-voice')
+  cloneVoice.textContent = '"Starting fresh — removing old installation and downloading Ember-2..."'
+  cloneStatus.classList.remove('hidden')
+  cloneLog.textContent = 'Removing existing installation...\n'
+
+  window.ember.onCloneProgress((text) => {
+    cloneLog.textContent += text
+    cloneLog.scrollTop = cloneLog.scrollHeight
+  })
+
+  const result = await window.ember.freshInstallEmber(parentDir)
+  window.ember.removeAllListeners('clone-progress')
+
+  if (result.ok) {
+    state.emberPath = result.path
+    await window.ember.saveEmberPath(result.path)
+    cloneLog.textContent += '\nDone!\n'
+    btn.textContent = 'Installed ✓'
+    setTimeout(() => showScreen('screen-vault'), 800)
+  } else {
+    cloneLog.textContent += '\nFailed. Check your internet connection and try again.\n'
+    btn.disabled = false
+    btn.textContent = 'Try Again'
+  }
+})
+
+// Existing install: Choose different location
+document.getElementById('btn-existing-cancel').addEventListener('click', () => {
+  document.getElementById('existing-install-notice').classList.add('hidden')
+  document.getElementById('btn-install-ember').disabled = false
 })
 
 // ---------------------------------------------------------------------------

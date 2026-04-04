@@ -409,6 +409,57 @@ ipcMain.handle('clone-ember-repo', (_e, { parentDir }) => {
   })
 })
 
+ipcMain.handle('check-target-path', (_e, { parentDir }) => {
+  const targetDir = path.join(parentDir, 'ember-2')
+  if (!fs.existsSync(targetDir)) return { exists: false }
+  const versionFile = path.join(targetDir, 'version.json')
+  if (!fs.existsSync(versionFile)) return { exists: true, isEmber: false }
+  try {
+    const data = JSON.parse(fs.readFileSync(versionFile, 'utf-8'))
+    return { exists: true, isEmber: true, version: data.version || data.tag || 'unknown', path: targetDir }
+  } catch {
+    return { exists: true, isEmber: false }
+  }
+})
+
+ipcMain.handle('update-existing-ember', (_e, { emberPath }) => {
+  return new Promise((resolve) => {
+    const proc = spawn('git', ['pull', 'origin', 'main'], { cwd: emberPath, shell: true })
+    proc.stdout.on('data', (d) => mainWindow.webContents.send('clone-progress', d.toString()))
+    proc.stderr.on('data', (d) => mainWindow.webContents.send('clone-progress', d.toString()))
+    proc.on('close', (code) => {
+      saveEmberPath(emberPath)
+      resolve({ ok: code === 0, path: emberPath })
+    })
+    proc.on('error', (err) => resolve({ ok: false, error: err.message }))
+  })
+})
+
+ipcMain.handle('fresh-install-ember', (_e, { parentDir }) => {
+  return new Promise((resolve) => {
+    const targetDir = path.join(parentDir, 'ember-2')
+    try {
+      if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true })
+    } catch (err) {
+      return resolve({ ok: false, error: `Cannot remove existing directory: ${err.message}` })
+    }
+    const proc = spawn('git', ['clone', 'https://github.com/niansahc/ember-2.git'], {
+      cwd: parentDir, shell: true,
+    })
+    proc.stdout.on('data', (d) => mainWindow.webContents.send('clone-progress', d.toString()))
+    proc.stderr.on('data', (d) => mainWindow.webContents.send('clone-progress', d.toString()))
+    proc.on('close', (code) => {
+      if (code === 0) {
+        saveEmberPath(targetDir)
+        resolve({ ok: true, path: targetDir })
+      } else {
+        resolve({ ok: false })
+      }
+    })
+    proc.on('error', (err) => resolve({ ok: false, error: err.message }))
+  })
+})
+
 ipcMain.handle('get-default-install-dir', () => {
   return process.platform === 'win32' ? 'C:\\Ember-2' : path.join(os.homedir(), 'Ember-2')
 })
@@ -1443,6 +1494,31 @@ if (DEMO_MODE) {
   // Override ember scan
   ipcMain.removeHandler('scan-for-ember')
   ipcMain.handle('scan-for-ember', () => ({ found: false }))
+
+  // Override target path check — no existing install in demo mode
+  ipcMain.removeHandler('check-target-path')
+  ipcMain.handle('check-target-path', () => ({ exists: false }))
+
+  // Override update/fresh install — simulate
+  ipcMain.removeHandler('update-existing-ember')
+  ipcMain.handle('update-existing-ember', async (_e, { emberPath }) => {
+    const msgs = ['Already up to date.\n']
+    for (const msg of msgs) {
+      mainWindow.webContents.send('clone-progress', msg)
+      await sleep(600)
+    }
+    return { ok: true, path: emberPath }
+  })
+
+  ipcMain.removeHandler('fresh-install-ember')
+  ipcMain.handle('fresh-install-ember', async (_e, { parentDir }) => {
+    const msgs = ['Cloning into ember-2...\n', 'Receiving objects: 100%\n', 'done.\n']
+    for (const msg of msgs) {
+      mainWindow.webContents.send('clone-progress', msg)
+      await sleep(600)
+    }
+    return { ok: true, path: parentDir + '/ember-2' }
+  })
 
   // Override recommended models
   ipcMain.removeHandler('get-recommended-models')
