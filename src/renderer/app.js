@@ -1347,6 +1347,32 @@ document.getElementById('btn-agpl-acknowledge').addEventListener('click', () => 
   loadEmberVersion()
 })
 
+// Launch Ember — runs the full launcher script (Docker, SearXNG, API, browser)
+document.getElementById('btn-launch-ember').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-launch-ember')
+  const launchStatus = document.getElementById('launch-status')
+  btn.disabled = true
+  btn.textContent = 'Launching...'
+  launchStatus.style.display = ''
+  launchStatus.textContent = 'Starting Docker, SearXNG, and the API — this may take a moment...'
+
+  const result = await window.ember.launchEmber(state.emberPath)
+
+  if (result.ok) {
+    btn.textContent = 'Launched'
+    launchStatus.textContent = 'Ember is starting up. A browser window will open when ready.'
+    setTimeout(() => {
+      btn.textContent = 'Launch Ember'
+      btn.disabled = false
+      launchStatus.style.display = 'none'
+    }, 10000)
+  } else {
+    btn.textContent = 'Launch Ember'
+    btn.disabled = false
+    launchStatus.textContent = result.error || 'Launch failed. Try the Open in Browser button instead.'
+  }
+})
+
 // Open Ember — use Tailscale DNS if available, otherwise localhost
 document.getElementById('btn-open-ember').addEventListener('click', () => {
   if (state.tailscaleDns) {
@@ -1482,6 +1508,10 @@ async function loadEmberVersion() {
   const voice = document.getElementById('done-voice')
   const status = document.getElementById('done-status')
   const btn = document.getElementById('btn-open-ember')
+  const launchBtn = document.getElementById('btn-launch-ember')
+
+  // Launch button is always available — the launcher script handles everything
+  launchBtn.disabled = false
 
   // Check UI is built before starting
   status.textContent = 'Checking Ember interface...'
@@ -1534,7 +1564,7 @@ async function loadEmberVersion() {
   } else {
     title.textContent = "Almost there."
     voice.textContent = '"I\'m ready — I just need a little help starting up."'
-    status.textContent = "Ember didn't start within 60 seconds. You can try starting it manually, then hit Try Again."
+    status.textContent = "Ember didn't start within 60 seconds. You can try starting it manually, or use Launch Ember."
     btn.disabled = false
     document.getElementById('btn-retry-api').style.display = ''
     document.getElementById('done-troubleshooting').classList.remove('hidden')

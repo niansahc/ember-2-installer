@@ -1484,6 +1484,35 @@ ipcMain.handle('check-venv-lock', (_e, { emberPath }) => {
 // ---------------------------------------------------------------------------
 
 
+ipcMain.handle('launch-ember', (_e, { emberPath }) => {
+  const isWin = process.platform === 'win32'
+  const scriptName = isWin ? 'launch_ember.bat' : 'launch_ember.sh'
+  const scriptPath = path.join(emberPath, scriptName)
+
+  if (!fs.existsSync(scriptPath)) {
+    return { ok: false, error: `Launcher script not found: ${scriptPath}` }
+  }
+
+  let proc
+  if (isWin) {
+    proc = spawn('cmd', ['/c', 'start', '""', scriptPath], {
+      cwd: emberPath,
+      shell: true,
+      detached: true,
+      stdio: 'ignore',
+    })
+  } else {
+    proc = spawn('bash', [scriptPath], {
+      cwd: emberPath,
+      detached: true,
+      stdio: 'ignore',
+    })
+  }
+
+  proc.unref()
+  return { ok: true }
+})
+
 ipcMain.handle('open-url', (_e, url) => {
   shell.openExternal(url)
 })

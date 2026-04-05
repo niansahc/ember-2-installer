@@ -98,6 +98,9 @@ contextBridge.exposeInMainWorld('ember', {
   startApi: (emberPath) => ipcRenderer.invoke('start-api', { emberPath }),
   checkApiHealth: (host) => ipcRenderer.invoke('check-api-health', { host }),
 
+  // Launcher
+  launchEmber: (emberPath) => ipcRenderer.invoke('launch-ember', { emberPath }),
+
   // UI built check
   checkUiBuilt: () => ipcRenderer.invoke('check-ui-built'),
 
