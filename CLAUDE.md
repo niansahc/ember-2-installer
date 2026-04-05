@@ -45,6 +45,10 @@ npm run build
 npm start
 ```
 
+## Testing Discipline
+
+When a flaky or condition-dependent test is identified during a release cycle, it must be fixed or marked skip-with-condition before that release ships. Flaky tests do not carry forward to the next release.
+
 ---
 
 ## Working Conventions
