@@ -675,6 +675,43 @@ async function ensureModelDownloaded(modelId, logBoxId, labelId) {
   return result.ok
 }
 
+async function pullEmbeddingModel() {
+  const logBox = document.getElementById('install-log')
+
+  // Check if already installed via ollama list
+  const models = await window.ember.getOllamaModels()
+  if (models && models.some && models.some((m) => m.includes('nomic-embed-text'))) {
+    if (logBox) logBox.textContent += 'Embedding model already installed ✓\n'
+    return true
+  }
+
+  if (logBox) logBox.textContent += 'Pulling nomic-embed-text...\n'
+
+  window.ember.onOllamaPullProgress((text) => {
+    if (logBox) {
+      logBox.textContent += text
+      logBox.scrollTop = logBox.scrollHeight
+    }
+  })
+
+  const result = await window.ember.pullOllamaModel('nomic-embed-text')
+  window.ember.removeAllListeners('ollama-pull-progress')
+
+  if (!result.ok) {
+    if (logBox) logBox.textContent += 'Failed to pull embedding model.\n'
+    return false
+  }
+
+  // Verify it's installed
+  const verify = await window.ember.getOllamaModels()
+  if (verify && verify.some && verify.some((m) => m.includes('nomic-embed-text'))) {
+    if (logBox) logBox.textContent += 'Embedding model installed ✓\n'
+    return true
+  }
+  if (logBox) logBox.textContent += 'Warning: embedding model pull completed but not found in ollama list.\n'
+  return false
+}
+
 // ---------------------------------------------------------------------------
 // Screen: Vision model
 // ---------------------------------------------------------------------------
@@ -1072,6 +1109,13 @@ async function runInstall() {
       run: () => ensureModelDownloaded(state.model, 'model-download-log', 'model-download-label'),
     })
   }
+
+  // Always pull the embedding model — required for retrieval since v0.13.0
+  steps.push({
+    id: 'embed-model',
+    label: 'Pulling embedding model (nomic-embed-text)...',
+    run: pullEmbeddingModel,
+  })
 
   if (needsVisionDownload) {
     steps.push({

@@ -1177,6 +1177,42 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     log('Backend updated ✓\n\n')
   }
 
+  // 1b. Ensure embedding model is installed (required since v0.13.0)
+  log('Checking embedding model...\n')
+  const ollamaModels = await new Promise((resolve) => {
+    const proc = spawn('ollama', ['list'], { shell: true })
+    let out = ''
+    proc.stdout.on('data', (d) => (out += d))
+    proc.on('close', () => resolve(out))
+    proc.on('error', () => resolve(''))
+  })
+  if (!ollamaModels.includes('nomic-embed-text')) {
+    log('Pulling embedding model (nomic-embed-text)...\n')
+    const pullOk = await new Promise((resolve) => {
+      const proc = spawn('ollama', ['pull', 'nomic-embed-text'], { shell: true })
+      proc.stdout.on('data', (d) => log(d.toString()))
+      proc.stderr.on('data', (d) => log(d.toString()))
+      proc.on('close', (code) => resolve(code === 0))
+      proc.on('error', () => resolve(false))
+    })
+    if (pullOk) {
+      // Verify installation
+      const verify = await new Promise((resolve) => {
+        const proc = spawn('ollama', ['list'], { shell: true })
+        let out = ''
+        proc.stdout.on('data', (d) => (out += d))
+        proc.on('close', () => resolve(out.includes('nomic-embed-text')))
+        proc.on('error', () => resolve(false))
+      })
+      log(verify ? 'Embedding model installed ✓\n' : 'Warning: embedding model pull completed but not found.\n')
+    } else {
+      log('Warning: failed to pull embedding model. Embeddings may not work.\n')
+    }
+  } else {
+    log('Embedding model already installed ✓\n')
+  }
+  log('\n')
+
   // 2. UI update
   if (updates.ui) {
     log('Updating Ember UI...\n')
@@ -1632,6 +1668,7 @@ if (DEMO_MODE) {
     'llama3.2:3b',
     'llama3.2-vision:11b',
     'mistral:7b',
+    'nomic-embed-text:latest',
   ])
 
   // Override pull — simulate progress
