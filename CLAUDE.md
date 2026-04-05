@@ -57,6 +57,37 @@ npm start
 
 ---
 
+## Conventional Commits (Required)
+
+All three Ember-2 repos use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) and release-please for automated release PRs.
+
+**Format:** `type(scope): description`
+
+**Types:**
+- `feat` — new feature (bumps minor)
+- `fix` — bug fix (bumps patch)
+- `chore` — maintenance, version bumps, config changes
+- `docs` — documentation only
+- `refactor` — code change that neither fixes a bug nor adds a feature
+- `test` — adding or updating tests
+- `ci` — CI/CD changes
+
+**Breaking changes:** append `!` after the type — e.g., `feat!: redesign install flow`. This bumps major (or minor while pre-1.0).
+
+**Scope** is optional but encouraged — e.g., `feat(installer): ...`, `fix(updater): ...`
+
+**Examples:**
+```
+feat(installer): add nomic-embed-text to model pull flow
+fix(installer): kill and restart API after backend update
+chore: bump version to v0.5.9
+docs: add conventional commit guide to CLAUDE.md
+```
+
+release-please reads these commit messages to auto-generate changelogs and determine version bumps. The release PR is created automatically but requires human approval before merging.
+
+---
+
 ## Platform Notes
 
 - Windows: primary platform, fully tested
@@ -97,8 +128,8 @@ A release is not complete at commit. A release is not complete at tag. A release
 
 **ember-2-installer (installer):**
 - [ ] All Playwright tests passing
-- [ ] CHANGELOG.md updated
-- [ ] package.json version bumped
+- [ ] CHANGELOG.md updated (release-please handles this via conventional commits)
+- [ ] package.json version bumped (release-please handles this via conventional commits)
 - [ ] All changes committed and pushed to main: git push origin main
 - [ ] Frontend freshly built from pinned ember-2-ui tag before packaging
 - [ ] Backend version pinned and documented in release notes
