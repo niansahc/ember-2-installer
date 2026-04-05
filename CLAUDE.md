@@ -14,6 +14,33 @@ The installer clones ember-2 and ember-2-ui, builds the UI, installs dependencie
 
 ---
 
+## Current State
+
+v0.5.9. 48 Playwright tests passing. v0.14.0 installer work is next. Produces Windows NSIS installer (primary), Mac DMG, and Linux AppImage (both best-effort until tested on real hardware).
+
+---
+
+## Install Flow
+
+The installer runs a multi-step sequence:
+
+1. **Prerequisite detection and auto-install** — winget on Windows, Homebrew soft check on Mac, package manager on Linux
+2. **Model selection** — curated model cards with eval-based descriptions, disk sizes, and RAM requirements
+3. **Vault setup** — user picks or creates a private vault directory
+4. **API key configuration** — stored in OS credential store
+5. **Clone ember-2 and ember-2-ui** — at pinned version tags
+6. **Build UI** — `npm ci && npm run build` from the ember-2-ui source
+7. **Copy build into ember-2** — built `dist/` copied to `ember-2/ui/`
+8. **API health check polling** — Done screen starts the API and polls until healthy
+
+---
+
+## Inter-Repo Dependencies
+
+The installer clones ember-2 and ember-2-ui at specific tags. Frontend must be built from the pinned ember-2-ui tag — never from an unpinned clone. Backend version must be documented in release notes. Mismatched versions will produce an installer that ships stale UI or incompatible backend.
+
+---
+
 ## Core Rules
 
 - Do not use axios — use native fetch
@@ -21,6 +48,7 @@ The installer clones ember-2 and ember-2-ui, builds the UI, installs dependencie
 - Mac and Linux support is best-effort until tested on real hardware
 - Platform differences must be handled via process.platform checks — never hardcode platform assumptions
 - Do not auto-release — the human decides when to release
+- Do not use the word "shape" in any output — code comments, prompts, prose, or conversation. Use a more precise alternative.
 
 ---
 
@@ -160,6 +188,13 @@ A release is not complete at commit. A release is not complete at tag. A release
 ### Patch releases
 
 Patch releases follow the same checklist. There are no shortcuts for patches. A patch that is committed but not published is not a patch -- it is unpublished work. Every patch must complete the full release process before being called done.
+
+---
+
+## Known Issues
+
+- Mac and Linux install flows are not tested on real hardware — Windows is the only fully validated platform.
+- Clean install testing on a fresh machine is a known gap due to hardware constraints.
 
 ---
 
