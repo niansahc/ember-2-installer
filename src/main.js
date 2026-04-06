@@ -789,10 +789,10 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
       }
     }
 
-    // npm install
+    // npm ci
     mainWindow.webContents.send('install-log', { step, text: 'Installing UI dependencies...\n' })
     const npmOk = await new Promise((resolve) => {
-      const proc = spawn('npm', ['install'], { cwd: uiDir, shell: true })
+      const proc = spawn('npm', ['ci'], { cwd: uiDir, shell: true })
       proc.stdout.on('data', (d) => mainWindow.webContents.send('install-log', { step, text: d.toString() }))
       proc.stderr.on('data', (d) => mainWindow.webContents.send('install-log', { step, text: d.toString() }))
       proc.on('close', (code) => resolve(code === 0))
@@ -1347,13 +1347,13 @@ ipcMain.handle('run-git-pull', async (_e) => {
 
   log('Installing UI dependencies...\n')
   const npmOk = await new Promise((resolve) => {
-    const proc = spawn('npm', ['install'], { cwd: uiDir, shell: true })
+    const proc = spawn('npm', ['ci'], { cwd: uiDir, shell: true })
     proc.stdout.on('data', (d) => log(d.toString()))
     proc.stderr.on('data', (d) => log(d.toString()))
     proc.on('close', (code) => resolve(code === 0))
     proc.on('error', () => resolve(false))
   })
-  if (!npmOk) { log('npm install failed.\n'); return { ok: false } }
+  if (!npmOk) { log('npm ci failed.\n'); return { ok: false } }
 
   log('Building Ember UI...\n')
   const buildOk = await new Promise((resolve) => {
