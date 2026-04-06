@@ -35,6 +35,16 @@ function initPaths() {
   INSTALL_PATH_FILE = path.join(USER_DATA, 'ember-install-path.txt')
 }
 
+// ---------------------------------------------------------------------------
+// Repository URLs and slugs
+// ---------------------------------------------------------------------------
+
+const REPO_BACKEND_SLUG = 'niansahc/ember-2'
+const REPO_UI_SLUG = 'niansahc/ember-2-ui'
+const REPO_INSTALLER_SLUG = 'niansahc/ember-2-installer'
+const REPO_BACKEND_URL = `https://github.com/${REPO_BACKEND_SLUG}.git`
+const REPO_UI_URL = `https://github.com/${REPO_UI_SLUG}.git`
+
 // In dev, ember-2 is a sibling folder two levels up from src/
 const DEV_EMBER_PATH = path.resolve(__dirname, '..', '..', 'ember-2')
 
@@ -392,7 +402,7 @@ ipcMain.handle('clone-ember-repo', (_e, { parentDir }) => {
     } catch (err) {
       return resolve({ ok: false, error: `Cannot create directory: ${err.message}` })
     }
-    const proc = spawn('git', ['clone', 'https://github.com/niansahc/ember-2.git'], {
+    const proc = spawn('git', ['clone', REPO_BACKEND_URL], {
       cwd: parentDir,
       shell: true,
     })
@@ -448,7 +458,7 @@ ipcMain.handle('fresh-install-ember', (_e, { parentDir }) => {
     } catch (err) {
       return resolve({ ok: false, error: `Cannot remove existing directory: ${err.message}` })
     }
-    const proc = spawn('git', ['clone', 'https://github.com/niansahc/ember-2.git'], {
+    const proc = spawn('git', ['clone', REPO_BACKEND_URL], {
       cwd: parentDir, shell: true,
     })
     proc.stdout.on('data', (d) => mainWindow.webContents.send('clone-progress', d.toString()))
@@ -775,7 +785,7 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     // Clone if not exists
     if (!fs.existsSync(uiDir)) {
       const cloneOk = await new Promise((resolve) => {
-        const proc = spawn('git', ['clone', 'https://github.com/niansahc/ember-2-ui.git'], {
+        const proc = spawn('git', ['clone', REPO_UI_URL], {
           cwd: path.dirname(emberPath), shell: true,
         })
         proc.stdout.on('data', (d) => mainWindow.webContents.send('install-log', { step, text: d.toString() }))
@@ -906,7 +916,7 @@ ipcMain.handle('check-for-update', async () => {
   }
 
   // Fetch latest release from GitHub
-  const latest = await fetchLatestRelease('niansahc/ember-2')
+  const latest = await fetchLatestRelease(REPO_BACKEND_SLUG)
   if (!latest) return { hasUpdate: false }
 
   const hasUpdate = installed && installed !== latest.tag_name
@@ -919,7 +929,7 @@ ipcMain.handle('check-for-update', async () => {
   }
 })
 
-function fetchLatestRelease(repo = 'niansahc/ember-2') {
+function fetchLatestRelease(repo = REPO_BACKEND_SLUG) {
   return new Promise((resolve) => {
     const options = {
       hostname: 'api.github.com',
@@ -963,9 +973,9 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
 
   // Run all checks in parallel with 4-second timeout each
   const [installerRelease, backendRelease, uiRelease, healthData] = await Promise.all([
-    fetchLatestReleaseWithTimeout('niansahc/ember-2-installer'),
-    fetchLatestReleaseWithTimeout('niansahc/ember-2'),
-    fetchLatestReleaseWithTimeout('niansahc/ember-2-ui'),
+    fetchLatestReleaseWithTimeout(REPO_INSTALLER_SLUG),
+    fetchLatestReleaseWithTimeout(REPO_BACKEND_SLUG),
+    fetchLatestReleaseWithTimeout(REPO_UI_SLUG),
     // Get backend version from running API, not version.json
     new Promise((resolve) => {
       const targetHost = host || '127.0.0.1'
@@ -1217,7 +1227,7 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     if (!fs.existsSync(uiDir)) {
       log('Cloning ember-2-ui...\n')
       const cloneOk = await new Promise((resolve) => {
-        const proc = spawn('git', ['clone', 'https://github.com/niansahc/ember-2-ui.git'], {
+        const proc = spawn('git', ['clone', REPO_UI_URL], {
           cwd: path.dirname(emberPath), shell: true,
         })
         proc.stdout.on('data', (d) => log(d.toString()))
@@ -1324,7 +1334,7 @@ ipcMain.handle('run-git-pull', async (_e) => {
   if (!fs.existsSync(uiDir)) {
     log('Cloning ember-2-ui...\n')
     const cloneOk = await new Promise((resolve) => {
-      const proc = spawn('git', ['clone', 'https://github.com/niansahc/ember-2-ui.git'], {
+      const proc = spawn('git', ['clone', REPO_UI_URL], {
         cwd: path.dirname(emberPath), shell: true,
       })
       proc.stdout.on('data', (d) => log(d.toString()))
