@@ -29,12 +29,10 @@ const DEMO_MODE = !IS_PACKAGED && !HAS_REAL_FLAG
 // Deferred until app is ready — getPath() is not available at require time.
 let USER_DATA
 let INSTALL_PATH_FILE
-let VERSION_FILE
 
 function initPaths() {
   USER_DATA = app.getPath('userData')
   INSTALL_PATH_FILE = path.join(USER_DATA, 'ember-install-path.txt')
-  VERSION_FILE = path.join(USER_DATA, 'version.json')
 }
 
 // In dev, ember-2 is a sibling folder two levels up from src/
