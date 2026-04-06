@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.14.0 — 2026-04-06
+## v0.6.0 — 2026-04-06
 
 ### Features
 - Launch Ember button on Done screen — runs the platform-appropriate launcher script (Docker, SearXNG, API, browser) in one click
