@@ -57,7 +57,6 @@ contextBridge.exposeInMainWorld('ember', {
   onUpdateAllLog: (fn) => ipcRenderer.on('update-all-log', (_e, text) => fn(text)),
 
   // Misc
-  openWebUI: () => ipcRenderer.invoke('open-webui'),
   openUrl: (url) => ipcRenderer.invoke('open-url', url),
   getPlatform: () => ipcRenderer.invoke('get-platform'),
   restartComputer: () => ipcRenderer.invoke('restart-computer'),
