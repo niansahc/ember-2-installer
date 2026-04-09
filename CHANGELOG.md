@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.6.1 — 2026-04-09
+
+### Maintenance
+- Version bump for coordinated release with ember-2 v0.14.1 and ember-2-ui v0.7.1
+- No functional changes
+
+---
+
 ## v0.6.0 — 2026-04-06
 
 ### Features
