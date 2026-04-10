@@ -1531,12 +1531,19 @@ async function loadEmberVersion() {
     }
   }
 
-  // Start the API
-  status.textContent = 'Starting Ember...'
-  await window.ember.startApi(state.emberPath)
+  // Start the API — but only if it isn't already running (e.g. the update
+  // flow already restarted it).  A redundant startApi() spawns a second
+  // process that fights over the port and can stall the health poll.
+  const host = state.host || '127.0.0.1'
+  const alreadyRunning = await window.ember.checkApiHealth(host)
+  if (alreadyRunning.ok) {
+    status.textContent = 'Ember is already running.'
+  } else {
+    status.textContent = 'Starting Ember...'
+    await window.ember.startApi(state.emberPath)
+  }
 
   // Poll health check every 3 seconds, up to 60 seconds
-  const host = state.host || '127.0.0.1'
   const maxAttempts = 20
   let healthy = false
 
@@ -1645,8 +1652,21 @@ document.getElementById('btn-run-update-all').addEventListener('click', async ()
     if (result.needsInstallerUpdate) {
       logBox.textContent += '\nBackend and UI updated. Downloading installer update...\n'
       btn.textContent = 'Restarting...'
-      await window.ember.downloadInstallerUpdate()
-      // electron-updater will quit-and-install when download completes
+      const downloadTimeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('timeout')), 30000)
+      )
+      try {
+        await Promise.race([
+          window.ember.downloadInstallerUpdate(),
+          downloadTimeout,
+        ])
+        // electron-updater will quit-and-install when download completes
+      } catch {
+        logBox.textContent += '\nInstaller download timed out. Backend and UI are updated — skipping installer update.\n'
+        btn.textContent = 'Done'
+        showScreen('screen-done')
+        loadEmberVersion()
+      }
     } else {
       logBox.textContent += '\nAll updates applied. Starting Ember...\n'
       btn.textContent = 'Done'
