@@ -549,6 +549,9 @@ ipcMain.handle('detect-hardware', async () => {
     gpu = 'Unknown'
   }
 
+  // Thresholds based on model memory requirements: 14B models need ~9 GB
+  // VRAM/RAM so 32 GB gives comfortable headroom; 8B models need ~5 GB so
+  // 12 GB is the practical floor; below that only 7B fits.
   let recommendation
   if (totalRamGB >= 32) {
     recommendation = { model: 'qwen2.5:14b', reason: `${totalRamGB} GB RAM — larger model fits comfortably` }
@@ -867,10 +870,10 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
 
     mainWindow.webContents.send('install-step-done', { step, ok: true })
     return { ok: true }
-  } else {
-    return { ok: false, error: `Unknown step: ${step}` }
   }
 
+  // venv, pip, docker all set cmd/args above — run via shared helper
+  if (!cmd) return { ok: false, error: `Unknown step: ${step}` }
   return runSpawn(cmd, args, emberPath, step)
 })
 
@@ -1185,7 +1188,10 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     log('Backend updated ✓\n\n')
   }
 
-  // 1b. Ensure embedding model is installed (required since v0.13.0)
+  // 1b. Ensure embedding model is installed (required since v0.13.0).
+  // Runs unconditionally — not gated on updates.backend — because older
+  // installs may be missing nomic-embed-text and retrieval will silently
+  // fail without it.
   log('Checking embedding model...\n')
   const ollamaModels = await new Promise((resolve) => {
     const proc = spawn('ollama', ['list'], { shell: true })
@@ -1532,12 +1538,10 @@ ipcMain.handle('get-default-vault', () => {
 })
 
 ipcMain.handle('get-default-ollama-models', () => {
-  // Ollama default model storage location
+  // Ollama uses ~/.ollama/models on all platforms
   const envPath = process.env.OLLAMA_MODELS
   if (envPath) return envPath
-  return process.platform === 'win32'
-    ? path.join(os.homedir(), '.ollama', 'models')
-    : path.join(os.homedir(), '.ollama', 'models')
+  return path.join(os.homedir(), '.ollama', 'models')
 })
 
 ipcMain.handle('set-ollama-models-path', (_e, modelsPath) => {
@@ -1659,6 +1663,12 @@ ipcMain.handle('get-tailscale-dns', async () => {
 
 // ---------------------------------------------------------------------------
 // Demo mode overrides
+//
+// When running unpackaged without --real, every IPC handler that touches
+// real infrastructure (git, pip, docker, ollama, tailscale, filesystem)
+// is replaced with a fake that returns realistic data after a short delay.
+// This allows the full UI to be exercised in e2e tests and during
+// development without requiring any real tooling to be installed.
 // ---------------------------------------------------------------------------
 
 if (DEMO_MODE) {
@@ -1881,8 +1891,6 @@ if (DEMO_MODE) {
     await sleep(2000)
     return { ok: true }
   })
-
-  // (Open WebUI overrides removed — Ember UI only)
 
   // Override clone — simulate progress
   ipcMain.removeHandler('clone-ember-repo')

@@ -897,7 +897,7 @@ document.getElementById('btn-host-next').addEventListener('click', () => {
     state.vaultPath = document.getElementById('vault-path-input').placeholder
   }
 
-  const modelSizes = { 'qwen2.5:14b': 9, 'llama3.1:8b': 4.7, 'mistral:7b': 4.1, 'qwen3:8b': 4.9, 'deepseek-r1:8b': 4.9 }
+  const modelSizes = { 'qwen2.5:14b': 9, 'gemma3:12b': 8.1, 'phi4:14b': 9.1, 'mistral:7b': 4.1, 'qwen3:8b': 4.9 }
   const visionSizes = { 'llama3.2-vision:11b': 6.4, 'llava:13b': 8 }
 
   document.getElementById('summary-ember-path').textContent = state.emberPath || 'Not set'
@@ -908,7 +908,8 @@ document.getElementById('btn-host-next').addEventListener('click', () => {
   const modelGB = modelSizes[state.model] || 5
   document.getElementById('summary-model-size').textContent = `~${modelGB} GB`
 
-  let totalGB = 0.05 + 2 + 0.2 + modelGB // ember + python + searxng + model
+  // ember-2 repo (~50 MB) + Python venv+deps (~2 GB) + SearXNG Docker (~200 MB) + model
+  let totalGB = 0.05 + 2 + 0.2 + modelGB
 
   if (state.vision) {
     document.getElementById('summary-vision-row').classList.remove('hidden')
@@ -1228,8 +1229,9 @@ async function runInstallFrom(steps, startIndex) {
     if (!ok && !step.nonFatal) {
       const friendlyNames = {
         env: 'writing configuration', venv: 'creating Python environment',
-        pip: 'installing dependencies', 'build-ui': "building Ember's interface",
-        docker: 'starting search engine',
+        pip: 'installing dependencies', apikey: 'setting up API key',
+        model: 'downloading model', 'vision-dl': 'downloading vision model',
+        'build-ui': "building Ember's interface", docker: 'starting search engine',
       }
       logBox.textContent += `\nSomething went wrong during ${friendlyNames[step.id] || step.id}.\n`
       logBox.textContent += 'Want to try again?\n'
@@ -1711,6 +1713,12 @@ document.getElementById('btn-check-installer-update').addEventListener('click', 
 // Init
 // ---------------------------------------------------------------------------
 
+// Boot sequence:
+//   1. If an existing ember-2 install is found, check all three repos for updates.
+//   2. If any updates are available, jump straight to the Update screen.
+//   3. Otherwise (no install, no updates, or GitHub unreachable), show the
+//      Welcome screen and begin preloading data (install dir, vault, models)
+//      in the background so later screens render instantly.
 async function init() {
   // Show demo badge if in demo mode
   const demoMode = await window.ember.getDemoMode()
