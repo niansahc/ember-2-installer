@@ -16,7 +16,7 @@ The installer clones ember-2 and ember-2-ui, builds the UI, installs dependencie
 
 ## Current State
 
-v0.6.0. 48 Playwright tests passing. Produces Windows NSIS installer (primary), Mac DMG, and Linux AppImage (both best-effort until tested on real hardware).
+v0.6.1. 48 Playwright tests passing. Produces Windows NSIS installer (primary), Mac DMG, and Linux AppImage (both best-effort until tested on real hardware).
 
 ---
 
@@ -54,7 +54,7 @@ The installer clones ember-2 and ember-2-ui at specific tags. Frontend must be b
 
 ## Tech Stack
 
-- Electron 29+
+- Electron 33+
 - electron-builder
 - Playwright (e2e tests)
 - Node.js
@@ -69,9 +69,14 @@ npm run test:e2e
 # Build installer
 npm run build
 
-# Run in dev mode
+# Run in dev mode (demo mode — see below)
 npm start
+
+# Run in dev mode with real infrastructure
+npm run start:real
 ```
+
+**Demo mode:** `npm start` runs in demo mode by default. Every IPC handler that touches real infrastructure (git, pip, docker, ollama, tailscale, filesystem) is replaced with a fake that returns realistic data after a short delay. This means `npm start` does not touch Ollama, the real API, or any live services. Use `npm run start:real` (or `--real` flag) to connect to real infrastructure.
 
 ## Testing Discipline
 
