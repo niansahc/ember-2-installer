@@ -52,6 +52,12 @@ The installer clones ember-2 and ember-2-ui at specific tags. Frontend must be b
 
 ---
 
+## Vault Privacy Rule
+
+Vault contents — including names, conversation text, and record IDs — must never appear in code, tests, commits, scripts, or docs. This rule has no exceptions. If a test requires memory data, use synthetic fixture data only.
+
+---
+
 ## Tech Stack
 
 - Electron 33+
