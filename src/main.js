@@ -1528,6 +1528,13 @@ ipcMain.handle('launch-ember', (_e, { emberPath }) => {
 })
 
 ipcMain.handle('open-url', (_e, url) => {
+  if (typeof url !== 'string') return
+  const isHttps = url.startsWith('https://')
+  const isLocalhost = url.startsWith('http://localhost') || url.startsWith('http://127.0.0.1')
+  if (!isHttps && !isLocalhost) {
+    console.warn(`[open-url] Blocked URL with disallowed scheme: ${url}`)
+    return
+  }
   shell.openExternal(url)
 })
 
