@@ -72,7 +72,7 @@ let mainWindow
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 820,
-    height: 700,
+    height: 800,
     resizable: true,
     center: true,
     title: 'Ember-2 Setup',

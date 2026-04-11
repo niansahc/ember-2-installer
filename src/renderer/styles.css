@@ -108,7 +108,7 @@ body {
   display: none;
   width: 600px;
   max-width: 90vw;
-  padding: 10px 30px 30px;
+  padding: 10px 30px 40px;
   animation: fadeIn 0.3s ease;
 }
 
