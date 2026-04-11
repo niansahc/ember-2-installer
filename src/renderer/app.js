@@ -27,9 +27,21 @@ const state = {
 // Simple markdown renderer (## headings, **bold**, - bullets, newlines)
 // ---------------------------------------------------------------------------
 
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 function simpleMarkdown(text) {
   if (!text) return ''
-  return text
+  // Escape HTML entities before markdown processing to prevent XSS
+  // from untrusted content (e.g. GitHub release bodies).
+  const escaped = escapeHtml(text)
+  return escaped
     .split('\n')
     .map((line) => {
       const trimmed = line.trim()
