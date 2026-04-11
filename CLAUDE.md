@@ -231,3 +231,20 @@ Any task touching 3+ independent files or with clearly separable subtasks must u
 **Session naming:**
 - Always name sessions descriptively, e.g. `claude -n "vault-citation-backend"`
 - Enables resumption with full context.
+
+---
+
+## Hooks
+
+Configured in `.claude/settings.json`. Hook scripts live in `.claude/hooks/`.
+
+**Pre-edit: reject .env files** (`reject-env-edit.sh`)
+- Fires on `PreToolUse` for Edit and Write tools
+- Checks `tool_input.file_path` — blocks with exit code 2 if the target is a `.env` file
+- Prevents accidental credential exposure
+
+**Post-edit: auto-run tests** (`run-tests.sh`)
+- Fires on `PostToolUse` for Edit and Write tools
+- Only runs `npm run test:e2e` when the edited file is in `src/` or `tests/` (`.js`, `.html`, `.css`, `.cjs`)
+- Skips for non-source files (CLAUDE.md, package.json, etc.)
+- 300-second timeout to accommodate the full Playwright suite
