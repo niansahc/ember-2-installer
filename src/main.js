@@ -855,6 +855,9 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
       return { ok: false }
     }
 
+    // Remove .env now that the key is baked into the bundle
+    try { fs.unlinkSync(path.join(uiDir, '.env')) } catch {}
+
     // Copy dist/ to ember-2/ui/
     try {
       if (fs.existsSync(targetUiDir)) {
@@ -1290,6 +1293,9 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
       proc.on('error', () => resolve(false))
     })
     if (!buildOk) { log('UI build failed.\n'); return { ok: false, stage: 'ui-build' } }
+
+    // Remove .env now that the key is baked into the bundle
+    try { fs.unlinkSync(path.join(uiDir, '.env')) } catch {}
 
     // Copy dist to ember-2/ui/
     const targetUiDir = path.join(emberPath, 'ui')
