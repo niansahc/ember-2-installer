@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.6.2 — 2026-04-10
+
+### Security
+- Restrict open-url IPC handler to safe URL schemes
+- Delete UI .env file after build to prevent API key persistence on disk
+- HTML-escape GitHub release body before rendering
+
+### Bug Fixes
+- Prevent double API start on update and add timeout to installer download
+
+### Maintenance
+- Fix comment drift and add missing documentation comments
+- Update CLAUDE.md to v0.6.1 state
+
+---
+
 ## v0.6.1 — 2026-04-09
 
 ### Maintenance
