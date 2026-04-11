@@ -1533,45 +1533,168 @@ ipcMain.handle('launch-ember', (_e, { emberPath }) => {
   return { ok: true }
 })
 
-// Windows startup task — creates/removes a Task Scheduler entry that runs
-// launch_ember.bat at user logon.  schtasks is more reliable than the
-// Startup folder on Windows 10/11 because it survives folder cleanup tools
-// and runs with the correct working directory.
-ipcMain.handle('set-startup-task', (_e, { emberPath, enabled }) => {
-  if (process.platform !== 'win32') return { ok: false, error: 'Windows only' }
+// ---------------------------------------------------------------------------
+// Startup task — auto-launch Ember at user logon
+//
+// Windows: Task Scheduler entry (schtasks ONLOGON)
+// macOS:   LaunchAgent plist (~/Library/LaunchAgents/)
+// Linux:   systemd user service (~/.config/systemd/user/)
+// ---------------------------------------------------------------------------
 
-  const taskName = 'EmberStartup'
+const STARTUP_TASK_NAME = 'EmberStartup'
+const LAUNCHAGENT_LABEL = 'com.ember2.api'
+const LAUNCHAGENT_PATH = path.join(os.homedir(), 'Library', 'LaunchAgents', `${LAUNCHAGENT_LABEL}.plist`)
+const SYSTEMD_UNIT_DIR = path.join(os.homedir(), '.config', 'systemd', 'user')
+const SYSTEMD_UNIT_PATH = path.join(SYSTEMD_UNIT_DIR, 'ember-2.service')
 
-  if (!enabled) {
+ipcMain.handle('set-startup-task', async (_e, { emberPath, enabled }) => {
+  const plat = process.platform
+
+  if (plat === 'win32') {
+    if (!enabled) {
+      return new Promise((resolve) => {
+        const proc = spawn('schtasks', ['/Delete', '/TN', STARTUP_TASK_NAME, '/F'], { shell: true })
+        proc.on('close', (code) => resolve({ ok: code === 0 || code === 1 })) // 1 = task didn't exist
+        proc.on('error', () => resolve({ ok: false }))
+      })
+    }
+    const scriptPath = path.join(emberPath, 'launch_ember.bat')
+    if (!fs.existsSync(scriptPath)) {
+      return { ok: false, error: `Launcher script not found: ${scriptPath}` }
+    }
     return new Promise((resolve) => {
-      const proc = spawn('schtasks', ['/Delete', '/TN', taskName, '/F'], { shell: true })
-      proc.on('close', (code) => resolve({ ok: code === 0 || code === 1 })) // 1 = task didn't exist
+      const proc = spawn('schtasks', [
+        '/Create', '/TN', STARTUP_TASK_NAME, '/TR', `"${scriptPath}"`,
+        '/SC', 'ONLOGON', '/RL', 'LIMITED', '/F',
+      ], { shell: true })
+      proc.on('close', (code) => resolve({ ok: code === 0 }))
       proc.on('error', () => resolve({ ok: false }))
     })
   }
 
-  const scriptPath = path.join(emberPath, 'launch_ember.bat')
-  if (!fs.existsSync(scriptPath)) {
-    return { ok: false, error: `Launcher script not found: ${scriptPath}` }
+  if (plat === 'darwin') {
+    if (!enabled) {
+      // Unload then remove the plist
+      await new Promise((resolve) => {
+        const proc = spawn('launchctl', ['unload', LAUNCHAGENT_PATH], { shell: true })
+        proc.on('close', () => resolve())
+        proc.on('error', () => resolve())
+      })
+      try { fs.unlinkSync(LAUNCHAGENT_PATH) } catch {}
+      return { ok: true }
+    }
+    const scriptPath = path.join(emberPath, 'launch_ember.sh')
+    if (!fs.existsSync(scriptPath)) {
+      return { ok: false, error: `Launcher script not found: ${scriptPath}` }
+    }
+    const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${LAUNCHAGENT_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>${scriptPath}</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>${emberPath}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>${path.join(emberPath, 'ember-launch.log')}</string>
+  <key>StandardErrorPath</key>
+  <string>${path.join(emberPath, 'ember-launch.log')}</string>
+</dict>
+</plist>`
+    try {
+      fs.mkdirSync(path.dirname(LAUNCHAGENT_PATH), { recursive: true })
+      fs.writeFileSync(LAUNCHAGENT_PATH, plist, 'utf-8')
+    } catch (err) {
+      return { ok: false, error: `Failed to write plist: ${err.message}` }
+    }
+    return new Promise((resolve) => {
+      const proc = spawn('launchctl', ['load', LAUNCHAGENT_PATH], { shell: true })
+      proc.on('close', (code) => resolve({ ok: code === 0 }))
+      proc.on('error', () => resolve({ ok: false }))
+    })
   }
 
-  return new Promise((resolve) => {
-    const proc = spawn('schtasks', [
-      '/Create', '/TN', taskName, '/TR', `"${scriptPath}"`,
-      '/SC', 'ONLOGON', '/RL', 'LIMITED', '/F',
-    ], { shell: true })
-    proc.on('close', (code) => resolve({ ok: code === 0 }))
-    proc.on('error', () => resolve({ ok: false }))
-  })
+  if (plat === 'linux') {
+    if (!enabled) {
+      await new Promise((resolve) => {
+        const proc = spawn('systemctl', ['--user', 'disable', 'ember-2.service'], { shell: true })
+        proc.on('close', () => resolve())
+        proc.on('error', () => resolve())
+      })
+      try { fs.unlinkSync(SYSTEMD_UNIT_PATH) } catch {}
+      return { ok: true }
+    }
+    const scriptPath = path.join(emberPath, 'launch_ember.sh')
+    if (!fs.existsSync(scriptPath)) {
+      return { ok: false, error: `Launcher script not found: ${scriptPath}` }
+    }
+    const unit = `[Unit]
+Description=Ember-2 API
+After=network.target docker.service
+
+[Service]
+Type=simple
+ExecStart=/bin/bash ${scriptPath}
+WorkingDirectory=${emberPath}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+`
+    try {
+      fs.mkdirSync(SYSTEMD_UNIT_DIR, { recursive: true })
+      fs.writeFileSync(SYSTEMD_UNIT_PATH, unit, 'utf-8')
+    } catch (err) {
+      return { ok: false, error: `Failed to write unit file: ${err.message}` }
+    }
+    // Reload and enable
+    await new Promise((resolve) => {
+      const proc = spawn('systemctl', ['--user', 'daemon-reload'], { shell: true })
+      proc.on('close', () => resolve())
+      proc.on('error', () => resolve())
+    })
+    return new Promise((resolve) => {
+      const proc = spawn('systemctl', ['--user', 'enable', 'ember-2.service'], { shell: true })
+      proc.on('close', (code) => resolve({ ok: code === 0 }))
+      proc.on('error', () => resolve({ ok: false }))
+    })
+  }
+
+  return { ok: false, error: `Unsupported platform: ${plat}` }
 })
 
 ipcMain.handle('get-startup-task', () => {
-  if (process.platform !== 'win32') return { enabled: false }
-  return new Promise((resolve) => {
-    const proc = spawn('schtasks', ['/Query', '/TN', 'EmberStartup'], { shell: true })
-    proc.on('close', (code) => resolve({ enabled: code === 0 }))
-    proc.on('error', () => resolve({ enabled: false }))
-  })
+  const plat = process.platform
+
+  if (plat === 'win32') {
+    return new Promise((resolve) => {
+      const proc = spawn('schtasks', ['/Query', '/TN', STARTUP_TASK_NAME], { shell: true })
+      proc.on('close', (code) => resolve({ enabled: code === 0 }))
+      proc.on('error', () => resolve({ enabled: false }))
+    })
+  }
+
+  if (plat === 'darwin') {
+    return { enabled: fs.existsSync(LAUNCHAGENT_PATH) }
+  }
+
+  if (plat === 'linux') {
+    return new Promise((resolve) => {
+      const proc = spawn('systemctl', ['--user', 'is-enabled', 'ember-2.service'], { shell: true })
+      proc.on('close', (code) => resolve({ enabled: code === 0 }))
+      proc.on('error', () => resolve({ enabled: false }))
+    })
+  }
+
+  return { enabled: false }
 })
 
 ipcMain.handle('open-url', (_e, url) => {

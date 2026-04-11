@@ -1599,19 +1599,16 @@ async function loadEmberVersion() {
     gatekeeperNote.classList.remove('hidden')
   }
 
-  // Show Windows startup task toggle
-  if (platform === 'win32') {
-    const startupRow = document.getElementById('startup-task-row')
-    const startupToggle = document.getElementById('startup-task-toggle')
-    startupRow.classList.remove('hidden')
+  // Show startup task toggle (all platforms)
+  const startupRow = document.getElementById('startup-task-row')
+  const startupToggle = document.getElementById('startup-task-toggle')
+  startupRow.classList.remove('hidden')
 
-    // Check current state
-    const current = await window.ember.getStartupTask()
-    startupToggle.checked = current.enabled
-  }
+  const current = await window.ember.getStartupTask()
+  startupToggle.checked = current.enabled
 }
 
-// Windows startup task toggle
+// Startup task toggle (all platforms)
 document.getElementById('startup-task-toggle').addEventListener('change', async (e) => {
   const statusEl = document.getElementById('startup-task-status')
   const result = await window.ember.setStartupTask(state.emberPath, e.target.checked)
