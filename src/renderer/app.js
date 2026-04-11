@@ -1598,7 +1598,32 @@ async function loadEmberVersion() {
   if (gatekeeperNote && platform === 'darwin') {
     gatekeeperNote.classList.remove('hidden')
   }
+
+  // Show Windows startup task toggle
+  if (platform === 'win32') {
+    const startupRow = document.getElementById('startup-task-row')
+    const startupToggle = document.getElementById('startup-task-toggle')
+    startupRow.classList.remove('hidden')
+
+    // Check current state
+    const current = await window.ember.getStartupTask()
+    startupToggle.checked = current.enabled
+  }
 }
+
+// Windows startup task toggle
+document.getElementById('startup-task-toggle').addEventListener('change', async (e) => {
+  const statusEl = document.getElementById('startup-task-status')
+  const result = await window.ember.setStartupTask(state.emberPath, e.target.checked)
+  if (result.ok) {
+    statusEl.textContent = e.target.checked
+      ? 'Ember will start automatically at logon.'
+      : 'Automatic startup disabled.'
+  } else {
+    statusEl.textContent = result.error || 'Failed to update startup setting.'
+    e.target.checked = !e.target.checked // revert
+  }
+})
 
 // ---------------------------------------------------------------------------
 // Installer self-update (electron-updater)

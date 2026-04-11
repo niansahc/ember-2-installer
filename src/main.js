@@ -1533,6 +1533,47 @@ ipcMain.handle('launch-ember', (_e, { emberPath }) => {
   return { ok: true }
 })
 
+// Windows startup task — creates/removes a Task Scheduler entry that runs
+// launch_ember.bat at user logon.  schtasks is more reliable than the
+// Startup folder on Windows 10/11 because it survives folder cleanup tools
+// and runs with the correct working directory.
+ipcMain.handle('set-startup-task', (_e, { emberPath, enabled }) => {
+  if (process.platform !== 'win32') return { ok: false, error: 'Windows only' }
+
+  const taskName = 'EmberStartup'
+
+  if (!enabled) {
+    return new Promise((resolve) => {
+      const proc = spawn('schtasks', ['/Delete', '/TN', taskName, '/F'], { shell: true })
+      proc.on('close', (code) => resolve({ ok: code === 0 || code === 1 })) // 1 = task didn't exist
+      proc.on('error', () => resolve({ ok: false }))
+    })
+  }
+
+  const scriptPath = path.join(emberPath, 'launch_ember.bat')
+  if (!fs.existsSync(scriptPath)) {
+    return { ok: false, error: `Launcher script not found: ${scriptPath}` }
+  }
+
+  return new Promise((resolve) => {
+    const proc = spawn('schtasks', [
+      '/Create', '/TN', taskName, '/TR', `"${scriptPath}"`,
+      '/SC', 'ONLOGON', '/RL', 'LIMITED', '/F',
+    ], { shell: true })
+    proc.on('close', (code) => resolve({ ok: code === 0 }))
+    proc.on('error', () => resolve({ ok: false }))
+  })
+})
+
+ipcMain.handle('get-startup-task', () => {
+  if (process.platform !== 'win32') return { enabled: false }
+  return new Promise((resolve) => {
+    const proc = spawn('schtasks', ['/Query', '/TN', 'EmberStartup'], { shell: true })
+    proc.on('close', (code) => resolve({ enabled: code === 0 }))
+    proc.on('error', () => resolve({ enabled: false }))
+  })
+})
+
 ipcMain.handle('open-url', (_e, url) => {
   if (typeof url !== 'string') return
   const isHttps = url.startsWith('https://')
@@ -1904,6 +1945,12 @@ if (DEMO_MODE) {
     await sleep(2000)
     return { ok: true }
   })
+
+  // Override startup task
+  ipcMain.removeHandler('set-startup-task')
+  ipcMain.handle('set-startup-task', async () => ({ ok: true }))
+  ipcMain.removeHandler('get-startup-task')
+  ipcMain.handle('get-startup-task', async () => ({ enabled: false }))
 
   // Override clone — simulate progress
   ipcMain.removeHandler('clone-ember-repo')
