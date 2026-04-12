@@ -470,10 +470,14 @@
     <p class="hint" id="done-status">Starting the API...</p>
 
     <div class="done-actions">
-      <button class="btn-primary" id="btn-launch-ember" disabled>Launch Ember</button>
-      <button class="btn-secondary" id="btn-open-ember" disabled>Open in Browser</button>
+      <button class="btn-primary" id="btn-launch-ember" disabled>Launch Services</button>
+      <button class="btn-secondary" id="btn-open-ember" disabled>Open Ember</button>
       <button class="btn-secondary" id="btn-retry-api" style="display: none;">Try Again</button>
     </div>
+    <p class="hint done-action-hint">
+      <strong>Launch Services</strong> starts Docker, SearXNG, and the Ember API.
+      <strong>Open Ember</strong> opens the running app in your browser.
+    </p>
     <p class="hint" id="launch-status" style="display: none;"></p>
 
     <div id="startup-task-row" class="hidden" style="margin-top: 1rem;">
@@ -521,19 +525,34 @@
 
     <div class="update-checklist" id="update-checklist">
       <div class="update-row hidden" id="update-row-backend">
-        <span class="update-icon">📦</span>
-        <span class="update-label">Ember backend</span>
-        <span class="update-versions"><span id="update-backend-installed"></span> → <span id="update-backend-latest"></span></span>
+        <span class="update-icon" data-default="📦">📦</span>
+        <div class="update-row-body">
+          <div class="update-row-main">
+            <span class="update-label">Ember backend</span>
+            <span class="update-versions"><span id="update-backend-installed"></span> → <span id="update-backend-latest"></span></span>
+          </div>
+          <div class="update-row-note" id="update-backend-note"></div>
+        </div>
       </div>
       <div class="update-row hidden" id="update-row-ui">
-        <span class="update-icon">🎨</span>
-        <span class="update-label">Ember UI</span>
-        <span class="update-versions"><span id="update-ui-installed"></span> → <span id="update-ui-latest"></span></span>
+        <span class="update-icon" data-default="🎨">🎨</span>
+        <div class="update-row-body">
+          <div class="update-row-main">
+            <span class="update-label">Ember UI</span>
+            <span class="update-versions"><span id="update-ui-installed"></span> → <span id="update-ui-latest"></span></span>
+          </div>
+          <div class="update-row-note" id="update-ui-note"></div>
+        </div>
       </div>
       <div class="update-row hidden" id="update-row-installer">
-        <span class="update-icon">⚙️</span>
-        <span class="update-label">Installer</span>
-        <span class="update-versions"><span id="update-installer-installed"></span> → <span id="update-installer-latest"></span></span>
+        <span class="update-icon" data-default="⚙️">⚙️</span>
+        <div class="update-row-body">
+          <div class="update-row-main">
+            <span class="update-label">Installer</span>
+            <span class="update-versions"><span id="update-installer-installed"></span> → <span id="update-installer-latest"></span></span>
+          </div>
+          <div class="update-row-note" id="update-installer-note"></div>
+        </div>
       </div>
     </div>
 
@@ -544,6 +563,16 @@
       <button class="btn-primary" id="btn-run-update-all">Update All</button>
     </div>
   </section>
+
+  <!-- Post-update celebration overlay — shows for ~8s after a successful update -->
+  <div id="update-celebration" class="hidden">
+    <div class="celebration-card">
+      <div class="celebration-flame">🔥</div>
+      <div class="celebration-version" id="celebration-version"></div>
+      <div class="celebration-bullet" id="celebration-bullet"></div>
+      <div class="celebration-tag">Warmer now.</div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>

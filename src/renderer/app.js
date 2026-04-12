@@ -1376,14 +1376,14 @@ document.getElementById('btn-launch-ember').addEventListener('click', async () =
     btn.textContent = 'Launched'
     launchStatus.textContent = 'Ember is starting up. A browser window will open when ready.'
     setTimeout(() => {
-      btn.textContent = 'Launch Ember'
+      btn.textContent = 'Launch Services'
       btn.disabled = false
       launchStatus.style.display = 'none'
     }, 10000)
   } else {
-    btn.textContent = 'Launch Ember'
+    btn.textContent = 'Launch Services'
     btn.disabled = false
-    launchStatus.textContent = result.error || 'Launch failed. Try the Open in Browser button instead.'
+    launchStatus.textContent = result.error || 'Launch failed. Try the Open Ember button instead.'
   }
 })
 
@@ -1432,6 +1432,113 @@ document.getElementById('btn-retry-api').addEventListener('click', async () => {
   }
 })
 
+// ---------------------------------------------------------------------------
+// Update screen — cute touches: rotating voice line, row animations,
+// changelog notes, a milestone easter egg, and a post-update celebration.
+// ---------------------------------------------------------------------------
+
+const UPDATE_VOICE_LINES = [
+  '"I found some updates."',
+  '"Fresh logs for the fire."',
+  '"Ooh, something new came in."',
+  '"Tidying up — back in a sec."',
+  '"Patches arrived. Let me try them on."',
+  '"Hi. New version time."',
+]
+const UPDATE_VOICE_MILESTONE = '"Tenth time you\'ve topped me up. Hi, again."'
+
+function pickUpdateVoiceLine(count) {
+  if (count > 0 && count % 10 === 0) return UPDATE_VOICE_MILESTONE
+  return UPDATE_VOICE_LINES[Math.floor(Math.random() * UPDATE_VOICE_LINES.length)]
+}
+
+// Cached most-recent update info — used by the celebration card after a
+// successful run to show "you're on vX.Y.Z, and here's what's new".
+let lastUpdateInfo = null
+
+// Populate the update screen from a check-all-updates response: show the
+// rows that actually have updates, fill versions and changelog notes, reset
+// any prior in-progress/done visual state, pick a voice line, and bump the
+// persistent counter used for the milestone easter egg.
+function prepareUpdateScreen(updates) {
+  const rows = ['backend', 'ui', 'installer']
+
+  for (const r of rows) {
+    const row = document.getElementById(`update-row-${r}`)
+    if (!row) continue
+    row.classList.add('hidden')
+    row.classList.remove('in-progress', 'done')
+    const icon = row.querySelector('.update-icon')
+    if (icon && icon.dataset.default) icon.textContent = icon.dataset.default
+    const note = document.getElementById(`update-${r}-note`)
+    if (note) note.textContent = ''
+  }
+
+  for (const r of rows) {
+    const info = updates[r]
+    if (!info?.hasUpdate) continue
+    const row = document.getElementById(`update-row-${r}`)
+    row.classList.remove('hidden')
+    document.getElementById(`update-${r}-installed`).textContent = info.installed
+    document.getElementById(`update-${r}-latest`).textContent = info.latest
+    const note = document.getElementById(`update-${r}-note`)
+    if (note && info.notes) note.textContent = `\u201C${info.notes}\u201D`
+  }
+
+  const count = Number(localStorage.getItem('ember:update-count') || '0') + 1
+  localStorage.setItem('ember:update-count', String(count))
+  document.getElementById('update-voice').textContent = pickUpdateVoiceLine(count)
+
+  lastUpdateInfo = updates
+}
+
+// Hold the celebration overlay for `durationMs` after a successful update.
+function showCelebration({ version, bullet, durationMs = 8000 }) {
+  return new Promise((resolve) => {
+    const card = document.getElementById('update-celebration')
+    const versionEl = document.getElementById('celebration-version')
+    const bulletEl = document.getElementById('celebration-bullet')
+    versionEl.textContent = version || ''
+    bulletEl.textContent = bullet ? `\u201C${bullet}\u201D` : ''
+    card.classList.remove('hidden')
+    setTimeout(() => {
+      card.classList.add('hidden')
+      resolve()
+    }, durationMs)
+  })
+}
+
+// Build the celebration summary from the cached updates. Prefer backend info
+// (most user-visible), then UI, then installer.
+function celebrationSummary() {
+  if (!lastUpdateInfo) return { version: '', bullet: '' }
+  if (lastUpdateInfo.backend?.hasUpdate) {
+    return { version: lastUpdateInfo.backend.latest, bullet: lastUpdateInfo.backend.notes }
+  }
+  if (lastUpdateInfo.ui?.hasUpdate) {
+    return { version: lastUpdateInfo.ui.latest, bullet: lastUpdateInfo.ui.notes }
+  }
+  return { version: lastUpdateInfo.installer?.latest, bullet: lastUpdateInfo.installer?.notes }
+}
+
+function markUpdateRowInProgress(name) {
+  const row = document.getElementById(`update-row-${name}`)
+  if (!row || row.classList.contains('hidden')) return
+  row.classList.add('in-progress')
+  row.classList.remove('done')
+  const icon = row.querySelector('.update-icon')
+  if (icon) icon.textContent = '🔥'
+}
+
+function markUpdateRowDone(name) {
+  const row = document.getElementById(`update-row-${name}`)
+  if (!row || row.classList.contains('hidden')) return
+  row.classList.remove('in-progress')
+  row.classList.add('done')
+  const icon = row.querySelector('.update-icon')
+  if (icon) icon.textContent = '✨'
+}
+
 // Unified update check from Done screen
 document.getElementById('btn-check-ember-update').addEventListener('click', async () => {
   const btn = document.getElementById('btn-check-ember-update')
@@ -1456,22 +1563,7 @@ document.getElementById('btn-check-ember-update').addEventListener('click', asyn
   const anyUpdate = updates.installer.hasUpdate || updates.backend.hasUpdate || updates.ui.hasUpdate
 
   if (anyUpdate) {
-    // Navigate to update screen with the unified checklist
-    if (updates.backend.hasUpdate) {
-      document.getElementById('update-row-backend').classList.remove('hidden')
-      document.getElementById('update-backend-installed').textContent = updates.backend.installed
-      document.getElementById('update-backend-latest').textContent = updates.backend.latest
-    }
-    if (updates.ui.hasUpdate) {
-      document.getElementById('update-row-ui').classList.remove('hidden')
-      document.getElementById('update-ui-installed').textContent = updates.ui.installed
-      document.getElementById('update-ui-latest').textContent = updates.ui.latest
-    }
-    if (updates.installer.hasUpdate) {
-      document.getElementById('update-row-installer').classList.remove('hidden')
-      document.getElementById('update-installer-installed').textContent = updates.installer.installed
-      document.getElementById('update-installer-latest').textContent = updates.installer.latest
-    }
+    prepareUpdateScreen(updates)
     pendingUpdates = {
       backend: updates.backend.hasUpdate,
       ui: updates.ui.hasUpdate,
@@ -1585,7 +1677,7 @@ async function loadEmberVersion() {
   } else {
     title.textContent = "Almost there."
     voice.textContent = '"I\'m ready — I just need a little help starting up."'
-    status.textContent = "Ember didn't start within 60 seconds. You can try starting it manually, or use Launch Ember."
+    status.textContent = "Ember didn't start within 60 seconds. You can try starting it manually, or use Launch Services."
     btn.disabled = false
     document.getElementById('btn-retry-api').style.display = ''
     document.getElementById('done-troubleshooting').classList.remove('hidden')
@@ -1676,15 +1768,42 @@ document.getElementById('btn-run-update-all').addEventListener('click', async ()
   logBox.classList.remove('hidden')
   logBox.textContent = ''
 
+  // Animate the row icons in response to stage markers in the log stream.
+  let currentStage = null
+  const advanceTo = (stage) => {
+    if (currentStage === stage) return
+    if (currentStage) markUpdateRowDone(currentStage)
+    currentStage = stage
+    markUpdateRowInProgress(stage)
+  }
+
   window.ember.onUpdateAllLog((text) => {
     logBox.textContent += text
     logBox.scrollTop = logBox.scrollHeight
+    if (/Updating Ember backend/i.test(text)) advanceTo('backend')
+    else if (/Updating Ember UI|Updating UI|Building UI/i.test(text)) advanceTo('ui')
+    else if (/Downloading installer update|Installing installer/i.test(text)) advanceTo('installer')
   })
 
   const result = await window.ember.runAllUpdates(pendingUpdates, state.host)
   window.ember.removeAllListeners('update-all-log')
 
   if (result.ok) {
+    // Finish the currently in-progress row, and mark any visible rows the
+    // log markers never touched as done too (defensive — some stages don't
+    // emit a distinctive marker).
+    if (currentStage) markUpdateRowDone(currentStage)
+    for (const r of ['backend', 'ui', 'installer']) {
+      const row = document.getElementById(`update-row-${r}`)
+      if (row && !row.classList.contains('hidden') && !row.classList.contains('done')) {
+        markUpdateRowDone(r)
+      }
+    }
+
+    // Celebration card holds for ~8s before the next screen transition.
+    const summary = celebrationSummary()
+    await showCelebration({ version: summary.version, bullet: summary.bullet, durationMs: 8000 })
+
     if (result.needsInstallerUpdate) {
       logBox.textContent += '\nBackend and UI updated. Downloading installer update...\n'
       btn.textContent = 'Restarting...'
@@ -1770,30 +1889,12 @@ async function init() {
       const anyUpdate = updates.installer.hasUpdate || updates.backend.hasUpdate || updates.ui.hasUpdate
 
       if (anyUpdate) {
-        // Populate update checklist
-        if (updates.backend.hasUpdate) {
-          document.getElementById('update-row-backend').classList.remove('hidden')
-          document.getElementById('update-backend-installed').textContent = updates.backend.installed
-          document.getElementById('update-backend-latest').textContent = updates.backend.latest
-        }
-        if (updates.ui.hasUpdate) {
-          document.getElementById('update-row-ui').classList.remove('hidden')
-          document.getElementById('update-ui-installed').textContent = updates.ui.installed
-          document.getElementById('update-ui-latest').textContent = updates.ui.latest
-        }
-        if (updates.installer.hasUpdate) {
-          document.getElementById('update-row-installer').classList.remove('hidden')
-          document.getElementById('update-installer-installed').textContent = updates.installer.installed
-          document.getElementById('update-installer-latest').textContent = updates.installer.latest
-        }
-
-        // Store what needs updating for the Update All button
+        prepareUpdateScreen(updates)
         pendingUpdates = {
           backend: updates.backend.hasUpdate,
           ui: updates.ui.hasUpdate,
           installer: updates.installer.hasUpdate,
         }
-
         showScreen('screen-update')
         return
       }

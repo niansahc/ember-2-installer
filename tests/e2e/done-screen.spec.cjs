@@ -44,4 +44,23 @@ test.describe('Done Screen', () => {
   test('done screen shows version info', async () => {
     await expect(window.locator('#ember-version-label')).toBeVisible({ timeout: 5000 })
   })
+
+  test('Launch Services button is labelled correctly', async () => {
+    const launchBtn = window.locator('#btn-launch-ember')
+    await expect(launchBtn).toBeVisible()
+    await expect(launchBtn).toHaveText('Launch Services')
+  })
+
+  test('Open Ember button is labelled correctly', async () => {
+    await expect(window.locator('#btn-open-ember')).toHaveText('Open Ember')
+  })
+
+  test('done screen shows explanatory hint for the action buttons', async () => {
+    const hint = window.locator('.done-action-hint')
+    await expect(hint).toBeVisible()
+    await expect(hint).toContainText('Launch Services')
+    await expect(hint).toContainText('Open Ember')
+    await expect(hint).toContainText('Docker')
+    await expect(hint).toContainText('browser')
+  })
 })

@@ -21,6 +21,9 @@ const os = require('os')
 const IS_PACKAGED = app.isPackaged
 const HAS_REAL_FLAG = process.argv.includes('--real')
 const DEMO_MODE = !IS_PACKAGED && !HAS_REAL_FLAG
+// Opt-in: when set, demo mode pretends the unified update check found
+// updates for all three repos so the update screen can be inspected.
+const HAS_DEMO_UPDATES_FLAG = process.argv.includes('--demo-updates')
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -935,6 +938,29 @@ ipcMain.handle('check-for-update', async () => {
   }
 })
 
+// Extract a short one-line summary from a GitHub release body — the first
+// bullet wins. Used by the update screen "what's new" notes so each row
+// shows something more useful than just a version bump.
+function firstBullet(body) {
+  if (!body) return ''
+  const lines = body.split('\n')
+  for (const line of lines) {
+    const m = line.match(/^\s*[-*]\s+(.+?)\s*$/)
+    if (m) {
+      return m[1]
+        .replace(/\*\*/g, '')
+        .replace(/`/g, '')
+        .replace(/\[(.+?)\]\(.+?\)/g, '$1')
+        .slice(0, 120)
+    }
+  }
+  for (const line of lines) {
+    const t = line.trim()
+    if (t && !t.startsWith('#') && !t.startsWith('---')) return t.slice(0, 120)
+  }
+  return ''
+}
+
 function fetchLatestRelease(repo = REPO_BACKEND_SLUG) {
   return new Promise((resolve) => {
     const options = {
@@ -1034,17 +1060,20 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
       hasUpdate: installerLatest && installerInstalled !== installerLatest,
       installed: installerInstalled,
       latest: installerLatest,
+      notes: firstBullet(installerRelease?.body),
     },
     backend: {
       hasUpdate: backendLatest && (!backendInstalled || backendInstalled !== backendLatest),
       installed: backendInstalled || 'unknown',
       latest: backendLatest,
       apiRunning: backendApiRunning,
+      notes: firstBullet(backendRelease?.body),
     },
     ui: {
       hasUpdate: uiLatest && (!uiInstalled || uiInstalled !== uiLatest),
       installed: uiInstalled || 'unknown',
       latest: uiLatest,
+      notes: firstBullet(uiRelease?.body),
     },
   }
 })
@@ -1989,17 +2018,82 @@ if (DEMO_MODE) {
   ipcMain.removeHandler('check-for-update')
   ipcMain.handle('check-for-update', async () => ({ hasUpdate: false }))
 
-  // Override unified update checker — no updates in demo
+  // When --demo-updates is set, pretend an install exists so init() enters
+  // the update-check branch and shows the update screen on boot. Without
+  // this the demo boots to Welcome instead.
+  if (HAS_DEMO_UPDATES_FLAG) {
+    ipcMain.removeHandler('get-ember-path')
+    ipcMain.handle('get-ember-path', () => 'C:/demo/ember-2')
+  }
+
+  // Override unified update checker — no updates in demo, OR fake updates
+  // for all three repos when --demo-updates is set (for demoing the screen).
   ipcMain.removeHandler('check-all-updates')
-  ipcMain.handle('check-all-updates', async () => ({
-    reachable: true,
-    installer: { hasUpdate: false, installed: app.getVersion(), latest: app.getVersion() },
-    backend: { hasUpdate: false, installed: 'v0.13.1 (demo)', latest: 'v0.13.1', apiRunning: true },
-    ui: { hasUpdate: false, installed: '0.5.3 (demo)', latest: '0.5.3' },
-  }))
+  ipcMain.handle('check-all-updates', async () => {
+    if (HAS_DEMO_UPDATES_FLAG) {
+      return {
+        reachable: true,
+        installer: {
+          hasUpdate: true,
+          installed: app.getVersion(),
+          latest: '0.7.0',
+          notes: 'Update screen learned to glow when it works.',
+        },
+        backend: {
+          hasUpdate: true,
+          installed: 'v0.13.1',
+          latest: 'v0.14.0',
+          apiRunning: true,
+          notes: 'Faster retrieval and a steadier conversation memory.',
+        },
+        ui: {
+          hasUpdate: true,
+          installed: '0.5.3',
+          latest: '0.6.0',
+          notes: 'Citation popovers and a calmer empty state.',
+        },
+      }
+    }
+    return {
+      reachable: true,
+      installer: { hasUpdate: false, installed: app.getVersion(), latest: app.getVersion() },
+      backend: { hasUpdate: false, installed: 'v0.13.1 (demo)', latest: 'v0.13.1', apiRunning: true },
+      ui: { hasUpdate: false, installed: '0.5.3 (demo)', latest: '0.5.3' },
+    }
+  })
 
   ipcMain.removeHandler('run-all-updates')
-  ipcMain.handle('run-all-updates', async () => ({ ok: true, needsInstallerUpdate: false }))
+  ipcMain.handle('run-all-updates', async (_e, payload) => {
+    if (HAS_DEMO_UPDATES_FLAG) {
+      const updates = payload?.updates || { backend: true, ui: true, installer: true }
+      const log = (text) => mainWindow?.webContents.send('update-all-log', text)
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+
+      if (updates.backend) {
+        log('Updating Ember backend...\n')
+        await wait(1500)
+        log('  pulled v0.14.0\n')
+        await wait(900)
+      }
+      if (updates.ui) {
+        log('Updating Ember UI...\n')
+        await wait(1500)
+        log('  built dist/\n')
+        await wait(900)
+      }
+      if (updates.installer) {
+        log('Downloading installer update...\n')
+        await wait(1600)
+        log('  installer ready\n')
+        await wait(700)
+      }
+      log('\nAll updates applied.\n')
+      // needsInstallerUpdate=false so the celebration card has time to play
+      // instead of the app quit-and-installing before we see it.
+      return { ok: true, needsInstallerUpdate: false }
+    }
+    return { ok: true, needsInstallerUpdate: false }
+  })
 
   // Override Tailscale checks — simulate installed + connected
   ipcMain.removeHandler('check-tailscale-installed')
