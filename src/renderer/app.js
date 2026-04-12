@@ -1806,10 +1806,170 @@ document.getElementById('startup-task-toggle').addEventListener('change', async 
   }
 })
 
-// Developer mode toggle — expands/collapses the dev vault panel
-document.getElementById('dev-mode-toggle').addEventListener('change', (e) => {
+// ---------------------------------------------------------------------------
+// Matrix easter egg — plays when developer mode is toggled on
+// ---------------------------------------------------------------------------
+
+function startMatrixRain(canvas) {
+  const ctx = canvas.getContext('2d')
+  canvas.width = window.innerWidth
+  canvas.height = window.innerHeight
+
+  // Ember-flavored character pool — code glyphs + cute symbols
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&*<>/|~'
+    + '\u2665\u2665\u2665'       // ♥ hearts (weighted)
+    + '\uD83D\uDC31'             // 🐱 kitty
+    + '\uD83D\uDC8E\uD83D\uDC8E' // 💎 gems (weighted)
+    + '\u2728'                    // ✨ sparkles
+    + '\uD83D\uDD25'             // 🔥 fire
+  const fontSize = 15
+  const columns = Math.floor(canvas.width / fontSize)
+  const drops = new Array(columns).fill(0).map(() => Math.random() * -15)
+
+  function draw() {
+    // Heavier trail fade = more visible columns, DOS-like persistence
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.04)'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.font = `${fontSize}px monospace`
+
+    for (let i = 0; i < drops.length; i++) {
+      const charArr = [...chars]
+      const char = charArr[Math.floor(Math.random() * charArr.length)]
+      const x = i * fontSize
+      const y = drops[i] * fontSize
+
+      // Lead character is bright white-orange, trail is warm amber
+      ctx.fillStyle = Math.random() > 0.92 ? '#ffd700' : '#ff8c00'
+      ctx.fillText(char, x, y)
+
+      if (y > canvas.height && Math.random() > 0.98) {
+        drops[i] = 0
+      }
+      drops[i]++
+    }
+  }
+
+  // Slower frame rate = more deliberate, CRT/DOS feel
+  return setInterval(draw, 55)
+}
+
+function typeText(element, text, charDelay = 65) {
+  return new Promise((resolve) => {
+    let i = 0
+    element.textContent = ''
+    const interval = setInterval(() => {
+      if (i < text.length) {
+        element.textContent += text[i]
+        i++
+      } else {
+        clearInterval(interval)
+        resolve()
+      }
+    }, charDelay)
+  })
+}
+
+let matrixPlayed = false
+let matrixSkipped = false
+
+async function playMatrixEasterEgg() {
+  const overlay = document.getElementById('matrix-overlay')
+  const canvas = document.getElementById('matrix-canvas')
+  const textEl = document.getElementById('matrix-text')
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+
+  // ESC key skips the animation at any point
+  matrixSkipped = false
+  const onEsc = (e) => {
+    if (e.key === 'Escape') matrixSkipped = true
+  }
+  document.addEventListener('keydown', onEsc)
+
+  // Cancellable wait — resolves early if ESC was pressed
+  const cancellableWait = (ms) => new Promise((resolve) => {
+    const start = Date.now()
+    const check = setInterval(() => {
+      if (matrixSkipped || Date.now() - start >= ms) {
+        clearInterval(check)
+        resolve()
+      }
+    }, 50)
+  })
+
+  function cleanup(rainId) {
+    clearInterval(rainId)
+    overlay.classList.add('hidden')
+    window.ember.setFullscreen(false)
+    document.removeEventListener('keydown', onEsc)
+    matrixPlayed = true
+  }
+
+  // Go fullscreen + show overlay (fullscreen is best-effort — animation works without it)
+  try { await window.ember.setFullscreen(true) } catch {}
+  overlay.classList.remove('hidden')
+  textEl.textContent = ''
+  overlay.setAttribute('role', 'dialog')
+  overlay.setAttribute('aria-label', 'Developer mode easter egg animation. Press Escape to skip.')
+  textEl.textContent = ''
+
+  // Phase 1: Matrix rain for 4s, then taper to black
+  let rainInterval = startMatrixRain(canvas)
+  await cancellableWait(4000)
+  if (matrixSkipped) { cleanup(rainInterval); return }
+
+  // Taper: accelerate the fade by painting heavier black each frame
+  clearInterval(rainInterval)
+  const ctx = canvas.getContext('2d')
+  for (let i = 0; i < 12; i++) {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    await cancellableWait(60)
+    if (matrixSkipped) { cleanup(0); return }
+  }
+  ctx.fillStyle = '#000'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+  // Phase 2: Type the message on the now-black screen
+  await cancellableWait(400)
+  if (matrixSkipped) { cleanup(0); return }
+  await typeText(textEl, 'Why did you download an installer if you\'re such a cool hacker?')
+  if (matrixSkipped) { cleanup(0); return }
+
+  // Phase 3: Blinking cursor after the text — like a terminal prompt
+  const cursor = document.createElement('span')
+  cursor.className = 'matrix-cursor'
+  cursor.textContent = '\u2588' // full block character
+  textEl.appendChild(cursor)
+
+  // Let the cursor blink for ~5s (CSS handles the blink animation)
+  await cancellableWait(5000)
+  if (matrixSkipped) { cleanup(0); return }
+
+  // Phase 4: Remove cursor + text, fresh burst of rain for 3s
+  textEl.textContent = ''
+  rainInterval = startMatrixRain(canvas)
+  await cancellableWait(3000)
+
+  // Clean up — exit fullscreen, hide overlay
+  cleanup(rainInterval)
+}
+
+// Developer mode toggle — plays Matrix egg on first check, then shows panel
+document.getElementById('dev-mode-toggle').addEventListener('change', async (e) => {
   const panel = document.getElementById('dev-mode-panel')
   if (e.target.checked) {
+    if (!matrixPlayed) {
+      try {
+        await playMatrixEasterEgg()
+      } catch (err) {
+        // If animation fails for any reason, skip it gracefully
+        console.error('[Matrix] Animation failed, skipping:', err)
+        matrixPlayed = true
+        const overlay = document.getElementById('matrix-overlay')
+        overlay.classList.add('hidden')
+        try { window.ember.setFullscreen(false) } catch {}
+      }
+    }
     panel.classList.remove('hidden')
   } else {
     panel.classList.add('hidden')
@@ -2027,6 +2187,7 @@ async function init() {
           installer: updates.installer.hasUpdate,
         }
         showScreen('screen-update')
+        preloadScreenData()
         return
       }
     }
@@ -2035,8 +2196,13 @@ async function init() {
 
   // Normal flow — check prerequisites
   showScreen('screen-welcome')
+  preloadScreenData()
+}
 
-  // Pre-load data in background
+// Pre-load data so install-location, vault, and model screens are ready
+// when the user reaches them.  Called from init() in both the update and
+// normal branches so it runs regardless of which screen we land on first.
+function preloadScreenData() {
   initInstallDir()
   initVaultPath()
   initOllamaModelsPath()

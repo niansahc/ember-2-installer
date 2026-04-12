@@ -1,5 +1,6 @@
-// Developer mode tests — verifies the dev mode toggle, expandable panel,
-// and Apply button on the Done screen.  Runs in demo mode.
+// Developer mode tests — verifies the dev mode toggle, Matrix easter egg
+// animation, expandable panel, and Apply button on the Done screen.
+// Runs in demo mode.
 
 const { test, expect } = require('@playwright/test')
 const { launchApp } = require('./helpers.cjs')
@@ -40,22 +41,48 @@ test.describe('Developer Mode', () => {
     await expect(window.locator('#dev-mode-panel')).toHaveClass(/hidden/)
   })
 
-  test('checking dev mode toggle reveals the panel with path fields', async () => {
+  test('checking dev mode toggle triggers Matrix animation then reveals vault fields', async () => {
+    test.slow() // animation takes ~14s + setup time
+
     await window.locator('#dev-mode-toggle').check()
-    await expect(window.locator('#dev-mode-panel')).not.toHaveClass(/hidden/)
+
+    // Matrix overlay should appear
+    await expect(window.locator('#matrix-overlay')).not.toHaveClass(/hidden/, { timeout: 3000 })
+
+    // Typed text should appear during the animation (rain tapers at ~4s, typing starts ~5s)
+    await expect(window.locator('#matrix-text')).toContainText('hacker', { timeout: 15000 })
+
+    // After animation completes (~14s), overlay hides and panel appears
+    await expect(window.locator('#matrix-overlay')).toHaveClass(/hidden/, { timeout: 25000 })
+    await expect(window.locator('#dev-mode-panel')).not.toHaveClass(/hidden/, { timeout: 3000 })
     await expect(window.locator('#dev-vault-demo')).toBeVisible()
     await expect(window.locator('#dev-vault-test')).toBeVisible()
   })
 
-  test('unchecking dev mode toggle hides the panel', async () => {
+  test('second toggle does not replay the Matrix animation', async () => {
+    test.slow() // first toggle plays animation
+
+    // First toggle — plays animation
     await window.locator('#dev-mode-toggle').check()
-    await expect(window.locator('#dev-mode-panel')).not.toHaveClass(/hidden/)
+    await expect(window.locator('#matrix-overlay')).toHaveClass(/hidden/, { timeout: 25000 })
+
+    // Uncheck
     await window.locator('#dev-mode-toggle').uncheck()
     await expect(window.locator('#dev-mode-panel')).toHaveClass(/hidden/)
+
+    // Re-check — should NOT replay (matrixPlayed flag)
+    await window.locator('#dev-mode-toggle').check()
+    // Panel should appear immediately without the overlay
+    await expect(window.locator('#dev-mode-panel')).not.toHaveClass(/hidden/, { timeout: 2000 })
+    // Overlay should stay hidden
+    await expect(window.locator('#matrix-overlay')).toHaveClass(/hidden/)
   })
 
   test('path fields are pre-populated with default dev vault paths', async () => {
+    test.slow()
     await window.locator('#dev-mode-toggle').check()
+    await expect(window.locator('#matrix-overlay')).toHaveClass(/hidden/, { timeout: 25000 })
+
     const demoVal = await window.locator('#dev-vault-demo').inputValue()
     const testVal = await window.locator('#dev-vault-test').inputValue()
     expect(demoVal).toContain('DEVEmberVault')
@@ -65,7 +92,10 @@ test.describe('Developer Mode', () => {
   })
 
   test('Apply button calls setup and shows confirmation', async () => {
+    test.slow()
     await window.locator('#dev-mode-toggle').check()
+    await expect(window.locator('#matrix-overlay')).toHaveClass(/hidden/, { timeout: 25000 })
+
     await window.locator('#btn-apply-dev-mode').click()
 
     // In demo mode, setup-dev-mode returns ok after ~300ms
@@ -74,5 +104,11 @@ test.describe('Developer Mode', () => {
       { timeout: 3000 }
     )
     await expect(window.locator('#btn-apply-dev-mode')).toHaveText('Applied')
+  })
+
+  test('pixel ember logo is visible during Matrix animation', async () => {
+    await window.locator('#dev-mode-toggle').check()
+    await expect(window.locator('#matrix-overlay')).not.toHaveClass(/hidden/, { timeout: 3000 })
+    await expect(window.locator('#matrix-logo')).toBeVisible()
   })
 })

@@ -705,6 +705,15 @@ ipcMain.handle('write-env', (_e, { emberPath, vault, model, vision, host }) => {
 })
 
 // ---------------------------------------------------------------------------
+// IPC — Fullscreen toggle (used by Matrix easter egg)
+// ---------------------------------------------------------------------------
+
+ipcMain.handle('set-fullscreen', (_e, { enabled }) => {
+  if (!mainWindow) return
+  mainWindow.setFullScreen(enabled)
+})
+
+// ---------------------------------------------------------------------------
 // IPC — Release notes (HTML file read)
 // ---------------------------------------------------------------------------
 

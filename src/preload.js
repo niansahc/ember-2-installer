@@ -102,6 +102,9 @@ contextBridge.exposeInMainWorld('ember', {
   setStartupTask: (emberPath, enabled) => ipcRenderer.invoke('set-startup-task', { emberPath, enabled }),
   getStartupTask: () => ipcRenderer.invoke('get-startup-task'),
 
+  // Fullscreen (Matrix easter egg)
+  setFullscreen: (enabled) => ipcRenderer.invoke('set-fullscreen', { enabled }),
+
   // Release notes
   getReleaseNotes: () => ipcRenderer.invoke('get-release-notes'),
 

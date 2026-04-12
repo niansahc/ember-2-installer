@@ -1276,3 +1276,88 @@ p {
   color: var(--text);
   font-weight: 600;
 }
+
+/* ── Matrix easter egg overlay ────────────────────────────────── */
+
+#matrix-overlay {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#matrix-overlay.hidden {
+  display: none !important;
+}
+
+#matrix-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+#matrix-text {
+  position: relative;
+  z-index: 1;
+  font-family: 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+  font-size: 1.05rem;
+  color: #ff8c00;
+  text-shadow: 0 0 2px rgba(255, 140, 0, 0.3);
+  max-width: 520px;
+  text-align: center;
+  line-height: 1.6;
+  padding: 12px 28px;
+  background: rgba(0, 0, 0, 0.85);
+  border-radius: 6px;
+}
+
+#matrix-logo {
+  position: absolute;
+  bottom: 74px;
+  left: 24px;
+  z-index: 1;
+}
+
+.matrix-cursor {
+  color: #ff8c00;
+  animation: cursorBlink 0.7s step-end infinite;
+}
+
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+
+/* Pixel art ember — each shadow is one 6px "pixel" */
+.pixel-ember {
+  width: 6px;
+  height: 6px;
+  background: transparent;
+  box-shadow:
+    /* row 0 — tip */
+    18px 0px 0 #ff6600,
+    /* row 1 */
+    12px 6px 0 #ff8c00, 18px 6px 0 #ffa500, 24px 6px 0 #ff8c00,
+    /* row 2 */
+    6px 12px 0 #ff8c00, 12px 12px 0 #ffa500, 18px 12px 0 #ffd700,
+    24px 12px 0 #ffa500, 30px 12px 0 #ff8c00,
+    /* row 3 */
+    0px 18px 0 #ff6600, 6px 18px 0 #ff8c00, 12px 18px 0 #ffa500,
+    18px 18px 0 #ffd700, 24px 18px 0 #ffa500, 30px 18px 0 #ff8c00,
+    36px 18px 0 #ff6600,
+    /* row 4 — split */
+    0px 24px 0 #ff6600, 6px 24px 0 #ff8c00, 12px 24px 0 #ffa500,
+    24px 24px 0 #ffa500, 30px 24px 0 #ff8c00, 36px 24px 0 #ff6600,
+    /* row 5 */
+    6px 30px 0 #ff6600, 12px 30px 0 #ff8c00, 18px 30px 0 #ffa500,
+    24px 30px 0 #ff8c00, 30px 30px 0 #ff6600,
+    /* row 6 */
+    12px 36px 0 #ff6600, 18px 36px 0 #ff8c00, 24px 36px 0 #ff6600,
+    /* row 7 — base */
+    18px 42px 0 #cc5500;
+  image-rendering: pixelated;
+}
