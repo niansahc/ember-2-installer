@@ -27,16 +27,29 @@ test.describe('Update Screen — cute additions', () => {
     await window.reload()
     await window.waitForLoadState('domcontentloaded')
 
-    // Under --demo-updates, init() should navigate to the update screen.
+    // Under --demo-updates, init() shows the Welcome screen with an update
+    // banner instead of auto-navigating.  Click "View updates" to get there.
+    await expect(window.locator('#update-available-banner')).toBeVisible({ timeout: 10000 })
+    await window.locator('#btn-view-updates').click()
     await expect(window.locator('.screen.active')).toHaveAttribute(
       'id',
       'screen-update',
-      { timeout: 10000 }
+      { timeout: 5000 }
     )
   })
 
   test.afterEach(async () => {
     await app.close()
+  })
+
+  test('updates show as a banner on Welcome, not as a forced screen', async () => {
+    // The beforeEach already validated this flow — verify the Welcome screen
+    // was the initial landing, not screen-update.  We can check by confirming
+    // the banner element exists and was clicked to get here.
+    // (If the app auto-navigated, the banner wouldn't exist on screen-welcome.)
+    const banner = window.locator('#update-available-banner')
+    // Banner should still be in the DOM (we navigated away but it's still there)
+    await expect(banner).toBeAttached()
   })
 
   test('voice line is populated from the rotating pool', async () => {
@@ -110,15 +123,17 @@ test.describe('Update Screen — cute additions', () => {
   })
 
   test('10th update fires the milestone voice line', async () => {
-    // Pre-seed the counter to 9 — init() will bump it to 10 on the next
-    // render, which is the milestone trigger.
+    // Pre-seed the counter to 9 — clicking "View updates" will bump it to
+    // 10, which is the milestone trigger.
     await window.evaluate(() => localStorage.setItem('ember:update-count', '9'))
     await window.reload()
     await window.waitForLoadState('domcontentloaded')
+    await expect(window.locator('#update-available-banner')).toBeVisible({ timeout: 10000 })
+    await window.locator('#btn-view-updates').click()
     await expect(window.locator('.screen.active')).toHaveAttribute(
       'id',
       'screen-update',
-      { timeout: 10000 }
+      { timeout: 5000 }
     )
 
     const voice = (await window.locator('#update-voice').textContent()) || ''

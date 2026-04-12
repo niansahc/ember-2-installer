@@ -16,10 +16,13 @@ test.describe('Release Notes Panel', () => {
     await window.evaluate(() => localStorage.removeItem('ember:update-count'))
     await window.reload()
     await window.waitForLoadState('domcontentloaded')
+    // Click "View updates" banner to navigate to update screen
+    await expect(window.locator('#update-available-banner')).toBeVisible({ timeout: 10000 })
+    await window.locator('#btn-view-updates').click()
     await expect(window.locator('.screen.active')).toHaveAttribute(
       'id',
       'screen-update',
-      { timeout: 10000 }
+      { timeout: 5000 }
     )
   })
 

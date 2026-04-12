@@ -1483,11 +1483,11 @@ document.getElementById('btn-retry-api').addEventListener('click', async () => {
 
   const host = state.host || '127.0.0.1'
   let healthy = false
-  for (let i = 0; i < 15; i++) {
-    await new Promise((r) => setTimeout(r, 2000))
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 3000))
     const check = await window.ember.checkApiHealth(host)
     if (check.ok) { healthy = true; break }
-    status.textContent = `Waiting for Ember to start... (${(i + 1) * 2}s)`
+    status.textContent = `Waiting for Ember to start... (${(i + 1) * 3}s)`
   }
 
   retryBtn.disabled = false
@@ -1729,20 +1729,50 @@ async function loadEmberVersion() {
     }
   }
 
-  // Start the API — but only if it isn't already running (e.g. the update
-  // flow already restarted it).  A redundant startApi() spawns a second
-  // process that fights over the port and can stall the health poll.
+  // BUG-011: Check Docker readiness before starting services.
+  // Docker Desktop can take 30-60s to become usable after launch.
   const host = state.host || '127.0.0.1'
   const alreadyRunning = await window.ember.checkApiHealth(host)
+
   if (alreadyRunning.ok) {
     status.textContent = 'Ember is already running.'
   } else {
+    // Poll Docker daemon readiness — up to 60s (20 × 3s)
+    status.textContent = 'Checking Docker...'
+    let dockerReady = false
+    for (let i = 0; i < 20; i++) {
+      const dockerCheck = await window.ember.checkDockerDaemon()
+      if (dockerCheck.ok) {
+        dockerReady = true
+        break
+      }
+      status.textContent = `Waiting for Docker to start... (${(i + 1) * 3}s)`
+      await new Promise((r) => setTimeout(r, 3000))
+    }
+
+    if (!dockerReady) {
+      title.textContent = "Almost there."
+      voice.textContent = '"Docker isn\'t responding — I need it to run."'
+      status.textContent = "Docker didn't start within 60 seconds. Open Docker Desktop manually and try again."
+      btn.disabled = false
+      document.getElementById('btn-retry-api').style.display = ''
+      document.getElementById('done-troubleshooting').classList.remove('hidden')
+      document.getElementById('ember-version-label').textContent = 'not started'
+
+      const platform = await window.ember.getPlatform()
+      if (platform === 'darwin') document.getElementById('done-gatekeeper-note')?.classList.remove('hidden')
+      document.getElementById('startup-task-row').classList.remove('hidden')
+      const current = await window.ember.getStartupTask()
+      document.getElementById('startup-task-toggle').checked = current.enabled
+      return
+    }
+
     status.textContent = 'Starting Ember...'
     await window.ember.startApi(state.emberPath)
   }
 
-  // Poll health check every 3 seconds, up to 60 seconds
-  const maxAttempts = 20
+  // Poll health check every 3 seconds, up to 120 seconds (BUG-011)
+  const maxAttempts = 40
   let healthy = false
 
   for (let i = 0; i < maxAttempts; i++) {
@@ -1769,7 +1799,7 @@ async function loadEmberVersion() {
   } else {
     title.textContent = "Almost there."
     voice.textContent = '"I\'m ready — I just need a little help starting up."'
-    status.textContent = "Ember didn't start within 60 seconds. You can try starting it manually, or use Launch Services."
+    status.textContent = "Ember didn't start within 120 seconds. You can try starting it manually, or use Launch Services."
     btn.disabled = false
     document.getElementById('btn-retry-api').style.display = ''
     document.getElementById('done-troubleshooting').classList.remove('hidden')
@@ -2056,8 +2086,22 @@ document.getElementById('btn-skip-update').addEventListener('click', () => {
   showScreen('screen-welcome')
 })
 
+// "View updates" button on the Welcome screen banner — navigates to the
+// update screen using the stashed boot-time update data.
+document.getElementById('btn-view-updates').addEventListener('click', () => {
+  if (!cachedBootUpdates) return
+  prepareUpdateScreen(cachedBootUpdates)
+  pendingUpdates = {
+    backend: cachedBootUpdates.backend.hasUpdate,
+    ui: cachedBootUpdates.ui.hasUpdate,
+    installer: cachedBootUpdates.installer.hasUpdate,
+  }
+  showScreen('screen-update')
+})
+
 // Unified update — stores pending update info for the Update All button
 let pendingUpdates = null
+let cachedBootUpdates = null // stashed from init() when updates detected on launch
 
 document.getElementById('btn-run-update-all').addEventListener('click', async () => {
   if (!pendingUpdates) return
@@ -2190,15 +2234,10 @@ async function init() {
       const anyUpdate = updates.installer.hasUpdate || updates.backend.hasUpdate || updates.ui.hasUpdate
 
       if (anyUpdate) {
-        prepareUpdateScreen(updates)
-        pendingUpdates = {
-          backend: updates.backend.hasUpdate,
-          ui: updates.ui.hasUpdate,
-          installer: updates.installer.hasUpdate,
-        }
-        showScreen('screen-update')
-        preloadScreenData()
-        return
+        // Stash update info — don't auto-navigate to the update screen.
+        // Instead show a subtle banner on Welcome and let the user decide.
+        cachedBootUpdates = updates
+        document.getElementById('update-available-banner').classList.remove('hidden')
       }
     }
     // If GitHub unreachable or no updates, fall through to normal flow

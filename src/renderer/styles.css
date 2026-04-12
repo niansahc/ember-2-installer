@@ -83,6 +83,22 @@ body {
   opacity: 0.85;
 }
 
+/* ── Update available banner (Welcome screen) ──────────────────────── */
+
+.update-available-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 10px 16px;
+  background: rgba(255, 140, 0, 0.08);
+  border: 1px solid rgba(255, 140, 0, 0.25);
+  border-radius: 8px;
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
 /* ── Logo ──────────────────────────────────────────────────────────── */
 
 #logo-wrap {

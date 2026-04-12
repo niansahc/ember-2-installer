@@ -29,6 +29,13 @@
   <section id="screen-welcome" class="screen active">
     <h1>Hi, I'm Ember.</h1>
     <p class="subtitle">Let's get you set up.</p>
+
+    <!-- Subtle update notification — shown when updates are detected on launch -->
+    <div id="update-available-banner" class="update-available-banner hidden">
+      <span>Updates available for Ember.</span>
+      <button class="btn-link" id="btn-view-updates">View updates</button>
+    </div>
+
     <div class="btn-row">
       <button class="btn-primary" data-next="screen-prereqs">Next</button>
     </div>
