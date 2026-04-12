@@ -18,6 +18,7 @@ test.describe('Full Happy Path', () => {
   })
 
   test('complete install flow from Welcome to Done', async () => {
+    test.slow() // full flow + health check can exceed 30s
     // Screen 0: Welcome
     await expect(window.locator('h1').first()).toContainText('Ember')
     await window.locator('button[data-next="screen-prereqs"]').click()

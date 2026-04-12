@@ -291,17 +291,31 @@ document.getElementById('btn-install-all').addEventListener('click', async () =>
   btn.disabled = true
   btn.textContent = 'Installing...'
 
-  // Install Docker last (may need restart)
-  const sorted = [...missingPrereqs].sort((a, b) => {
-    if (a === 'docker') return 1
-    if (b === 'docker') return -1
-    return 0
-  })
+  // Git, Python, Node, and Ollama can install concurrently via winget.
+  // Docker installs last — it may need a restart and Ollama needs it.
+  const nonDocker = [...missingPrereqs].filter((n) => n !== 'docker')
+  const hasDocker = missingPrereqs.includes('docker')
 
-  for (const name of sorted) {
-    const row = document.getElementById(`prereq-${name}`)
+  if (nonDocker.length > 0) {
+    const results = await Promise.all(
+      nonDocker.map((name) => {
+        const row = document.getElementById(`prereq-${name}`)
+        const prereqBtn = row?.querySelector('.prereq-install-btn')
+        return installOnePrereq(name, prereqBtn).then((ok) => ({ name, ok }))
+      })
+    )
+    const failed = results.find((r) => !r.ok)
+    if (failed) {
+      btn.disabled = false
+      btn.textContent = 'Retry Remaining'
+      return
+    }
+  }
+
+  if (hasDocker) {
+    const row = document.getElementById('prereq-docker')
     const prereqBtn = row?.querySelector('.prereq-install-btn')
-    const ok = await installOnePrereq(name, prereqBtn)
+    const ok = await installOnePrereq('docker', prereqBtn)
     if (!ok) {
       btn.disabled = false
       btn.textContent = 'Retry Remaining'
@@ -1085,6 +1099,155 @@ function updateProgressBar(stepIndex, totalSteps) {
   }
 }
 
+// Flatten a steps list that may contain parallel groups (arrays) into a flat
+// list of individual step objects.  Used for progress bar counting and for
+// ensuring DOM elements exist for every step.
+function flattenSteps(steps) {
+  const flat = []
+  for (const item of steps) {
+    if (Array.isArray(item)) flat.push(...item)
+    else flat.push(item)
+  }
+  return flat
+}
+
+const STEP_FRIENDLY_NAMES = {
+  env: 'writing configuration',
+  venv: 'creating Python environment',
+  pip: 'installing dependencies',
+  apikey: 'setting up API key',
+  model: 'downloading model',
+  'embed-model': 'pulling embedding model',
+  'vision-dl': 'downloading vision model',
+  'build-ui': "building Ember's interface",
+  docker: 'starting search engine',
+}
+
+// Shared runner for both initial install and retry.  Handles single steps
+// and parallel groups (arrays of steps that run via Promise.all).
+async function runStepsFrom(steps, startIndex) {
+  const logBox = document.getElementById('install-log')
+  const retryBtn = document.getElementById('btn-install-retry')
+  if (retryBtn) retryBtn.style.display = 'none'
+
+  const flat = flattenSteps(steps)
+  const totalSteps = flat.length
+  let visualIndex = 0
+
+  // Count visual steps for items before startIndex so the progress bar is correct.
+  for (let i = 0; i < startIndex; i++) {
+    visualIndex += Array.isArray(steps[i]) ? steps[i].length : 1
+  }
+
+  for (let i = startIndex; i < steps.length; i++) {
+    const item = steps[i]
+
+    if (Array.isArray(item)) {
+      // ── Parallel group ──────────────────────────────────────────
+      // Mark every member as active
+      for (const step of item) {
+        const el = document.getElementById(`step-${step.id}`)
+        if (el) {
+          el.classList.add('active')
+          el.querySelector('.step-icon').textContent = '⏳'
+          el.querySelector('.step-label').textContent = step.label
+        }
+      }
+      updateProgressBar(visualIndex, totalSteps)
+
+      // Run all members concurrently
+      const results = await Promise.all(
+        item.map((step) =>
+          step.run().then(
+            (ok) => ({ step, ok }),
+            () => ({ step, ok: false })
+          )
+        )
+      )
+
+      // Update icons and detect failures
+      let groupFailed = null
+      for (const { step, ok } of results) {
+        const el = document.getElementById(`step-${step.id}`)
+        if (el) {
+          el.querySelector('.step-icon').textContent = ok ? '✅' : '❌'
+          el.querySelector('.step-label').textContent = step.label
+          el.classList.remove('active')
+        }
+        if (!ok && !step.nonFatal && !groupFailed) groupFailed = step
+      }
+
+      visualIndex += item.length
+
+      if (groupFailed) {
+        const stepName = STEP_FRIENDLY_NAMES[groupFailed.id] || groupFailed.id
+        logBox.textContent += `\nSomething went wrong during ${stepName}.\n`
+        logBox.textContent += 'Want to try again?\n'
+        const failedGroupIndex = i
+        showRetryButton(() => {
+          // Reset this group and all remaining steps
+          for (let j = failedGroupIndex; j < steps.length; j++) {
+            const members = Array.isArray(steps[j]) ? steps[j] : [steps[j]]
+            for (const s of members) {
+              const el = document.getElementById(`step-${s.id}`)
+              if (el) {
+                el.querySelector('.step-icon').textContent = '⏳'
+                el.querySelector('.step-label').textContent = s.label
+              }
+            }
+          }
+          runStepsFrom(steps, failedGroupIndex)
+        })
+        return false
+      }
+    } else {
+      // ── Single step ─────────────────────────────────────────────
+      const step = item
+      const el = document.getElementById(`step-${step.id}`)
+      const icon = el.querySelector('.step-icon')
+      const label = el.querySelector('.step-label')
+
+      el.classList.add('active')
+      icon.textContent = '⏳'
+      label.textContent = `${step.label} (${visualIndex + 1} of ${totalSteps})`
+      updateProgressBar(visualIndex, totalSteps)
+
+      const ok = await step.run()
+
+      icon.textContent = ok ? '✅' : '❌'
+      label.textContent = step.label
+      el.classList.remove('active')
+
+      visualIndex++
+
+      if (!ok && !step.nonFatal) {
+        const stepName = STEP_FRIENDLY_NAMES[step.id] || step.id
+        logBox.textContent += `\nSomething went wrong during ${stepName}.\n`
+        logBox.textContent += 'Want to try again?\n'
+        const failedIndex = i
+        showRetryButton(() => {
+          for (let j = failedIndex; j < steps.length; j++) {
+            const members = Array.isArray(steps[j]) ? steps[j] : [steps[j]]
+            for (const s of members) {
+              const el = document.getElementById(`step-${s.id}`)
+              if (el) {
+                el.querySelector('.step-icon').textContent = '⏳'
+                el.querySelector('.step-label').textContent = s.label
+              }
+            }
+          }
+          runStepsFrom(steps, failedIndex)
+        })
+        return false
+      }
+    }
+
+    updateProgressBar(visualIndex, totalSteps)
+  }
+
+  return true
+}
+
 async function runInstall() {
   startFunFacts()
 
@@ -1108,15 +1271,14 @@ async function runInstall() {
   const needsModelDownload = modelData && !modelData.recommended.find((m) => m.id === state.model)?.installed
   const needsVisionDownload = state.vision && modelData && !modelData.vision.find((m) => m.id === state.vision)?.installed
 
-  const steps = [
-    { id: 'env',    label: 'Writing configuration...',          run: writeEnv },
-    { id: 'venv',   label: 'Creating Python environment...',    run: runVenvStep },
-    { id: 'pip',    label: 'Installing dependencies...',        run: runPipStep },
-    { id: 'apikey', label: 'Setting up API key...',             run: () => runStep('apikey'), nonFatal: true },
+  // Build the parallel downloads group — pip + model pulls run concurrently
+  // since pip uses Python/pip and model pulls use Ollama (independent tools).
+  const parallelGroup = [
+    { id: 'pip', label: 'Installing dependencies...', run: runPipStep },
   ]
 
   if (needsModelDownload) {
-    steps.push({
+    parallelGroup.push({
       id: 'model',
       label: `Downloading ${state.model}...`,
       run: () => ensureModelDownloaded(state.model, 'model-download-log', 'model-download-label'),
@@ -1124,14 +1286,14 @@ async function runInstall() {
   }
 
   // Always pull the embedding model — required for retrieval since v0.13.0
-  steps.push({
+  parallelGroup.push({
     id: 'embed-model',
     label: 'Pulling embedding model (nomic-embed-text)...',
     run: pullEmbeddingModel,
   })
 
   if (needsVisionDownload) {
-    steps.push({
+    parallelGroup.push({
       id: 'vision-dl',
       label: `Downloading ${state.vision}...`,
       run: () => ensureModelDownloaded(state.vision, 'vision-download-log', 'vision-download-label'),
@@ -1139,18 +1301,24 @@ async function runInstall() {
     })
   }
 
-  steps.push({ id: 'build-ui', label: "Building Ember's interface...", run: () => runStep('build-ui') })
-  steps.push({ id: 'docker', label: 'Starting search engine...', run: runDockerStep })
+  const steps = [
+    { id: 'env',  label: 'Writing configuration...',       run: writeEnv },
+    { id: 'venv', label: 'Creating Python environment...', run: runVenvStep },
+    parallelGroup,  // pip + model downloads run concurrently
+    { id: 'apikey', label: 'Setting up API key...', run: () => runStep('apikey'), nonFatal: true },
+    { id: 'build-ui', label: "Building Ember's interface...", run: () => runStep('build-ui') },
+    { id: 'docker', label: 'Starting search engine...', run: runDockerStep },
+  ]
 
   // Ensure step elements exist for dynamic steps (model/vision downloads)
   const stepsContainer = document.querySelector('.install-steps')
-  for (const step of steps) {
+  const flat = flattenSteps(steps)
+  for (const step of flat) {
     if (!document.getElementById(`step-${step.id}`)) {
       const div = document.createElement('div')
       div.className = 'install-step'
       div.id = `step-${step.id}`
       div.innerHTML = `<span class="step-icon">⏳</span><span class="step-label">${step.label}</span>`
-      // Insert before the docker step if it exists, otherwise append
       const dockerEl = document.getElementById('step-docker')
       if (dockerEl) {
         stepsContainer.insertBefore(div, dockerEl)
@@ -1160,111 +1328,15 @@ async function runInstall() {
     }
   }
 
-  for (let i = 0; i < steps.length; i++) {
-    const step = steps[i]
-    const el = document.getElementById(`step-${step.id}`)
-    const icon = el.querySelector('.step-icon')
-    const label = el.querySelector('.step-label')
+  const ok = await runStepsFrom(steps, 0)
 
-    el.classList.add('active')
-    icon.textContent = '⏳'
-    label.textContent = `${step.label} (${i + 1} of ${steps.length})`
-    updateProgressBar(i, steps.length)
-
-    const ok = await step.run()
-
-    icon.textContent = ok ? '✅' : '❌'
-    label.textContent = step.label
-    el.classList.remove('active')
-
-    if (!ok && !step.nonFatal) {
-      const friendlyNames = {
-        env: 'writing configuration',
-        venv: 'creating Python environment',
-        pip: 'installing dependencies',
-        apikey: 'setting up API key',
-        model: 'downloading model',
-        'vision-dl': 'downloading vision model',
-        'build-ui': "building Ember's interface",
-        docker: 'starting search engine',
-      }
-      const stepName = friendlyNames[step.id] || step.id
-      logBox.textContent += `\nSomething went wrong during ${stepName}.\n`
-      logBox.textContent += 'Want to try again?\n'
-      const failedIndex = i
-      showRetryButton(() => {
-        // Reset only failed and remaining steps, retry from failed step
-        for (let j = failedIndex; j < steps.length; j++) {
-          const stepEl = document.getElementById(`step-${steps[j].id}`)
-          stepEl.querySelector('.step-icon').textContent = '⏳'
-          stepEl.querySelector('.step-label').textContent = steps[j].label
-        }
-        runInstallFrom(steps, failedIndex)
-      })
-      return
-    }
+  if (ok) {
+    window.ember.removeAllListeners('install-log')
+    window.ember.removeAllListeners('install-step-done')
+    stopFunFacts()
+    updateProgressBar(flat.length, flat.length)
+    showScreen('screen-agpl')
   }
-
-  // Clean up
-  window.ember.removeAllListeners('install-log')
-  window.ember.removeAllListeners('install-step-done')
-  stopFunFacts()
-  updateProgressBar(steps.length, steps.length)
-
-  // All done — show AGPL acknowledgment before done screen
-  showScreen('screen-agpl')
-}
-
-async function runInstallFrom(steps, startIndex) {
-  const logBox = document.getElementById('install-log')
-  // Hide retry button
-  const retryBtn = document.getElementById('btn-install-retry')
-  if (retryBtn) retryBtn.style.display = 'none'
-
-  for (let i = startIndex; i < steps.length; i++) {
-    const step = steps[i]
-    const el = document.getElementById(`step-${step.id}`)
-    const icon = el.querySelector('.step-icon')
-    const label = el.querySelector('.step-label')
-
-    el.classList.add('active')
-    icon.textContent = '⏳'
-    label.textContent = `${step.label} (${i + 1} of ${steps.length})`
-    updateProgressBar(i, steps.length)
-
-    const ok = await step.run()
-
-    icon.textContent = ok ? '✅' : '❌'
-    label.textContent = step.label
-    el.classList.remove('active')
-
-    if (!ok && !step.nonFatal) {
-      const friendlyNames = {
-        env: 'writing configuration', venv: 'creating Python environment',
-        pip: 'installing dependencies', apikey: 'setting up API key',
-        model: 'downloading model', 'vision-dl': 'downloading vision model',
-        'build-ui': "building Ember's interface", docker: 'starting search engine',
-      }
-      logBox.textContent += `\nSomething went wrong during ${friendlyNames[step.id] || step.id}.\n`
-      logBox.textContent += 'Want to try again?\n'
-      const failedIndex = i
-      showRetryButton(() => {
-        for (let j = failedIndex; j < steps.length; j++) {
-          const stepEl = document.getElementById(`step-${steps[j].id}`)
-          stepEl.querySelector('.step-icon').textContent = '⏳'
-          stepEl.querySelector('.step-label').textContent = steps[j].label
-        }
-        runInstallFrom(steps, failedIndex)
-      })
-      return
-    }
-  }
-
-  window.ember.removeAllListeners('install-log')
-  window.ember.removeAllListeners('install-step-done')
-  stopFunFacts()
-  updateProgressBar(steps.length, steps.length)
-  showScreen('screen-agpl')
 }
 
 function showRetryButton(onRetry) {
@@ -1711,6 +1783,45 @@ document.getElementById('startup-task-toggle').addEventListener('change', async 
   } else {
     statusEl.textContent = result.error || 'Failed to update startup setting.'
     e.target.checked = !e.target.checked // revert
+  }
+})
+
+// Developer mode toggle — expands/collapses the dev vault panel
+document.getElementById('dev-mode-toggle').addEventListener('change', (e) => {
+  const panel = document.getElementById('dev-mode-panel')
+  if (e.target.checked) {
+    panel.classList.remove('hidden')
+  } else {
+    panel.classList.add('hidden')
+    document.getElementById('dev-mode-status').textContent = ''
+  }
+})
+
+// Apply developer mode — writes to .env and creates vault directories
+document.getElementById('btn-apply-dev-mode').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-apply-dev-mode')
+  const statusEl = document.getElementById('dev-mode-status')
+  const demoVault = document.getElementById('dev-vault-demo').value.trim()
+  const testVault = document.getElementById('dev-vault-test').value.trim()
+
+  if (!demoVault || !testVault) {
+    statusEl.textContent = 'Both vault paths are required.'
+    return
+  }
+
+  btn.disabled = true
+  btn.textContent = 'Applying...'
+  statusEl.textContent = ''
+
+  const result = await window.ember.setupDevMode(state.emberPath, demoVault, testVault)
+
+  if (result.ok) {
+    btn.textContent = 'Applied'
+    statusEl.textContent = 'Developer mode enabled. Vault directories created.'
+  } else {
+    btn.textContent = 'Apply'
+    btn.disabled = false
+    statusEl.textContent = result.error || 'Failed to set up developer mode.'
   }
 })
 

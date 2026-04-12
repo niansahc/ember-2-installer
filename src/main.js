@@ -405,7 +405,7 @@ ipcMain.handle('clone-ember-repo', (_e, { parentDir }) => {
     } catch (err) {
       return resolve({ ok: false, error: `Cannot create directory: ${err.message}` })
     }
-    const proc = spawn('git', ['clone', REPO_BACKEND_URL], {
+    const proc = spawn('git', ['clone', '--depth', '1', REPO_BACKEND_URL], {
       cwd: parentDir,
       shell: true,
     })
@@ -461,7 +461,7 @@ ipcMain.handle('fresh-install-ember', (_e, { parentDir }) => {
     } catch (err) {
       return resolve({ ok: false, error: `Cannot remove existing directory: ${err.message}` })
     }
-    const proc = spawn('git', ['clone', REPO_BACKEND_URL], {
+    const proc = spawn('git', ['clone', '--depth', '1', REPO_BACKEND_URL], {
       cwd: parentDir, shell: true,
     })
     proc.stdout.on('data', (d) => mainWindow.webContents.send('clone-progress', d.toString()))
@@ -705,6 +705,49 @@ ipcMain.handle('write-env', (_e, { emberPath, vault, model, vision, host }) => {
 })
 
 // ---------------------------------------------------------------------------
+// IPC — Developer mode setup
+// ---------------------------------------------------------------------------
+
+const VAULT_SUBDIRS = [
+  'memory/conversation',
+  'memory/journal',
+  'memory/reflection',
+  'memory/state',
+  'memory/ingested',
+  'memory/archive',
+  'embeddings',
+  'imports',
+]
+
+ipcMain.handle('setup-dev-mode', (_e, { emberPath, demoVault, testVault }) => {
+  try {
+    // 1. Create vault directory structures
+    for (const vaultRoot of [demoVault, testVault]) {
+      for (const sub of VAULT_SUBDIRS) {
+        fs.mkdirSync(path.join(vaultRoot, sub), { recursive: true })
+      }
+    }
+
+    // 2. Append dev mode vars to .env (don't overwrite — append to existing)
+    const envPath = path.join(emberPath, '.env')
+    const demoFwd = demoVault.replace(/\\/g, '/')
+    const testFwd = testVault.replace(/\\/g, '/')
+    const devBlock = [
+      '\n',
+      '# ── Developer Mode ─────────────────────────────────────────────\n',
+      'EMBER_DEV_MODE=true\n',
+      `VAULT_PATH_DEMO=${demoFwd}\n`,
+      `VAULT_PATH_TEST=${testFwd}\n`,
+    ].join('')
+
+    fs.appendFileSync(envPath, devBlock, 'utf-8')
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+// ---------------------------------------------------------------------------
 // IPC — Install steps (streamed)
 // ---------------------------------------------------------------------------
 
@@ -791,7 +834,7 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     // Clone if not exists
     if (!fs.existsSync(uiDir)) {
       const cloneOk = await new Promise((resolve) => {
-        const proc = spawn('git', ['clone', REPO_UI_URL], {
+        const proc = spawn('git', ['clone', '--depth', '1', REPO_UI_URL], {
           cwd: path.dirname(emberPath), shell: true,
         })
         proc.stdout.on('data', (d) => mainWindow.webContents.send('install-log', { step, text: d.toString() }))
@@ -1265,7 +1308,7 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     if (!fs.existsSync(uiDir)) {
       log('Cloning ember-2-ui...\n')
       const cloneOk = await new Promise((resolve) => {
-        const proc = spawn('git', ['clone', REPO_UI_URL], {
+        const proc = spawn('git', ['clone', '--depth', '1', REPO_UI_URL], {
           cwd: path.dirname(emberPath), shell: true,
         })
         proc.stdout.on('data', (d) => log(d.toString()))
@@ -1375,7 +1418,7 @@ ipcMain.handle('run-git-pull', async (_e) => {
   if (!fs.existsSync(uiDir)) {
     log('Cloning ember-2-ui...\n')
     const cloneOk = await new Promise((resolve) => {
-      const proc = spawn('git', ['clone', REPO_UI_URL], {
+      const proc = spawn('git', ['clone', '--depth', '1', REPO_UI_URL], {
         cwd: path.dirname(emberPath), shell: true,
       })
       proc.stdout.on('data', (d) => log(d.toString()))
@@ -2188,6 +2231,13 @@ if (DEMO_MODE) {
   ipcMain.removeHandler('get-default-install-dir')
   ipcMain.handle('get-default-install-dir', () => {
     return process.platform === 'win32' ? 'C:\\Ember-2' : path.join(os.homedir(), 'Ember-2')
+  })
+
+  // Override dev mode — just pretend
+  ipcMain.removeHandler('setup-dev-mode')
+  ipcMain.handle('setup-dev-mode', async () => {
+    await sleep(300)
+    return { ok: true }
   })
 
   // Override ember scan
