@@ -1954,55 +1954,65 @@ async function playMatrixEasterEgg() {
   cleanup(rainInterval)
 }
 
-// Developer mode toggle — plays Matrix egg on first check, then shows panel
-document.getElementById('dev-mode-toggle').addEventListener('change', async (e) => {
-  const panel = document.getElementById('dev-mode-panel')
-  if (e.target.checked) {
-    if (!matrixPlayed) {
-      try {
-        await playMatrixEasterEgg()
-      } catch (err) {
-        // If animation fails for any reason, skip it gracefully
-        console.error('[Matrix] Animation failed, skipping:', err)
-        matrixPlayed = true
-        const overlay = document.getElementById('matrix-overlay')
-        overlay.classList.add('hidden')
-        try { window.ember.setFullscreen(false) } catch {}
+// Developer mode toggles — both the Done screen and Update screen toggles
+// share the same Matrix animation and apply logic.
+document.querySelectorAll('.dev-mode-trigger, #dev-mode-toggle').forEach((toggle) => {
+  toggle.addEventListener('change', async (e) => {
+    // Find the sibling panel (next .dev-mode-panel in the same section)
+    const section = e.target.closest('.dev-mode-section') || e.target.closest('section')
+    const panel = section.querySelector('.dev-mode-panel')
+    if (e.target.checked) {
+      if (!matrixPlayed) {
+        try {
+          await playMatrixEasterEgg()
+        } catch (err) {
+          console.error('[Matrix] Animation failed, skipping:', err)
+          matrixPlayed = true
+          const overlay = document.getElementById('matrix-overlay')
+          overlay.classList.add('hidden')
+          try { window.ember.setFullscreen(false) } catch {}
+        }
       }
+      if (panel) panel.classList.remove('hidden')
+    } else {
+      if (panel) panel.classList.add('hidden')
     }
-    panel.classList.remove('hidden')
-  } else {
-    panel.classList.add('hidden')
-    document.getElementById('dev-mode-status').textContent = ''
-  }
+  })
 })
 
-// Apply developer mode — writes to .env and creates vault directories
-document.getElementById('btn-apply-dev-mode').addEventListener('click', async () => {
-  const btn = document.getElementById('btn-apply-dev-mode')
-  const statusEl = document.getElementById('dev-mode-status')
-  const demoVault = document.getElementById('dev-vault-demo').value.trim()
-  const testVault = document.getElementById('dev-vault-test').value.trim()
+// Apply developer mode — works from both Done and Update screen panels.
+document.querySelectorAll('.dev-mode-apply-btn, #btn-apply-dev-mode').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    const section = btn.closest('.dev-mode-panel') || btn.closest('.dev-mode-section')
+    // Resolve field IDs — data attributes for the update screen, hardcoded for Done
+    const demoId = btn.dataset.demo || 'dev-vault-demo'
+    const testId = btn.dataset.test || 'dev-vault-test'
+    const statusId = btn.dataset.status || 'dev-mode-status'
 
-  if (!demoVault || !testVault) {
-    statusEl.textContent = 'Both vault paths are required.'
-    return
-  }
+    const statusEl = document.getElementById(statusId)
+    const demoVault = document.getElementById(demoId).value.trim()
+    const testVault = document.getElementById(testId).value.trim()
 
-  btn.disabled = true
-  btn.textContent = 'Applying...'
-  statusEl.textContent = ''
+    if (!demoVault || !testVault) {
+      statusEl.textContent = 'Both vault paths are required.'
+      return
+    }
 
-  const result = await window.ember.setupDevMode(state.emberPath, demoVault, testVault)
+    btn.disabled = true
+    btn.textContent = 'Applying...'
+    statusEl.textContent = ''
 
-  if (result.ok) {
-    btn.textContent = 'Applied'
-    statusEl.textContent = 'Developer mode enabled. Vault directories created.'
-  } else {
-    btn.textContent = 'Apply'
-    btn.disabled = false
-    statusEl.textContent = result.error || 'Failed to set up developer mode.'
-  }
+    const result = await window.ember.setupDevMode(state.emberPath, demoVault, testVault)
+
+    if (result.ok) {
+      btn.textContent = 'Applied'
+      statusEl.textContent = 'Developer mode enabled. Vault directories created.'
+    } else {
+      btn.textContent = 'Apply'
+      btn.disabled = false
+      statusEl.textContent = result.error || 'Failed to set up developer mode.'
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------

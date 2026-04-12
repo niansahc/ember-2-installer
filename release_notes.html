@@ -1,7 +1,29 @@
-<!-- Release notes — rendered in the update screen panel.
-     Write content here before each release. The installer reads this file
-     and injects it as innerHTML into the #release-notes-content element.
-     Style with the classes defined in styles.css (.rn-h2, .rn-p, .rn-li, etc.)
-     or use plain HTML — the panel inherits the installer's dark theme. -->
+<!-- Release notes for v0.15.0 — rendered in the update screen panel. -->
 
-<p class="rn-p">No release notes yet. Content will be added before ship.</p>
+<p class="rn-p"><span class="rn-strong">TLDR:</span> v0.15.0 is a quality of life release. Ember got smarter about when to search, better at citing where her answers come from, and faster overall.</p>
+
+<h2 class="rn-h2">Web Search</h2>
+<div class="rn-li"><span class="rn-strong">Ask-first mode:</span> Ember asks before searching. She flags the gap and checks if you want her to look it up.</div>
+<div class="rn-li"><span class="rn-strong">Autonomous mode:</span> Toggle in Settings if you'd rather she just handle it.</div>
+<div class="rn-li"><span class="rn-strong">Broader triggers:</span> Current events, financial data, sports, culture, and time-sensitive queries now route to web search without you having to spell it out.</div>
+
+<h2 class="rn-h2">Memory and Retrieval</h2>
+<div class="rn-li"><span class="rn-strong">Temporal decay:</span> Recent records score higher than older ones on the same query. Last week outweighs last month.</div>
+<div class="rn-li"><span class="rn-strong">Source citations:</span> Every response now shows where it came from. Source: Vault, Source: Web Search, Source: LLM, or any combination.</div>
+
+<h2 class="rn-h2">Character and Behavior</h2>
+<div class="rn-li"><span class="rn-strong">Parenthetical question loop fixed:</span> Ember was ending responses with questions in parentheses and continuing after you asked her to stop. Fixed.</div>
+<div class="rn-li"><span class="rn-strong">Topic fixation fixed:</span> When you say you don't want to talk about something, she drops it.</div>
+<div class="rn-li"><span class="rn-strong">Lowercase bug fixed:</span> Internal reasoning traces were leaking into the stream and lowercasing everything. Fixed.</div>
+<div class="rn-li"><span class="rn-strong">Constitutional review overhaul:</span> Review now asks three targeted questions instead of sending the full constitution. Faster and more accurate.</div>
+
+<h2 class="rn-h2">Security and Privacy</h2>
+<div class="rn-li"><span class="rn-strong">Change PIN:</span> Now available in Settings under Security.</div>
+<div class="rn-li"><span class="rn-strong">Disk encryption check:</span> Ember checks whether full disk encryption is enabled and shows a reminder if it isn't.</div>
+
+<h2 class="rn-h2">Services</h2>
+<div class="rn-li"><span class="rn-strong">Auto-start:</span> The API starts automatically at login on Windows, macOS, and Linux.</div>
+<div class="rn-li"><span class="rn-strong">Service controls:</span> Stop and restart the API from the glowing dot in the corner of the UI.</div>
+
+<h2 class="rn-h2">Developer Tools</h2>
+<div class="rn-li"><span class="rn-strong">Vault switcher:</span> Switch between live, demo, and test vaults without restarting. Enable developer mode during install or via EMBER_DEV_MODE=true in .env.</div>

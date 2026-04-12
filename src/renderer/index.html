@@ -589,6 +589,27 @@
       <button class="btn-secondary" id="btn-skip-update">Skip</button>
       <button class="btn-primary" id="btn-run-update-all">Update All</button>
     </div>
+
+    <!-- Developer mode — also available on the update screen -->
+    <div class="dev-mode-section">
+      <label class="checkbox-label dev-mode-label">
+        <input type="checkbox" id="dev-mode-toggle-update" class="dev-mode-trigger">
+        Enable developer mode
+      </label>
+      <div id="dev-mode-panel-update" class="dev-mode-panel hidden">
+        <p class="hint">Creates demo and test vault directories for development. Writes dev paths to <code>.env</code>.</p>
+        <div class="dev-mode-field">
+          <label class="hint" for="dev-vault-demo-update">Demo vault</label>
+          <input type="text" id="dev-vault-demo-update" class="path-input" value="C:\DEVEmberVault\demo_vault">
+        </div>
+        <div class="dev-mode-field">
+          <label class="hint" for="dev-vault-test-update">Test vault</label>
+          <input type="text" id="dev-vault-test-update" class="path-input" value="C:\DEVEmberVault\test_vault">
+        </div>
+        <button class="btn-secondary btn-sm dev-mode-apply-btn" data-demo="dev-vault-demo-update" data-test="dev-vault-test-update" data-status="dev-mode-status-update">Apply</button>
+        <p class="hint" id="dev-mode-status-update"></p>
+      </div>
+    </div>
   </section>
 
   <!-- Post-update celebration overlay — shows for ~8s after a successful update -->
