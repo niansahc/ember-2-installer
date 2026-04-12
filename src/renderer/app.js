@@ -1361,7 +1361,7 @@ document.getElementById('btn-agpl-acknowledge').addEventListener('click', () => 
   loadEmberVersion()
 })
 
-// Launch Ember — runs the full launcher script (Docker, SearXNG, API, browser)
+// Launch Services — runs the full launcher script (Docker, SearXNG, API, browser)
 document.getElementById('btn-launch-ember').addEventListener('click', async () => {
   const btn = document.getElementById('btn-launch-ember')
   const launchStatus = document.getElementById('launch-status')
