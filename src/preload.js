@@ -102,6 +102,10 @@ contextBridge.exposeInMainWorld('ember', {
   setStartupTask: (emberPath, enabled) => ipcRenderer.invoke('set-startup-task', { emberPath, enabled }),
   getStartupTask: () => ipcRenderer.invoke('get-startup-task'),
 
+  // Developer mode
+  setupDevMode: (emberPath, demoVault, testVault) =>
+    ipcRenderer.invoke('setup-dev-mode', { emberPath, demoVault, testVault }),
+
   // UI built check
   checkUiBuilt: () => ipcRenderer.invoke('check-ui-built'),
 

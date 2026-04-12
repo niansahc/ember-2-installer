@@ -1170,3 +1170,50 @@ p {
   margin-top: 14px;
   letter-spacing: 0.04em;
 }
+
+/* ── Developer mode (Done screen) ─────────────────────────────── */
+
+.dev-mode-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.dev-mode-label {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+
+.dev-mode-label:hover {
+  opacity: 1;
+}
+
+.dev-mode-panel {
+  margin-top: 10px;
+  padding: 14px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.dev-mode-field {
+  margin: 8px 0;
+}
+
+.dev-mode-field label {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 0.78rem;
+}
+
+.dev-mode-field .path-input {
+  width: 100%;
+  font-size: 0.82rem;
+  padding: 7px 10px;
+}
+
+#dev-mode-status {
+  margin-top: 6px;
+  font-size: 0.8rem;
+}

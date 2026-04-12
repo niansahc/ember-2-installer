@@ -502,6 +502,27 @@
       <p class="hint">On Mac, you may see a security warning the first time you open Ember. Right-click the app and select <strong>Open</strong>, then click <strong>Open</strong> again to bypass Gatekeeper. This is a one-time step.</p>
     </div>
 
+    <!-- Developer mode — subtle, at bottom of action area -->
+    <div id="dev-mode-section" class="dev-mode-section">
+      <label class="checkbox-label dev-mode-label">
+        <input type="checkbox" id="dev-mode-toggle">
+        Enable developer mode
+      </label>
+      <div id="dev-mode-panel" class="dev-mode-panel hidden">
+        <p class="hint">Creates demo and test vault directories for development. Writes dev paths to <code>.env</code>.</p>
+        <div class="dev-mode-field">
+          <label class="hint" for="dev-vault-demo">Demo vault</label>
+          <input type="text" id="dev-vault-demo" class="path-input" value="C:\DEVEmberVault\demo_vault">
+        </div>
+        <div class="dev-mode-field">
+          <label class="hint" for="dev-vault-test">Test vault</label>
+          <input type="text" id="dev-vault-test" class="path-input" value="C:\DEVEmberVault\test_vault">
+        </div>
+        <button class="btn-secondary btn-sm" id="btn-apply-dev-mode">Apply</button>
+        <p class="hint" id="dev-mode-status"></p>
+      </div>
+    </div>
+
     <!-- Ember-2 backend version & updates -->
     <div class="done-update-section">
       <div class="done-version-row">
