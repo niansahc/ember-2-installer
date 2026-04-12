@@ -1217,3 +1217,62 @@ p {
   margin-top: 6px;
   font-size: 0.8rem;
 }
+
+/* ── Release notes panel (update screen) ──────────────────────── */
+
+.release-notes-panel {
+  margin-top: 14px;
+  padding: 14px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.release-notes-heading {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+.release-notes-content {
+  max-height: 200px;
+  overflow-y: auto;
+  font-size: 0.84rem;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+/* Utility classes for release_notes.html content */
+
+.rn-h2 {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--accent);
+  margin: 10px 0 4px;
+}
+
+.rn-p {
+  margin: 4px 0;
+  color: var(--text-dim);
+}
+
+.rn-li {
+  list-style: none;
+  padding-left: 14px;
+  position: relative;
+  margin: 3px 0;
+  color: var(--text);
+}
+
+.rn-li::before {
+  content: '\2022';
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+}
+
+.rn-strong {
+  color: var(--text);
+  font-weight: 600;
+}

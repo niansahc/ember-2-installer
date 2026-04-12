@@ -1562,6 +1562,26 @@ function prepareUpdateScreen(updates) {
   document.getElementById('update-voice').textContent = pickUpdateVoiceLine(count)
 
   lastUpdateInfo = updates
+
+  // Load release notes panel (fire-and-forget — non-blocking)
+  loadReleaseNotes()
+}
+
+// Fetch release_notes.html from the app bundle and inject into the panel.
+async function loadReleaseNotes() {
+  const panel = document.getElementById('release-notes-panel')
+  const content = document.getElementById('release-notes-content')
+  try {
+    const result = await window.ember.getReleaseNotes()
+    if (result.ok && result.html.trim()) {
+      content.innerHTML = result.html
+      panel.classList.remove('hidden')
+    } else {
+      panel.classList.add('hidden')
+    }
+  } catch {
+    panel.classList.add('hidden')
+  }
 }
 
 // Hold the celebration overlay for `durationMs` after a successful update.

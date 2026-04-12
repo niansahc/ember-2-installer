@@ -705,6 +705,29 @@ ipcMain.handle('write-env', (_e, { emberPath, vault, model, vision, host }) => {
 })
 
 // ---------------------------------------------------------------------------
+// IPC — Release notes (HTML file read)
+// ---------------------------------------------------------------------------
+
+ipcMain.handle('get-release-notes', () => {
+  try {
+    // Look for release_notes.html in the app root (packaged: resources/app/,
+    // dev: project root).
+    const candidates = [
+      path.join(__dirname, '..', 'release_notes.html'),
+      path.join(__dirname, 'release_notes.html'),
+    ]
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        return { ok: true, html: fs.readFileSync(p, 'utf-8') }
+      }
+    }
+    return { ok: false, html: '' }
+  } catch {
+    return { ok: false, html: '' }
+  }
+})
+
+// ---------------------------------------------------------------------------
 // IPC — Developer mode setup
 // ---------------------------------------------------------------------------
 

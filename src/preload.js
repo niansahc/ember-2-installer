@@ -102,6 +102,9 @@ contextBridge.exposeInMainWorld('ember', {
   setStartupTask: (emberPath, enabled) => ipcRenderer.invoke('set-startup-task', { emberPath, enabled }),
   getStartupTask: () => ipcRenderer.invoke('get-startup-task'),
 
+  // Release notes
+  getReleaseNotes: () => ipcRenderer.invoke('get-release-notes'),
+
   // Developer mode
   setupDevMode: (emberPath, demoVault, testVault) =>
     ipcRenderer.invoke('setup-dev-mode', { emberPath, demoVault, testVault }),
