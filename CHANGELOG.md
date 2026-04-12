@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.7.0 — 2026-04-12
+
+### Features
+- Update screen cute touches — rotating voice lines, per-row changelog notes, row flame animations during update, 8-second post-update celebration card
+- HTML release notes panel on update screen — renders release_notes.html with scrollable "What's new" section
+- Developer mode setup — checkbox on Done and Update screens, creates demo/test vault directories, writes dev config to .env
+- Matrix easter egg on developer mode unlock — fullscreen Ember-orange rain with hearts, kitties, gems; typed message with blinking cursor; ESC to skip
+- Rename Done screen buttons — "Launch Services" and "Open Ember" with explanatory hint
+
+### Performance
+- Parallelize pip install + model downloads — run concurrently since they use independent tools
+- Parallelize winget prerequisite installs — Git, Python, Node, Ollama install concurrently; Docker last
+- Shallow git clones — `--depth 1` on all clone operations
+
+### Documentation
+- Installer performance audit for v0.15.0
+- v0.15.0 release notes rendered as HTML
+
+### Tests
+- 72 Playwright e2e tests (up from 48)
+
+---
+
 ## v0.6.2 — 2026-04-10
 
 ### Security
