@@ -103,8 +103,14 @@ app.whenReady().then(() => {
   } catch {}
 
   // Set up installer self-updates (only when packaged + updater available)
+  // Update detection is handled by checkAllUpdates() in the renderer's init().
+  // electron-updater is only used for the download/install mechanism, NOT for
+  // startup checks — those caused unprompted OS-level popups and error dialogs.
   if (autoUpdater) {
     autoUpdater.autoDownload = false
+    autoUpdater.autoInstallOnAppQuit = false
+
+    autoUpdater.on('error', () => {})
 
     autoUpdater.on('update-available', (info) => {
       if (mainWindow) {
@@ -128,10 +134,6 @@ app.whenReady().then(() => {
         mainWindow.webContents.send('installer-update-downloaded')
       }
     })
-
-    if (IS_PACKAGED) {
-      autoUpdater.checkForUpdates().catch(() => {})
-    }
   }
 
   app.on('activate', () => {
