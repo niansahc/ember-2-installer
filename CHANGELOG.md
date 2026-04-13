@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.7.2 — 2026-04-13
+
+### Bug Fixes
+- Disable NSIS "Run after finish" to prevent unprompted installer relaunch
+- Docker readiness check polls container health after `docker compose up -d`
+- Remove jarring installer-update-banner popup on launch — rely on subtle Welcome-screen banner
+
+### Documentation
+- Sync CLAUDE.md version (v0.7.1) and test count (73)
+- Expand README with current feature list, platform table, and dev commands
+- Add explicit release process and gates to CLAUDE.md
+
+### Tests
+- 73 Playwright e2e tests
+
+---
+
 ## v0.7.1 — 2026-04-12
 
 ### Bug Fixes
