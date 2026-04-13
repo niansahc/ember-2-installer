@@ -16,7 +16,7 @@ The installer clones ember-2 and ember-2-ui, builds the UI, installs dependencie
 
 ## Current State
 
-v0.6.1. 48 Playwright tests passing. Produces Windows NSIS installer (primary), Mac DMG, and Linux AppImage (both best-effort until tested on real hardware).
+v0.7.1. 73 Playwright tests passing. Produces Windows NSIS installer (primary), Mac DMG, and Linux AppImage (both best-effort until tested on real hardware).
 
 ---
 
