@@ -28,6 +28,7 @@ linux:
 
 nsis:
   oneClick: false
+  perMachine: true
   allowToChangeInstallationDirectory: true
   installerIcon: assets/Ember2.ico
   installerHeaderIcon: assets/Ember2.ico
