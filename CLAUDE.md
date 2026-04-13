@@ -140,66 +140,50 @@ release-please reads these commit messages to auto-generate changelogs and deter
 
 ---
 
-## Release Checklist
+## Release Process
 
-**Critical principle: CC runs the full release process. Nothing is "done" until it is publicly downloadable. Never assume the human is cutting the release unless they explicitly say so.**
+### Gates — mandatory before any release or patch is cut
 
-A release is not complete at commit. A release is not complete at tag. A release is complete when:
-- The GitHub Release is published (not draft)
-- Artifacts are attached (installer .exe / source)
-- latest.yml is present in release assets (installer only)
-- The release is visible and downloadable at the GitHub Releases URL
-- CC has verified the above and reported the URL
+**Documentation gate (all three repos):**
+- [ ] CLAUDE.md version and test count current
+- [ ] TDD updated to reflect what shipped (G only)
+- [ ] README reflects current features
+- [ ] CHANGELOG.md current (release-please handles via commits)
 
-### Pre-release (run before every release)
+**Quality gate:**
+- [ ] All tests passing
+- [ ] Retrieval eval passing with no regression (G only)
+- [ ] No flaky tests carried forward
 
-**ember-2 (backend):**
-- [ ] All tests passing: pytest tests/
-- [ ] Retrieval eval passing: python tools/eval_retrieval.py -- no regression
-- [ ] Conversation eval run: python tools/eval_conversations.py -- document results
-- [ ] CHANGELOG.md updated
-- [ ] version.json bumped
-- [ ] All changes committed and pushed to main: git push origin main
-- [ ] Constitution, nature, and Lodestone layers reviewed for coherence
-- [ ] Research review: any watch items ready to graduate to roadmap?
+**Coordination gate:**
+- [ ] All three repos confirm docs and tests green
+- [ ] Human approves before any tag is created
+- [ ] GitHub Release not created until human says go
 
-**ember-2-ui (frontend):**
-- [ ] All Playwright tests passing: npm run test:e2e
-- [ ] CHANGELOG.md updated
-- [ ] package.json version bumped
-- [ ] All changes committed and pushed to main: git push origin main
-- [ ] UI rebuilt from correct source: npm ci && npm run build
+### Sequence
 
-**ember-2-installer (installer):**
-- [ ] All Playwright tests passing
-- [ ] CHANGELOG.md updated (release-please handles this via conventional commits)
-- [ ] package.json version bumped (release-please handles this via conventional commits)
-- [ ] All changes committed and pushed to main: git push origin main
-- [ ] Frontend freshly built from pinned ember-2-ui tag before packaging
-- [ ] Backend version pinned and documented in release notes
-- [ ] Installer built: npm run dist
-- [ ] app-update.yml present in dist/win-unpacked/resources/ -- verify before publishing
-- [ ] latest.yml will be attached to release by electron-builder -- verify after publishing
+1. G, M, Y each complete documentation and quality gates
+2. Each reports green to manager
+3. Manager confirms all three green and gets human approval
+4. G coordinates the release — tags all three repos, creates GitHub Releases
+5. Y attaches installer artifacts (.exe, latest.yml)
+6. G verifies all three releases are publicly visible
+7. G reports release URLs — release is not done until this step
 
-### Release (CC runs this, not the human)
+### Y independent releases
 
-- [ ] Git tag created: git tag vX.X.X
-- [ ] Tag pushed: git push origin vX.X.X
-- [ ] GitHub Release created (NOT draft): gh release create vX.X.X --title "vX.X.X" --notes "..." --latest
-- [ ] Artifacts attached to release (installer .exe for yellow, source zip for green)
-- [ ] Release verified as published and visible: gh release view vX.X.X
-- [ ] Release URL reported to human: https://github.com/niansahc/ember-2-installer/releases/tag/vX.X.X
+Y may cut an installer-only release when:
+- Changes are installer-specific only (no backend or UI updates)
+- Human explicitly approves
+- Y completes documentation and quality gates independently
+- Y tags, creates GitHub Release, attaches artifacts, and reports URL
 
-### Post-release verification (CC runs this)
+Y does NOT cut independent releases when backend or UI changes are involved — coordinate with G.
 
-- [ ] Confirm release appears at https://github.com/niansahc/ember-2-installer/releases
-- [ ] Confirm latest.yml is present in release assets (installer only)
-- [ ] Confirm version matches package.json / version.json
-- [ ] Report to human: "Release vX.X.X is live at [URL]. Users can download/update now."
+### release-please
 
-### Patch releases
-
-Patch releases follow the same checklist. There are no shortcuts for patches. A patch that is committed but not published is not a patch -- it is unpublished work. Every patch must complete the full release process before being called done.
+All three repos use release-please for automated release PRs.
+Conventional commits are required. Release PRs require human approval before merging.
 
 ---
 
