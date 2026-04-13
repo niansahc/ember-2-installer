@@ -7,7 +7,7 @@ publish:
   repo: ember-2-installer
 
 directories:
-  output: dist
+  output: C:/temp/ember-dist
 
 files:
   - src/**/*
