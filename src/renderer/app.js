@@ -2225,6 +2225,7 @@ async function init() {
 
   // Check for updates across all three repos (if already installed)
   const emberPath = await window.ember.getEmberPath()
+  if (emberPath) state.emberPath = emberPath
 
   if (emberPath) {
     const updates = await window.ember.checkAllUpdates(state.host)
