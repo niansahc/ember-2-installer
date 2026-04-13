@@ -855,8 +855,35 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
       }
       mainWindow.webContents.send('install-log', { step, text: 'Docker daemon ready ✓\n' })
     }
-    cmd = 'docker'
-    args = ['compose', 'up', '-d']
+    // Run docker compose up -d, then poll until the container is healthy
+    const composeResult = await runSpawn('docker', ['compose', 'up', '-d'], emberPath, step)
+    if (!composeResult.ok) return composeResult
+
+    // Poll for SearXNG container readiness (up to 60s)
+    mainWindow.webContents.send('install-log', { step, text: 'Waiting for search engine to be ready...\n' })
+    let healthy = false
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 3000))
+      healthy = await new Promise((resolve) => {
+        const proc = spawn('docker', ['compose', 'ps', '--status', 'running', '-q'], {
+          cwd: emberPath, shell: true,
+        })
+        let out = ''
+        proc.stdout.on('data', (d) => (out += d.toString()))
+        proc.on('close', (code) => resolve(code === 0 && out.trim().length > 0))
+        proc.on('error', () => resolve(false))
+      })
+      if (healthy) break
+      mainWindow.webContents.send('install-log', { step, text: 'Waiting for search engine container...\n' })
+    }
+    if (!healthy) {
+      mainWindow.webContents.send('install-log', { step, text: 'Search engine container did not become ready in time.\n' })
+      mainWindow.webContents.send('install-step-done', { step, ok: false })
+      return { ok: false }
+    }
+    mainWindow.webContents.send('install-log', { step, text: 'Search engine ready ✓\n' })
+    mainWindow.webContents.send('install-step-done', { step, ok: true })
+    return { ok: true }
   } else if (step === 'build-ui') {
     // Clone ember-2-ui, install, build, copy to ember-2/ui/
     const uiDir = path.join(path.dirname(emberPath), 'ember-2-ui')
@@ -2070,9 +2097,11 @@ if (DEMO_MODE) {
         ],
       },
       docker: {
-        delay: 1500,
+        delay: 2500,
         logs: [
           'Creating ember-searxng ... done\n',
+          'Waiting for search engine to be ready...\n',
+          'Search engine ready ✓\n',
         ],
       },
     }

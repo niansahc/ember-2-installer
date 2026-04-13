@@ -2050,10 +2050,9 @@ document.querySelectorAll('.dev-mode-apply-btn, #btn-apply-dev-mode').forEach((b
 // ---------------------------------------------------------------------------
 
 window.ember.onInstallerUpdateAvailable((data) => {
-  const banner = document.getElementById('installer-update-banner')
-  const text = document.getElementById('installer-update-text')
-  text.textContent = `Ember Setup ${data.version} is available.`
-  banner.classList.remove('hidden')
+  // Don't show the top banner on launch — updates are surfaced via the
+  // subtle Welcome-screen banner from checkAllUpdates() instead.
+  state.installerUpdateVersion = data.version
 })
 
 document.getElementById('btn-installer-update').addEventListener('click', async () => {
