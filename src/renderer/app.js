@@ -1819,7 +1819,17 @@ async function loadEmberVersion() {
   startupRow.classList.remove('hidden')
 
   const current = await window.ember.getStartupTask()
-  startupToggle.checked = current.enabled
+  if (!current.enabled) {
+    // Auto-register startup task on first install so the API starts at login.
+    // Uses watchdog.py (crash recovery, signal-based restart/stop).
+    const autoResult = await window.ember.setStartupTask(state.emberPath, true)
+    startupToggle.checked = autoResult.ok
+    if (autoResult.ok) {
+      document.getElementById('startup-task-status').textContent = 'Ember will start automatically at logon.'
+    }
+  } else {
+    startupToggle.checked = true
+  }
 }
 
 // Startup task toggle (all platforms)

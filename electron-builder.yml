@@ -34,3 +34,4 @@ nsis:
   installerHeaderIcon: assets/Ember2.ico
   createDesktopShortcut: true
   createStartMenuShortcut: true
+  include: build/uninstaller.nsh

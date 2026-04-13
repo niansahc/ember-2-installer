@@ -1691,13 +1691,24 @@ ipcMain.handle('set-startup-task', async (_e, { emberPath, enabled }) => {
         proc.on('error', () => resolve({ ok: false }))
       })
     }
-    const scriptPath = path.join(emberPath, 'launch_ember.bat')
-    if (!fs.existsSync(scriptPath)) {
-      return { ok: false, error: `Launcher script not found: ${scriptPath}` }
+    // Use watchdog.py via venv Python — handles API lifecycle, crash recovery,
+    // and signal-based restart/stop. Falls back to launch_ember.bat if watchdog
+    // or venv is missing (pre-v0.16.0 installs).
+    const venvPython = path.join(emberPath, '.venv', 'Scripts', 'python.exe')
+    const watchdog = path.join(emberPath, 'scripts', 'watchdog.py')
+    let taskCommand
+    if (fs.existsSync(venvPython) && fs.existsSync(watchdog)) {
+      taskCommand = `"${venvPython}" "${watchdog}"`
+    } else {
+      const fallback = path.join(emberPath, 'launch_ember.bat')
+      if (!fs.existsSync(fallback)) {
+        return { ok: false, error: 'Neither watchdog.py nor launch_ember.bat found' }
+      }
+      taskCommand = `"${fallback}"`
     }
     return new Promise((resolve) => {
       const proc = spawn('schtasks', [
-        '/Create', '/TN', STARTUP_TASK_NAME, '/TR', `"${scriptPath}"`,
+        '/Create', '/TN', STARTUP_TASK_NAME, '/TR', taskCommand,
         '/SC', 'ONLOGON', '/RL', 'LIMITED', '/F',
       ], { shell: true })
       proc.on('close', (code) => resolve({ ok: code === 0 }))
@@ -1716,10 +1727,17 @@ ipcMain.handle('set-startup-task', async (_e, { emberPath, enabled }) => {
       try { fs.unlinkSync(LAUNCHAGENT_PATH) } catch {}
       return { ok: true }
     }
+    // Prefer watchdog.py via venv Python; fall back to launch_ember.sh
+    const venvPython = path.join(emberPath, '.venv', 'bin', 'python')
+    const watchdog = path.join(emberPath, 'scripts', 'watchdog.py')
+    const useWatchdog = fs.existsSync(venvPython) && fs.existsSync(watchdog)
     const scriptPath = path.join(emberPath, 'launch_ember.sh')
-    if (!fs.existsSync(scriptPath)) {
-      return { ok: false, error: `Launcher script not found: ${scriptPath}` }
+    if (!useWatchdog && !fs.existsSync(scriptPath)) {
+      return { ok: false, error: 'Neither watchdog.py nor launch_ember.sh found' }
     }
+    const progArgs = useWatchdog
+      ? `<string>${venvPython}</string>\n    <string>${watchdog}</string>`
+      : `<string>/bin/bash</string>\n    <string>${scriptPath}</string>`
     const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -1728,8 +1746,7 @@ ipcMain.handle('set-startup-task', async (_e, { emberPath, enabled }) => {
   <string>${LAUNCHAGENT_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/bash</string>
-    <string>${scriptPath}</string>
+    ${progArgs}
   </array>
   <key>WorkingDirectory</key>
   <string>${emberPath}</string>
@@ -1764,17 +1781,24 @@ ipcMain.handle('set-startup-task', async (_e, { emberPath, enabled }) => {
       try { fs.unlinkSync(SYSTEMD_UNIT_PATH) } catch {}
       return { ok: true }
     }
+    // Prefer watchdog.py via venv Python; fall back to launch_ember.sh
+    const venvPython = path.join(emberPath, '.venv', 'bin', 'python')
+    const watchdog = path.join(emberPath, 'scripts', 'watchdog.py')
+    const useWatchdog = fs.existsSync(venvPython) && fs.existsSync(watchdog)
     const scriptPath = path.join(emberPath, 'launch_ember.sh')
-    if (!fs.existsSync(scriptPath)) {
-      return { ok: false, error: `Launcher script not found: ${scriptPath}` }
+    if (!useWatchdog && !fs.existsSync(scriptPath)) {
+      return { ok: false, error: 'Neither watchdog.py nor launch_ember.sh found' }
     }
+    const execStart = useWatchdog
+      ? `${venvPython} ${watchdog}`
+      : `/bin/bash ${scriptPath}`
     const unit = `[Unit]
 Description=Ember-2 API
 After=network.target docker.service
 
 [Service]
 Type=simple
-ExecStart=/bin/bash ${scriptPath}
+ExecStart=${execStart}
 WorkingDirectory=${emberPath}
 Restart=on-failure
 RestartSec=5
