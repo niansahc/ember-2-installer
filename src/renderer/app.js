@@ -1796,6 +1796,14 @@ async function loadEmberVersion() {
     // Load version info only after API is confirmed running
     const result = await window.ember.checkEmberUpdate()
     document.getElementById('ember-version-label').textContent = result.installed || 'unknown'
+
+    // Load vault storage estimate
+    const storage = await window.ember.getVaultStorage(host)
+    if (storage && storage.current_human) {
+      document.getElementById('vault-current-size').textContent = storage.current_human
+      document.getElementById('vault-projected-size').textContent = storage.projected_30d_human || 'unknown'
+      document.getElementById('vault-storage-row').classList.remove('hidden')
+    }
   } else {
     title.textContent = "Almost there."
     voice.textContent = '"I\'m ready — I just need a little help starting up."'

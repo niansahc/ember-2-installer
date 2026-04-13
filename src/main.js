@@ -1598,6 +1598,26 @@ ipcMain.handle('check-api-health', (_e, { host }) => {
 })
 
 // ---------------------------------------------------------------------------
+// IPC — Vault storage estimate
+// ---------------------------------------------------------------------------
+
+ipcMain.handle('get-vault-storage', (_e, { host }) => {
+  const targetHost = host || '127.0.0.1'
+  const http = require('http')
+  return new Promise((resolve) => {
+    const req = http.get(`http://${targetHost}:8000/v1/vault/storage`, { timeout: 5000 }, (res) => {
+      let data = ''
+      res.on('data', (d) => (data += d))
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)) } catch { resolve(null) }
+      })
+    })
+    req.on('error', () => resolve(null))
+    req.on('timeout', () => { req.destroy(); resolve(null) })
+  })
+})
+
+// ---------------------------------------------------------------------------
 // IPC — Venv lock check
 // ---------------------------------------------------------------------------
 
@@ -2291,6 +2311,20 @@ if (DEMO_MODE) {
   ipcMain.handle('check-api-health', async () => {
     await sleep(2000)
     return { ok: true }
+  })
+
+  // Override vault storage
+  ipcMain.removeHandler('get-vault-storage')
+  ipcMain.handle('get-vault-storage', async () => {
+    await sleep(300)
+    return {
+      current_bytes: 15728640,
+      current_human: '15.0 MB',
+      growth_rate_bytes_per_day: 524288,
+      projected_30d_bytes: 31457280,
+      projected_30d_human: '30.0 MB',
+      sampled_days: 14,
+    }
   })
 
   // Override startup task
