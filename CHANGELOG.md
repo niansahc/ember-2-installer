@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.7.3 — 2026-04-13
+
+### Bug Fixes
+- Revert `runAfterFinish: false` — app must launch after NSIS install completes
+
+### Tests
+- 73 Playwright e2e tests
+
+---
+
 ## v0.7.2 — 2026-04-13
 
 ### Bug Fixes
