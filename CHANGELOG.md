@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.7.1 — 2026-04-12
+
+### Bug Fixes
+- Remove jarring update popup on launch — show subtle banner on Welcome screen instead
+- Add Docker readiness check before starting services (BUG-011) — polls up to 60s, clear error
+- Increase API health check timeout from 60s to 120s
+
+### Tests
+- 73 Playwright e2e tests
+
+---
+
 ## v0.7.0 — 2026-04-12
 
 ### Features
