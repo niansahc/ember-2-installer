@@ -218,6 +218,21 @@ Any task touching 3+ independent files or with clearly separable subtasks must u
 
 ---
 
+## Git Hooks (business hours push protection)
+
+Blocks pushes during US Eastern business hours (9am-5pm Mon-Fri). Two layers:
+
+1. **Local pre-push hook** — `hooks/pre-push`. Git hooks are not committed, so install manually after cloning:
+   ```bash
+   cp hooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+   ```
+
+2. **GitHub Actions check** — `.github/workflows/business-hours-check.yml`. Fails the push workflow if the push arrived during business hours. Catches anything that bypasses the local hook.
+
+Hook handles EST/EDT automatically via Python's `zoneinfo`.
+
+---
+
 ## Hooks
 
 Configured in `.claude/settings.json`. Hook scripts live in `.claude/hooks/`.
