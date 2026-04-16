@@ -1,6 +1,23 @@
 node_modules/
 dist/
 .env
+.env.*
 *.log
 playwright-report/
 test-results/
+
+# Build artifacts
+*.exe
+*.dmg
+*.AppImage
+*.snap
+*.blockmap
+*.nsis
+Ember Setup/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Local config
+.claude/settings.local.json
