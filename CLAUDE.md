@@ -22,16 +22,20 @@ v0.7.3. 73 Playwright tests passing. Produces Windows NSIS installer (primary), 
 
 ## Install Flow
 
-The installer runs a multi-step sequence:
+The installer walks the user through 12 screens:
 
-1. **Prerequisite detection and auto-install** — winget on Windows, Homebrew soft check on Mac, package manager on Linux
-2. **Model selection** — curated model cards with eval-based descriptions, disk sizes, and RAM requirements
-3. **Vault setup** — user picks or creates a private vault directory
-4. **API key configuration** — stored in OS credential store
-5. **Clone ember-2 and ember-2-ui** — at pinned version tags
-6. **Build UI** — `npm ci && npm run build` from the ember-2-ui source
-7. **Copy build into ember-2** — built `dist/` copied to `ember-2/ui/`
-8. **API health check polling** — Done screen starts the API and polls until healthy
+1. **Welcome** — intro screen
+2. **Prerequisites** — detects and auto-installs dependencies (winget on Windows, Homebrew soft check on Mac, package manager on Linux)
+3. **Install location** — user picks where to install Ember-2, with detection of existing installations
+4. **Vault setup** — user picks or creates a private vault directory
+5. **Model selection** — curated model cards with eval-based descriptions, disk sizes, and RAM requirements
+6. **Vision model** — optional vision model toggle and selection
+7. **Host configuration** — local-only or Tailscale for multi-device access
+8. **Summary** — review all choices before installing
+9. **Install** — writes config, creates venv, installs pip dependencies, sets API key, builds UI, starts search engine (parallel where possible)
+10. **AGPL acknowledgment** — user confirms understanding of the AGPL-3.0 license
+11. **Done** — starts the API, polls until healthy, shows vault storage estimate
+12. **Update** — checks for backend, UI, and installer updates with HTML release notes
 
 ---
 
