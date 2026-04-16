@@ -391,36 +391,6 @@ p {
   border-color: var(--accent);
 }
 
-/* ── Model select ──────────────────────────────────────────────────── */
-
-.model-row {
-  display: flex;
-  gap: 10px;
-  margin: 16px 0;
-}
-
-.model-select {
-  flex: 1;
-  font-family: inherit;
-  font-size: 0.9rem;
-  padding: 10px 14px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--input-bg);
-  color: var(--text);
-  outline: none;
-  cursor: pointer;
-}
-
-.model-select:focus {
-  border-color: var(--accent);
-}
-
-.model-select option {
-  background: var(--bg-card);
-  color: var(--text);
-}
-
 /* ── Model cards ───────────────────────────────────────────────────── */
 
 .model-cards {
@@ -904,54 +874,6 @@ p {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--accent);
-}
-
-/* ── Markdown rendering in release notes ─────────────────────── */
-
-.md-h2 {
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--accent);
-  margin: 12px 0 6px;
-}
-
-.md-h3 {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--accent);
-  margin: 10px 0 4px;
-}
-
-.md-p {
-  margin: 2px 0;
-  line-height: 1.5;
-}
-
-.md-li {
-  list-style: none;
-  padding-left: 12px;
-  position: relative;
-  margin: 2px 0;
-  line-height: 1.5;
-}
-
-.md-li::before {
-  content: '•';
-  position: absolute;
-  left: 0;
-  color: var(--accent);
-}
-
-.md-hr {
-  border: none;
-  border-top: 1px solid var(--border);
-  margin: 8px 0;
-}
-
-#update-changelog {
-  max-height: 300px;
-  overflow-y: auto;
-  font-size: 0.85rem;
 }
 
 /* ── Hardware summary ────────────────────────────────────────── */

@@ -24,44 +24,6 @@ const state = {
 }
 
 // ---------------------------------------------------------------------------
-// Simple markdown renderer (## headings, **bold**, - bullets, newlines)
-// ---------------------------------------------------------------------------
-
-function escapeHtml(text) {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
-function simpleMarkdown(text) {
-  if (!text) return ''
-  // Escape HTML entities before markdown processing to prevent XSS
-  // from untrusted content (e.g. GitHub release bodies).
-  const escaped = escapeHtml(text)
-  return escaped
-    .split('\n')
-    .map((line) => {
-      const trimmed = line.trim()
-      if (trimmed.startsWith('## ')) return `<h3 class="md-h3">${trimmed.slice(3)}</h3>`
-      if (trimmed.startsWith('# ')) return `<h2 class="md-h2">${trimmed.slice(2)}</h2>`
-      if (trimmed.startsWith('- ')) return `<li class="md-li">${inlineMd(trimmed.slice(2))}</li>`
-      if (trimmed === '---') return '<hr class="md-hr">'
-      if (trimmed === '') return '<br>'
-      return `<p class="md-p">${inlineMd(trimmed)}</p>`
-    })
-    .join('')
-}
-
-function inlineMd(text) {
-  return text
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/`(.+?)`/g, '<code>$1</code>')
-}
-
-// ---------------------------------------------------------------------------
 // Navigation
 // ---------------------------------------------------------------------------
 
@@ -1958,7 +1920,6 @@ async function playMatrixEasterEgg() {
   textEl.textContent = ''
   overlay.setAttribute('role', 'dialog')
   overlay.setAttribute('aria-label', 'Developer mode easter egg animation. Press Escape to skip.')
-  textEl.textContent = ''
 
   // Phase 1: Matrix rain for 4s, then taper to black
   let rainInterval = startMatrixRain(canvas)

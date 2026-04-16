@@ -10,8 +10,9 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
-const { spawn } = require('child_process')
+const { spawn, execSync } = require('child_process')
 const https = require('https')
+const http = require('http')
 const os = require('os')
 
 // ---------------------------------------------------------------------------
@@ -538,7 +539,6 @@ ipcMain.handle('detect-hardware', async () => {
 
   let gpu = 'Unknown'
   try {
-    const { execSync } = require('child_process')
     if (process.platform === 'win32') {
       const out = execSync('wmic path win32_VideoController get name', { timeout: 3000 }).toString()
       const lines = out.split('\n').map((l) => l.trim()).filter((l) => l && l !== 'Name')
@@ -1115,7 +1115,7 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
     // Get backend version from running API, not version.json
     new Promise((resolve) => {
       const targetHost = host || '127.0.0.1'
-      const http = require('http')
+  
       const req = http.get(`http://${targetHost}:8000/api/health`, { timeout: 3000 }, (res) => {
         let data = ''
         res.on('data', (d) => (data += d))
@@ -1288,7 +1288,7 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
 
     // Poll health and verify version matches what was pulled
     log('Waiting for API to start...\n')
-    const http = require('http')
+
     const targetHost = host || '127.0.0.1'
     let apiReady = false
     for (let i = 0; i < 20; i++) {
