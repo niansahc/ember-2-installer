@@ -1,12 +1,3 @@
-/**
- * src/main.js
- *
- * Ember-2 Installer — Main Process
- *
- * Handles: window creation, all IPC calls from renderer, shell commands,
- * file system operations, update checks via GitHub releases API.
- */
-
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
@@ -15,20 +6,11 @@ const https = require('https')
 const http = require('http')
 const os = require('os')
 
-// ---------------------------------------------------------------------------
-// Demo mode: active when running unpackaged (npm start) WITHOUT --real flag
-// ---------------------------------------------------------------------------
-
 const IS_PACKAGED = app.isPackaged
 const HAS_REAL_FLAG = process.argv.includes('--real')
 const DEMO_MODE = !IS_PACKAGED && !HAS_REAL_FLAG
-// Opt-in: when set, demo mode pretends the unified update check found
-// updates for all three repos so the update screen can be inspected.
+// Opt-in: demo mode pretends updates exist so the update screen can be inspected.
 const HAS_DEMO_UPDATES_FLAG = process.argv.includes('--demo-updates')
-
-// ---------------------------------------------------------------------------
-// Paths
-// ---------------------------------------------------------------------------
 
 // Deferred until app is ready — getPath() is not available at require time.
 let USER_DATA
@@ -38,10 +20,6 @@ function initPaths() {
   USER_DATA = app.getPath('userData')
   INSTALL_PATH_FILE = path.join(USER_DATA, 'ember-install-path.txt')
 }
-
-// ---------------------------------------------------------------------------
-// Repository URLs and slugs
-// ---------------------------------------------------------------------------
 
 const REPO_BACKEND_SLUG = 'niansahc/ember-2'
 const REPO_UI_SLUG = 'niansahc/ember-2-ui'
@@ -66,10 +44,6 @@ function saveEmberPath(p) {
   fs.mkdirSync(USER_DATA, { recursive: true })
   fs.writeFileSync(INSTALL_PATH_FILE, p, 'utf-8')
 }
-
-// ---------------------------------------------------------------------------
-// Window
-// ---------------------------------------------------------------------------
 
 let mainWindow
 
@@ -146,10 +120,6 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-// ---------------------------------------------------------------------------
-// Installer self-update IPC
-// ---------------------------------------------------------------------------
-
 ipcMain.handle('download-installer-update', async () => {
   if (autoUpdater) autoUpdater.downloadUpdate()
   return true
@@ -159,15 +129,10 @@ ipcMain.handle('install-installer-update', () => {
   if (autoUpdater) autoUpdater.quitAndInstall()
 })
 
-// ---------------------------------------------------------------------------
-// IPC — Ember-2 backend update check
-// ---------------------------------------------------------------------------
-
 ipcMain.handle('check-ember-update', async () => {
   const emberPath = getEmberPath()
   if (!emberPath) return { hasUpdate: false, error: 'No ember-2 path configured' }
 
-  // Read installed version from version.json or git tag
   let installed = null
   const vf = path.join(emberPath, 'version.json')
   if (fs.existsSync(vf)) {
@@ -178,7 +143,6 @@ ipcMain.handle('check-ember-update', async () => {
     } catch {}
   }
 
-  // Fallback: try git describe
   if (!installed) {
     installed = await new Promise((resolve) => {
       const proc = spawn('git', ['describe', '--tags', '--abbrev=0'], {
@@ -191,7 +155,6 @@ ipcMain.handle('check-ember-update', async () => {
     })
   }
 
-  // Fetch latest release
   const latest = await fetchLatestRelease()
   if (!latest || !latest.tag_name) return { hasUpdate: false, installed }
 
@@ -230,7 +193,6 @@ ipcMain.handle('run-ember-update', async () => {
   })
   if (!pullOk) return { ok: false }
 
-  // Step 2: pip install (in case requirements changed)
   const isWin = process.platform === 'win32'
   const pyBin = isWin
     ? path.join(emberPath, '.venv', 'Scripts', 'python.exe')
@@ -250,7 +212,6 @@ ipcMain.handle('run-ember-update', async () => {
     proc.on('error', () => resolve(false))
   })
 
-  // Step 3: restart docker services
   const dockerOk = await new Promise((resolve) => {
     const proc = spawn('docker', ['compose', 'up', '-d', '--build'], {
       cwd: emberPath, shell: true,
@@ -265,7 +226,6 @@ ipcMain.handle('run-ember-update', async () => {
     proc.on('error', () => resolve(false))
   })
 
-  // Update version.json with new tag
   const newTag = await new Promise((resolve) => {
     const proc = spawn('git', ['describe', '--tags', '--abbrev=0'], {
       cwd: emberPath, shell: true,
@@ -282,10 +242,6 @@ ipcMain.handle('run-ember-update', async () => {
 
   return { ok: pullOk, pipOk, dockerOk, tag: newTag }
 })
-
-// ---------------------------------------------------------------------------
-// IPC — Prerequisites
-// ---------------------------------------------------------------------------
 
 ipcMain.handle('check-prerequisites', async () => {
   const isWin = process.platform === 'win32'
@@ -329,7 +285,6 @@ function probe(cmd) {
   })
 }
 
-// Winget package IDs for each prerequisite
 const WINGET_PACKAGES = {
   git: 'Git.Git',
   python: 'Python.Python.3.12',
@@ -339,7 +294,6 @@ const WINGET_PACKAGES = {
 }
 
 ipcMain.handle('install-prerequisite', (_e, { name }) => {
-  // Auto-install via winget is Windows-only
   if (process.platform !== 'win32') {
     return Promise.resolve({ ok: false, error: 'Auto-install is only available on Windows. Please install manually.' })
   }
@@ -367,15 +321,10 @@ ipcMain.handle('install-prerequisite', (_e, { name }) => {
 })
 
 ipcMain.handle('check-winget', async () => {
-  // winget is Windows-only
   if (process.platform !== 'win32') return { available: false }
   const result = await probe(['winget', '--version'])
   return { available: result.ok }
 })
-
-// ---------------------------------------------------------------------------
-// IPC — Ember path
-// ---------------------------------------------------------------------------
 
 ipcMain.handle('get-ember-path', () => getEmberPath())
 
@@ -392,17 +341,12 @@ ipcMain.handle('pick-ember-folder', async () => {
   return result.canceled ? null : result.filePaths[0]
 })
 
-// ---------------------------------------------------------------------------
-// IPC — Clone ember-2 repo
-// ---------------------------------------------------------------------------
-
 ipcMain.handle('clone-ember-repo', (_e, { parentDir }) => {
   return new Promise((resolve) => {
     const targetDir = path.join(parentDir, 'ember-2')
     if (fs.existsSync(targetDir)) {
       return resolve({ ok: true, path: targetDir, message: 'Already exists' })
     }
-    // Create parent directory if it doesn't exist
     try {
       fs.mkdirSync(parentDir, { recursive: true })
     } catch (err) {
@@ -486,7 +430,6 @@ ipcMain.handle('get-default-install-dir', () => {
 })
 
 ipcMain.handle('scan-for-ember', () => {
-  // Check common locations for an existing ember-2 install
   const candidates = []
   const home = os.homedir()
 
@@ -507,10 +450,8 @@ ipcMain.handle('scan-for-ember', () => {
     )
   }
 
-  // Add the sibling path (relative to installer)
   candidates.push(DEV_EMBER_PATH)
 
-  // Add previously saved path
   if (fs.existsSync(INSTALL_PATH_FILE)) {
     const saved = fs.readFileSync(INSTALL_PATH_FILE, 'utf-8').trim()
     if (saved) candidates.push(saved)
@@ -533,7 +474,6 @@ ipcMain.handle('scan-for-ember', () => {
   return { found: false }
 })
 
-// Hardware detection
 ipcMain.handle('detect-hardware', async () => {
   const totalRamGB = Math.round(os.totalmem() / (1024 ** 3))
 
@@ -570,9 +510,7 @@ ipcMain.handle('detect-hardware', async () => {
 })
 
 
-// Curated model recommendations
 ipcMain.handle('get-recommended-models', async () => {
-  // Get installed models from Ollama
   let installed = []
   try {
     const result = await new Promise((resolve) => {
@@ -608,10 +546,6 @@ ipcMain.handle('get-recommended-models', async () => {
   }
 })
 
-// ---------------------------------------------------------------------------
-// IPC — Vault
-// ---------------------------------------------------------------------------
-
 ipcMain.handle('pick-vault-folder', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Choose your Ember vault location',
@@ -628,10 +562,6 @@ ipcMain.handle('create-vault', (_e, vaultPath) => {
     return { ok: false, error: err.message }
   }
 })
-
-// ---------------------------------------------------------------------------
-// IPC — Ollama models
-// ---------------------------------------------------------------------------
 
 ipcMain.handle('get-ollama-models', async () => {
   return new Promise((resolve) => {
@@ -662,10 +592,6 @@ ipcMain.handle('pull-ollama-model', (_e, model) => {
     proc.on('error', (err) => resolve({ ok: false, error: err.message }))
   })
 })
-
-// ---------------------------------------------------------------------------
-// IPC — Write .env
-// ---------------------------------------------------------------------------
 
 ipcMain.handle('write-env', (_e, { emberPath, vault, model, vision, host }) => {
   try {
@@ -706,18 +632,10 @@ ipcMain.handle('write-env', (_e, { emberPath, vault, model, vision, host }) => {
   }
 })
 
-// ---------------------------------------------------------------------------
-// IPC — Fullscreen toggle (used by Matrix easter egg)
-// ---------------------------------------------------------------------------
-
 ipcMain.handle('set-fullscreen', (_e, { enabled }) => {
   if (!mainWindow) return
   mainWindow.setFullScreen(enabled)
 })
-
-// ---------------------------------------------------------------------------
-// IPC — Release notes (HTML file read)
-// ---------------------------------------------------------------------------
 
 ipcMain.handle('get-release-notes', () => {
   try {
@@ -737,10 +655,6 @@ ipcMain.handle('get-release-notes', () => {
     return { ok: false, html: '' }
   }
 })
-
-// ---------------------------------------------------------------------------
-// IPC — Developer mode setup
-// ---------------------------------------------------------------------------
 
 const VAULT_SUBDIRS = [
   'memory/conversation',
@@ -781,12 +695,6 @@ ipcMain.handle('setup-dev-mode', (_e, { emberPath, demoVault, testVault }) => {
   }
 })
 
-// ---------------------------------------------------------------------------
-// IPC — Install steps (streamed)
-// ---------------------------------------------------------------------------
-
-// Each step sends progress events: install-log, install-step-done
-// step: 'pip' | 'apikey' | 'docker'
 
 ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
   const isWin = process.platform === 'win32'
@@ -794,7 +702,6 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     ? `"${path.join(emberPath, '.venv', 'Scripts', 'python.exe')}"`
     : path.join(emberPath, '.venv', 'bin', 'python')
 
-  // --- API key: check first, skip if exists, run non-interactive if not ---
   if (step === 'apikey') {
     const keyExists = await new Promise((resolve) => {
       const proc = spawn(pyBin, ['scripts/set_api_key.py', '--check'], {
@@ -814,7 +721,6 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     return runSpawn(pyBin, ['scripts/set_api_key.py', '--non-interactive'], emberPath, step)
   }
 
-  // --- All other steps ---
   let cmd, args
   if (step === 'venv') {
     cmd = isWin ? 'python' : 'python3'
@@ -823,7 +729,6 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     cmd = pyBin
     args = ['-m', 'pip', 'install', '-r', 'requirements.txt']
   } else if (step === 'docker') {
-    // Start Docker Desktop if the daemon isn't running
     const daemonUp = await new Promise((resolve) => {
       const proc = spawn('docker', ['info'], { shell: true })
       proc.on('close', (code) => resolve(code === 0))
@@ -838,7 +743,6 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
       } else {
         spawn('systemctl', ['--user', 'start', 'docker-desktop'], { shell: true })
       }
-      // Wait for daemon to become ready (poll every 3s, up to 60s)
       let ready = false
       for (let i = 0; i < 20; i++) {
         await new Promise((r) => setTimeout(r, 3000))
@@ -857,11 +761,9 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
       }
       mainWindow.webContents.send('install-log', { step, text: 'Docker daemon ready ✓\n' })
     }
-    // Run docker compose up -d, then poll until the container is healthy
     const composeResult = await runSpawn('docker', ['compose', 'up', '-d'], emberPath, step)
     if (!composeResult.ok) return composeResult
 
-    // Poll for SearXNG container readiness (up to 60s)
     mainWindow.webContents.send('install-log', { step, text: 'Waiting for search engine to be ready...\n' })
     let healthy = false
     for (let i = 0; i < 20; i++) {
@@ -887,12 +789,10 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     mainWindow.webContents.send('install-step-done', { step, ok: true })
     return { ok: true }
   } else if (step === 'build-ui') {
-    // Clone ember-2-ui, install, build, copy to ember-2/ui/
     const uiDir = path.join(path.dirname(emberPath), 'ember-2-ui')
     const uiDistDir = path.join(uiDir, 'dist')
     const targetUiDir = path.join(emberPath, 'ui')
 
-    // Clone if not exists
     if (!fs.existsSync(uiDir)) {
       const cloneOk = await new Promise((resolve) => {
         const proc = spawn('git', ['clone', '--depth', '1', REPO_UI_URL], {
@@ -909,7 +809,6 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
       }
     }
 
-    // npm ci
     mainWindow.webContents.send('install-log', { step, text: 'Installing UI dependencies...\n' })
     const npmOk = await new Promise((resolve) => {
       const proc = spawn('npm', ['ci'], { cwd: uiDir, shell: true })
@@ -948,7 +847,6 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
       mainWindow.webContents.send('install-log', { step, text: 'Warning: could not retrieve API key — UI will build without auth\n' })
     }
 
-    // npm run build
     mainWindow.webContents.send('install-log', { step, text: 'Building Ember UI...\n' })
     const buildOk = await new Promise((resolve) => {
       const proc = spawn('npm', ['run', 'build'], { cwd: uiDir, shell: true })
@@ -965,7 +863,6 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     // Remove .env now that the key is baked into the bundle
     try { fs.unlinkSync(path.join(uiDir, '.env')) } catch {}
 
-    // Copy dist/ to ember-2/ui/
     try {
       if (fs.existsSync(targetUiDir)) {
         fs.rmSync(targetUiDir, { recursive: true })
@@ -1009,15 +906,10 @@ function runSpawn(cmd, args, cwd, step) {
   })
 }
 
-// ---------------------------------------------------------------------------
-// IPC — Update check
-// ---------------------------------------------------------------------------
-
 ipcMain.handle('check-for-update', async () => {
   const emberPath = getEmberPath()
   if (!emberPath) return { hasUpdate: false }
 
-  // Read installed version
   let installed = null
   const vf = path.join(emberPath, 'version.json')
   if (fs.existsSync(vf)) {
@@ -1028,7 +920,6 @@ ipcMain.handle('check-for-update', async () => {
     } catch {}
   }
 
-  // Fetch latest release from GitHub
   const latest = await fetchLatestRelease(REPO_BACKEND_SLUG)
   if (!latest) return { hasUpdate: false }
 
@@ -1086,10 +977,6 @@ function fetchLatestRelease(repo = REPO_BACKEND_SLUG) {
   })
 }
 
-// ---------------------------------------------------------------------------
-// IPC — Unified update checker (all three repos)
-// ---------------------------------------------------------------------------
-
 function fetchLatestReleaseWithTimeout(repo, timeoutMs = 4000) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(null), timeoutMs)
@@ -1107,7 +994,6 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
   const emberPath = getEmberPath()
   const uiDir = emberPath ? path.join(path.dirname(emberPath), 'ember-2-ui') : null
 
-  // Run all checks in parallel with 4-second timeout each
   const [installerRelease, backendRelease, uiRelease, healthData] = await Promise.all([
     fetchLatestReleaseWithTimeout(REPO_INSTALLER_SLUG),
     fetchLatestReleaseWithTimeout(REPO_BACKEND_SLUG),
@@ -1128,7 +1014,6 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
     }),
   ])
 
-  // Installer version
   const installerInstalled = app.getVersion()
   const installerLatest = installerRelease?.tag_name?.replace(/^v/, '') || null
 
@@ -1148,7 +1033,6 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
   }
   const backendLatest = backendRelease?.tag_name || null
 
-  // UI version from local package.json
   let uiInstalled = null
   if (uiDir) {
     try {
@@ -1193,7 +1077,6 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
   const uiDir = path.join(path.dirname(emberPath), 'ember-2-ui')
   const log = (text) => mainWindow.webContents.send('update-all-log', text)
 
-  // 1. Backend update
   if (updates.backend) {
     log('Updating Ember backend...\n')
     // Reset version.json before pull — it gets modified locally by the
@@ -1224,7 +1107,6 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     })
     if (!pipOk) log('Warning: pip install had issues, continuing...\n')
 
-    // Verify the pull landed the expected version
     let pulledVersion = null
     try {
       const vf = path.join(emberPath, 'version.json')
@@ -1271,7 +1153,6 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     // Wait a moment for the port to free up
     await new Promise((r) => setTimeout(r, 2000))
 
-    // Restart the API
     log('Starting updated API...\n')
     if (isWin) {
       const apiProc = spawn('cmd', ['/c', 'start_api.bat'], {
@@ -1286,7 +1167,6 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
       apiProc.unref()
     }
 
-    // Poll health and verify version matches what was pulled
     log('Waiting for API to start...\n')
 
     const targetHost = host || '127.0.0.1'
@@ -1346,7 +1226,6 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
       proc.on('error', () => resolve(false))
     })
     if (pullOk) {
-      // Verify installation
       const verify = await new Promise((resolve) => {
         const proc = spawn('ollama', ['list'], { shell: true })
         let out = ''
@@ -1363,7 +1242,6 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
   }
   log('\n')
 
-  // 2. UI update
   if (updates.ui) {
     log('Updating Ember UI...\n')
     if (!fs.existsSync(uiDir)) {
@@ -1399,7 +1277,6 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     })
     if (!npmOk) { log('npm ci failed.\n'); return { ok: false, stage: 'ui-npm' } }
 
-    // Inject API key before building
     log('Injecting API key...\n')
     const apiKey = await new Promise((resolve) => {
       let out = ''
@@ -1430,7 +1307,6 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     // Remove .env now that the key is baked into the bundle
     try { fs.unlinkSync(path.join(uiDir, '.env')) } catch {}
 
-    // Copy dist to ember-2/ui/
     const targetUiDir = path.join(emberPath, 'ui')
     try {
       if (fs.existsSync(targetUiDir)) fs.rmSync(targetUiDir, { recursive: true })
@@ -1461,7 +1337,6 @@ ipcMain.handle('run-git-pull', async (_e) => {
     proc.on('error', () => resolve())
   })
 
-  // Step 1: Pull ember-2
   log('Pulling ember-2...\n')
   const pullOk = await new Promise((resolve) => {
     const proc = spawn('git', ['pull', 'origin', 'main'], { cwd: emberPath, shell: true })
@@ -1472,7 +1347,6 @@ ipcMain.handle('run-git-pull', async (_e) => {
   })
   if (!pullOk) return { ok: false }
 
-  // Step 2: Pull and rebuild ember-2-ui
   const uiDir = path.join(path.dirname(emberPath), 'ember-2-ui')
   const targetUiDir = path.join(emberPath, 'ui')
 
@@ -1532,20 +1406,12 @@ ipcMain.handle('run-git-pull', async (_e) => {
   return { ok: true }
 })
 
-// ---------------------------------------------------------------------------
-// IPC — UI built check
-// ---------------------------------------------------------------------------
-
 ipcMain.handle('check-ui-built', () => {
   const emberPath = getEmberPath()
   if (!emberPath) return { ok: false }
   const indexPath = path.join(emberPath, 'ui', 'index.html')
   return { ok: fs.existsSync(indexPath) }
 })
-
-// ---------------------------------------------------------------------------
-// IPC — Docker daemon check
-// ---------------------------------------------------------------------------
 
 ipcMain.handle('check-docker-daemon', () => {
   return new Promise((resolve) => {
@@ -1554,10 +1420,6 @@ ipcMain.handle('check-docker-daemon', () => {
     proc.on('error', () => resolve({ ok: false }))
   })
 })
-
-// ---------------------------------------------------------------------------
-// IPC — Start API + health check
-// ---------------------------------------------------------------------------
 
 ipcMain.handle('start-api', (_e, { emberPath }) => {
   const isWin = process.platform === 'win32'
@@ -1597,10 +1459,6 @@ ipcMain.handle('check-api-health', (_e, { host }) => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// IPC — Vault storage estimate
-// ---------------------------------------------------------------------------
-
 ipcMain.handle('get-vault-storage', (_e, { host }) => {
   const targetHost = host || '127.0.0.1'
   const http = require('http')
@@ -1617,10 +1475,6 @@ ipcMain.handle('get-vault-storage', (_e, { host }) => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// IPC — Venv lock check
-// ---------------------------------------------------------------------------
-
 ipcMain.handle('check-venv-lock', (_e, { emberPath }) => {
   if (!emberPath) return { locked: false }
 
@@ -1629,7 +1483,6 @@ ipcMain.handle('check-venv-lock', (_e, { emberPath }) => {
     ? path.join(emberPath, '.venv', 'Scripts', 'python.exe')
     : path.join(emberPath, '.venv', 'bin', 'python')
 
-  // If .venv doesn't exist yet, no lock possible
   if (!fs.existsSync(pythonExe)) return { locked: false }
 
   // On Windows, try to rename the file to itself — locked files throw EPERM/EBUSY
@@ -1651,10 +1504,6 @@ ipcMain.handle('check-venv-lock', (_e, { emberPath }) => {
     return { locked: false }
   }
 })
-
-// ---------------------------------------------------------------------------
-// IPC — Misc
-// ---------------------------------------------------------------------------
 
 
 ipcMain.handle('launch-ember', (_e, { emberPath }) => {
@@ -1686,14 +1535,9 @@ ipcMain.handle('launch-ember', (_e, { emberPath }) => {
   return { ok: true }
 })
 
-// ---------------------------------------------------------------------------
-// Startup task — auto-launch Ember at user logon
-//
-// Windows: Task Scheduler entry (schtasks ONLOGON)
+// Windows: Task Scheduler (schtasks ONLOGON)
 // macOS:   LaunchAgent plist (~/Library/LaunchAgents/)
 // Linux:   systemd user service (~/.config/systemd/user/)
-// ---------------------------------------------------------------------------
-
 const STARTUP_TASK_NAME = 'EmberStartup'
 const LAUNCHAGENT_LABEL = 'com.ember2.api'
 const LAUNCHAGENT_PATH = path.join(os.homedir(), 'Library', 'LaunchAgents', `${LAUNCHAGENT_LABEL}.plist`)
@@ -1738,7 +1582,6 @@ ipcMain.handle('set-startup-task', async (_e, { emberPath, enabled }) => {
 
   if (plat === 'darwin') {
     if (!enabled) {
-      // Unload then remove the plist
       await new Promise((resolve) => {
         const proc = spawn('launchctl', ['unload', LAUNCHAGENT_PATH], { shell: true })
         proc.on('close', () => resolve())
@@ -1747,7 +1590,6 @@ ipcMain.handle('set-startup-task', async (_e, { emberPath, enabled }) => {
       try { fs.unlinkSync(LAUNCHAGENT_PATH) } catch {}
       return { ok: true }
     }
-    // Prefer watchdog.py via venv Python; fall back to launch_ember.sh
     const venvPython = path.join(emberPath, '.venv', 'bin', 'python')
     const watchdog = path.join(emberPath, 'scripts', 'watchdog.py')
     const useWatchdog = fs.existsSync(venvPython) && fs.existsSync(watchdog)
@@ -1801,7 +1643,6 @@ ipcMain.handle('set-startup-task', async (_e, { emberPath, enabled }) => {
       try { fs.unlinkSync(SYSTEMD_UNIT_PATH) } catch {}
       return { ok: true }
     }
-    // Prefer watchdog.py via venv Python; fall back to launch_ember.sh
     const venvPython = path.join(emberPath, '.venv', 'bin', 'python')
     const watchdog = path.join(emberPath, 'scripts', 'watchdog.py')
     const useWatchdog = fs.existsSync(venvPython) && fs.existsSync(watchdog)
@@ -1832,7 +1673,6 @@ WantedBy=default.target
     } catch (err) {
       return { ok: false, error: `Failed to write unit file: ${err.message}` }
     }
-    // Reload and enable
     await new Promise((resolve) => {
       const proc = spawn('systemctl', ['--user', 'daemon-reload'], { shell: true })
       proc.on('close', () => resolve())
@@ -1900,7 +1740,6 @@ ipcMain.handle('get-default-ollama-models', () => {
 
 ipcMain.handle('set-ollama-models-path', (_e, modelsPath) => {
   if (process.platform === 'win32') {
-    // Set OLLAMA_MODELS environment variable system-wide via setx
     return new Promise((resolve) => {
       const proc = spawn('setx', ['OLLAMA_MODELS', modelsPath], { shell: true })
       proc.on('close', (code) => resolve({ ok: code === 0 }))
@@ -1908,7 +1747,6 @@ ipcMain.handle('set-ollama-models-path', (_e, modelsPath) => {
     })
   }
 
-  // Mac/Linux: write to shell profile
   const profilePath = process.platform === 'darwin'
     ? path.join(os.homedir(), '.zprofile')
     : path.join(os.homedir(), '.profile')
@@ -1917,7 +1755,6 @@ ipcMain.handle('set-ollama-models-path', (_e, modelsPath) => {
   try {
     const existing = fs.existsSync(profilePath) ? fs.readFileSync(profilePath, 'utf-8') : ''
     if (existing.includes('OLLAMA_MODELS=')) {
-      // Replace existing line
       const updated = existing.replace(/^export OLLAMA_MODELS=.*$/m, exportLine)
       fs.writeFileSync(profilePath, updated, 'utf-8')
     } else {
@@ -1935,16 +1772,11 @@ ipcMain.handle('restart-computer', () => {
   if (process.platform === 'win32') {
     spawn('shutdown', ['/r', '/t', '30', '/c', 'Restarting for Docker Desktop setup. Run Ember Setup again after restart.'], { shell: true })
   } else {
-    // Mac/Linux: schedule a reboot in 1 minute
     spawn('sudo', ['shutdown', '-r', '+1', 'Restarting for Docker setup. Run Ember Setup again after restart.'], { shell: true })
   }
 })
 
 ipcMain.handle('get-demo-mode', () => DEMO_MODE)
-
-// ---------------------------------------------------------------------------
-// IPC — Tailscale
-// ---------------------------------------------------------------------------
 
 ipcMain.handle('check-tailscale-installed', async () => {
   return probe(['tailscale', '--version'])
@@ -2015,24 +1847,16 @@ ipcMain.handle('get-tailscale-dns', async () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// Demo mode overrides
-//
-// When running unpackaged without --real, every IPC handler that touches
-// real infrastructure (git, pip, docker, ollama, tailscale, filesystem)
-// is replaced with a fake that returns realistic data after a short delay.
-// This allows the full UI to be exercised in e2e tests and during
-// development without requiring any real tooling to be installed.
-// ---------------------------------------------------------------------------
+// Demo mode: every IPC handler that touches real infrastructure is replaced
+// with a fake that returns realistic data after a short delay, so the full
+// UI can be exercised in e2e tests and during development.
 
 if (DEMO_MODE) {
   console.log('[DEMO MODE] Running with simulated install steps')
 
-  // Override UI built check
   ipcMain.removeHandler('check-ui-built')
   ipcMain.handle('check-ui-built', async () => ({ ok: true }))
 
-  // Override hardware detection
   ipcMain.removeHandler('detect-hardware')
   ipcMain.handle('detect-hardware', async () => ({
     ram: 32,
@@ -2050,11 +1874,9 @@ if (DEMO_MODE) {
     node: { ok: true, version: 'v24.14.0 (demo)' },
   }))
 
-  // Override winget check
   ipcMain.removeHandler('check-winget')
   ipcMain.handle('check-winget', async () => ({ available: true }))
 
-  // Override prerequisite install
   ipcMain.removeHandler('install-prerequisite')
   ipcMain.handle('install-prerequisite', async (_e, { name }) => {
     await sleep(1500)
@@ -2275,7 +2097,6 @@ if (DEMO_MODE) {
     return 'ember-desktop.exocomet-alpha.ts.net'
   })
 
-  // Override ember-2 backend update check
   ipcMain.removeHandler('check-ember-update')
   ipcMain.handle('check-ember-update', async () => {
     await sleep(600)
@@ -2296,15 +2117,12 @@ if (DEMO_MODE) {
     return { ok: true, tag: 'v0.9.3' }
   })
 
-  // Override docker daemon check
   ipcMain.removeHandler('check-docker-daemon')
   ipcMain.handle('check-docker-daemon', async () => ({ ok: true }))
 
-  // Override venv lock check
   ipcMain.removeHandler('check-venv-lock')
   ipcMain.handle('check-venv-lock', async () => ({ locked: false }))
 
-  // Override API start + health
   ipcMain.removeHandler('start-api')
   ipcMain.handle('start-api', async () => ({ ok: true }))
   ipcMain.removeHandler('check-api-health')
@@ -2313,7 +2131,6 @@ if (DEMO_MODE) {
     return { ok: true }
   })
 
-  // Override vault storage
   ipcMain.removeHandler('get-vault-storage')
   ipcMain.handle('get-vault-storage', async () => {
     await sleep(300)
@@ -2327,7 +2144,6 @@ if (DEMO_MODE) {
     }
   })
 
-  // Override startup task
   ipcMain.removeHandler('set-startup-task')
   ipcMain.handle('set-startup-task', async () => ({ ok: true }))
   ipcMain.removeHandler('get-startup-task')
@@ -2361,7 +2177,6 @@ if (DEMO_MODE) {
     return { ok: true }
   })
 
-  // Override ember scan
   ipcMain.removeHandler('scan-for-ember')
   ipcMain.handle('scan-for-ember', () => ({ found: false }))
 
@@ -2390,7 +2205,6 @@ if (DEMO_MODE) {
     return { ok: true, path: parentDir + '/ember-2' }
   })
 
-  // Override recommended models
   ipcMain.removeHandler('get-recommended-models')
   ipcMain.handle('get-recommended-models', async () => ({
     recommended: [

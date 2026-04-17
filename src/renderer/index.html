@@ -23,14 +23,10 @@
     <img src="../../assets/Ember2.png" alt="Ember" id="logo">
   </div>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- Screen 0 — Welcome                                               -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-welcome" class="screen active">
     <h1>Hi, I'm Ember.</h1>
     <p class="subtitle">Let's get you set up.</p>
 
-    <!-- Subtle update notification — shown when updates are detected on launch -->
     <div id="update-available-banner" class="update-available-banner hidden">
       <span>Updates available for Ember.</span>
       <button class="btn-link" id="btn-view-updates">View updates</button>
@@ -45,9 +41,6 @@
     </div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- Screen 1 — Prerequisites                                         -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-prereqs" class="screen">
     <h2>Checking prerequisites</h2>
     <p class="ember-voice">"Let me make sure everything's in place..."</p>
@@ -125,9 +118,6 @@
     </div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- Screen 2 — Install location (clone)                              -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-ember-path" class="screen">
     <h2>Where should I install Ember-2?</h2>
     <p>Choose a folder. I'll create an <strong>ember-2</strong> subfolder inside it.</p>
@@ -169,9 +159,6 @@
     </div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- Screen 3 — Vault location                                        -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-vault" class="screen">
     <h2>Memory Vault</h2>
     <p>This is where Ember-2 stores your memories, journal entries, and reflections.</p>
@@ -189,9 +176,6 @@
     </div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- Screen 4 — Model selection (curated cards)                       -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-model" class="screen">
     <h2>Choose Ember-2's Brain</h2>
     <p>This is the model Ember-2 uses to think and talk. Pick one to start — you can change it later. <a href="https://github.com/niansahc/ember-2/blob/main/docs/model_guide.md" target="_blank">Read the Model Selection Guide</a> for detailed scores and recommendations.</p>
@@ -225,9 +209,6 @@
     </div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- Screen 5 — Vision model (curated cards)                          -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-vision" class="screen">
     <h2>Can Ember-2 See Images?</h2>
     <p>A vision model lets Ember-2 analyze photos and screenshots you share. This is optional.</p>
@@ -254,9 +235,6 @@
     </div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- Screen 6 — API host                                              -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-host" class="screen">
     <h2>How will you use Ember-2?</h2>
     <p>Choose how you want to connect.</p>
@@ -275,7 +253,6 @@
     <!-- ── Tailscale walkthrough (hidden until selected) ── -->
     <div id="tailscale-walkthrough" class="hidden">
 
-      <!-- Step 1: Check installed -->
       <div class="ts-step" id="ts-step-install">
         <div class="ts-step-header">
           <span class="ts-step-icon" id="ts-install-icon">⏳</span>
@@ -286,7 +263,6 @@
         </div>
       </div>
 
-      <!-- Step 2: Check connected + IP -->
       <div class="ts-step hidden" id="ts-step-connect">
         <div class="ts-step-header">
           <span class="ts-step-icon" id="ts-connect-icon">⏳</span>
@@ -297,7 +273,6 @@
         </div>
       </div>
 
-      <!-- Step 3: Set up serve -->
       <div class="ts-step hidden" id="ts-step-serve">
         <div class="ts-step-header">
           <span class="ts-step-icon" id="ts-serve-icon">⏳</span>
@@ -310,7 +285,6 @@
         </div>
       </div>
 
-      <!-- Step 4: Phone instructions -->
       <div class="ts-step hidden" id="ts-step-phone">
         <div class="ts-step-header">
           <span class="ts-step-icon">📱</span>
@@ -333,9 +307,6 @@
     </div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- Screen 7a — Summary before install                               -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-summary" class="screen">
     <h2>Ready to install</h2>
     <p class="ember-voice">"Here's everything we're about to set up."</p>
@@ -389,9 +360,6 @@
     </div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- Screen 7b — Install progress                                     -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-install" class="screen">
     <h2>Installing</h2>
 
@@ -441,9 +409,7 @@
     </div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
   <!-- Screen — AGPL Acknowledgment                                       -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-agpl" class="screen">
     <h2>Before you finish</h2>
     <p class="ember-voice">"I want to make sure you know something important."</p>
@@ -467,9 +433,7 @@
     </div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
   <!-- Screen — Done                                                      -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-done" class="screen">
     <h1 id="done-title">Starting Ember...</h1>
     <p class="ember-voice" id="done-voice">"Almost there..."</p>
@@ -503,7 +467,6 @@
       </ul>
     </div>
 
-    <!-- Mac Gatekeeper note — shown only on macOS -->
     <div id="done-gatekeeper-note" class="hidden" style="margin-top: 1rem;">
       <p class="hint">On Mac, you may see a security warning the first time you open Ember. Right-click the app and select <strong>Open</strong>, then click <strong>Open</strong> again to bypass Gatekeeper. This is a one-time step.</p>
     </div>
@@ -529,7 +492,6 @@
       </div>
     </div>
 
-    <!-- Vault storage estimate -->
     <div id="vault-storage-row" class="hidden" style="margin-top: 1rem;">
       <p class="hint">
         Vault size: <strong id="vault-current-size">...</strong>
@@ -538,7 +500,6 @@
       </p>
     </div>
 
-    <!-- Ember-2 backend version & updates -->
     <div class="done-update-section">
       <div class="done-version-row">
         <span>Ember version: <strong id="ember-version-label">checking...</strong></span>
@@ -552,9 +513,7 @@
     </div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
   <!-- Screen — Update available                                         -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
   <section id="screen-update" class="screen">
     <h2>Updates Available</h2>
     <p class="ember-voice" id="update-voice">"I found some updates."</p>
@@ -592,7 +551,6 @@
       </div>
     </div>
 
-    <!-- Release notes panel — HTML content loaded from release_notes.html -->
     <div id="release-notes-panel" class="release-notes-panel hidden">
       <h3 class="release-notes-heading">What's new</h3>
       <div id="release-notes-content" class="release-notes-content"></div>
@@ -627,7 +585,6 @@
     </div>
   </section>
 
-  <!-- Post-update celebration overlay — shows for ~8s after a successful update -->
   <div id="update-celebration" class="hidden">
     <div class="celebration-card">
       <div class="celebration-flame">🔥</div>
@@ -637,7 +594,6 @@
     </div>
   </div>
 
-  <!-- Matrix easter egg overlay -->
   <div id="matrix-overlay" class="hidden">
     <canvas id="matrix-canvas"></canvas>
     <div id="matrix-text"></div>

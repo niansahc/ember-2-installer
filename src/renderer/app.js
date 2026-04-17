@@ -7,10 +7,6 @@
  * to the main process via the ember.* API exposed through preload.js.
  */
 
-// ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
-
 const state = {
   emberPath: null,
   vaultPath: null,
@@ -22,10 +18,6 @@ const state = {
   models: [],
   ollamaModelsPath: null,
 }
-
-// ---------------------------------------------------------------------------
-// Navigation
-// ---------------------------------------------------------------------------
 
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active'))
@@ -39,7 +31,6 @@ function showScreen(id) {
   }
 }
 
-// Wire up all Next/Back buttons with data-next / data-prev attributes
 document.querySelectorAll('[data-next]').forEach((btn) => {
   btn.addEventListener('click', () => {
     if (!btn.disabled) showScreen(btn.dataset.next)
@@ -50,15 +41,10 @@ document.querySelectorAll('[data-prev]').forEach((btn) => {
   btn.addEventListener('click', () => showScreen(btn.dataset.prev))
 })
 
-// ---------------------------------------------------------------------------
-// Screen: Prerequisites
-// ---------------------------------------------------------------------------
-
 let hasWinget = false
 let missingPrereqs = []
 let currentPlatform = 'win32'
 
-// Platform-specific install hints for missing prerequisites
 const INSTALL_HINTS = {
   darwin: {
     python: 'Install via Homebrew: brew install python3',
@@ -90,7 +76,6 @@ async function checkPrerequisites() {
   missingPrereqs = []
   let allGood = true
 
-  // Show Homebrew row on Mac
   if (currentPlatform === 'darwin') {
     const brewRow = document.getElementById('prereq-brew')
     if (brewRow) {
@@ -132,7 +117,6 @@ async function checkPrerequisites() {
       allGood = false
       missingPrereqs.push(name)
 
-      // Platform-specific install hint
       const hints = INSTALL_HINTS[currentPlatform]
       if (hints && hints[name]) {
         version.textContent = hints[name]
@@ -140,7 +124,6 @@ async function checkPrerequisites() {
         version.textContent = 'Not found'
       }
 
-      // Windows: show winget install button; Mac/Linux: show manual download link only
       if (hasWinget && installBtn) {
         installBtn.classList.remove('hidden')
         if (link) link.classList.remove('hidden')
@@ -177,7 +160,6 @@ async function checkPrerequisites() {
 
   document.getElementById('btn-prereqs-next').disabled = !allGood
 
-  // Show "Install All" if multiple missing and winget available (Windows only)
   const installAllWrap = document.getElementById('prereq-install-all-wrap')
   if (hasWinget && missingPrereqs.length > 1) {
     installAllWrap.classList.remove('hidden')
@@ -185,7 +167,6 @@ async function checkPrerequisites() {
     installAllWrap.classList.add('hidden')
   }
 
-  // Show total size estimate for missing items
   const sizeMap = { git: 50, python: 100, node: 75, ollama: 100, docker: 600 }
   const totalHint = document.getElementById('prereq-total-hint')
   if (missingPrereqs.length > 0) {
@@ -197,7 +178,6 @@ async function checkPrerequisites() {
   }
 }
 
-// Individual install buttons
 document.querySelectorAll('.prereq-install-btn').forEach((btn) => {
   btn.addEventListener('click', async () => {
     const name = btn.dataset.prereq
@@ -235,7 +215,6 @@ async function installOnePrereq(name, btn) {
       return true
     }
 
-    // Re-check to update the UI
     await checkPrerequisites()
   } else {
     logBox.textContent += `Failed to install ${name}. ${result.error || 'Try the manual download link.'}\n\n`
@@ -247,7 +226,6 @@ async function installOnePrereq(name, btn) {
   return result.ok
 }
 
-// Install All Missing button
 document.getElementById('btn-install-all').addEventListener('click', async () => {
   const btn = document.getElementById('btn-install-all')
   btn.disabled = true
@@ -308,7 +286,6 @@ document.getElementById('btn-docker-daemon-recheck').addEventListener('click', (
   checkPrerequisites()
 })
 
-// Download links open external browser (fallback)
 document.querySelectorAll('.prereq-link').forEach((link) => {
   link.addEventListener('click', (e) => {
     e.preventDefault()
@@ -325,16 +302,11 @@ document.getElementById('btn-recheck').addEventListener('click', () => {
   checkPrerequisites()
 })
 
-// ---------------------------------------------------------------------------
-// Screen: Install location (clone) + Ember detection
-// ---------------------------------------------------------------------------
-
 async function initInstallDir() {
   const defaultDir = await window.ember.getDefaultInstallDir()
   document.getElementById('ember-path-input').value = defaultDir
-  state.emberPath = null // Not yet cloned
+  state.emberPath = null
 
-  // Scan for existing installation
   const scan = await window.ember.scanForEmber()
   if (scan.found) {
     const notice = document.getElementById('ember-detected')
@@ -365,7 +337,6 @@ document.getElementById('btn-install-ember').addEventListener('click', async () 
   const existingNotice = document.getElementById('existing-install-notice')
   const existingText = document.getElementById('existing-install-text')
 
-  // Check if target path already contains an ember-2 installation
   const check = await window.ember.checkTargetPath(parentDir)
   if (check.exists && check.isEmber) {
     existingText.textContent = `Ember-2 found at this location (${check.version}). What would you like to do?`
@@ -413,7 +384,6 @@ async function runClone(parentDir, btn) {
   }
 }
 
-// Existing install: Update (git pull)
 document.getElementById('btn-existing-update').addEventListener('click', async () => {
   const parentDir = document.getElementById('ember-path-input').value.trim()
   const btn = document.getElementById('btn-install-ember')
@@ -451,7 +421,6 @@ document.getElementById('btn-existing-update').addEventListener('click', async (
   }
 })
 
-// Existing install: Fresh install (remove and re-clone)
 document.getElementById('btn-existing-fresh').addEventListener('click', async () => {
   const parentDir = document.getElementById('ember-path-input').value.trim()
   const btn = document.getElementById('btn-install-ember')
@@ -487,15 +456,10 @@ document.getElementById('btn-existing-fresh').addEventListener('click', async ()
   }
 })
 
-// Existing install: Choose different location
 document.getElementById('btn-existing-cancel').addEventListener('click', () => {
   document.getElementById('existing-install-notice').classList.add('hidden')
   document.getElementById('btn-install-ember').disabled = false
 })
-
-// ---------------------------------------------------------------------------
-// Screen: Vault path
-// ---------------------------------------------------------------------------
 
 async function initVaultPath() {
   const defaultVault = await window.ember.getDefaultVault()
@@ -522,17 +486,12 @@ document.getElementById('btn-pick-vault').addEventListener('click', async () => 
   }
 })
 
-// If user types directly, update state and check
 document.getElementById('vault-path-input').addEventListener('input', (e) => {
   if (e.target.value) {
     state.vaultPath = e.target.value
     checkCloudPath(e.target.value)
   }
 })
-
-// ---------------------------------------------------------------------------
-// Screen: Model selection (curated cards)
-// ---------------------------------------------------------------------------
 
 let modelData = null
 
@@ -550,7 +509,6 @@ async function loadHardwareInfo() {
     document.getElementById('hw-gpu').textContent = hw.gpu !== 'Unknown' ? `GPU: ${hw.gpu}` : ''
     document.getElementById('hw-recommendation').textContent =
       `Recommended: ${hw.recommendation.model} — ${hw.recommendation.reason}`
-    // Pre-select recommended model if user hasn't manually changed it
     if (state.model === 'qwen3:8b') {
       state.model = hw.recommendation.model
       renderModelCards()
@@ -592,7 +550,6 @@ function selectModel(id, container) {
   for (let i = 0; i < models.length; i++) {
     if (models[i].id === id) cards[i]?.classList.add('selected')
   }
-  // Update space hint
   const selected = models.find((m) => m.id === id)
   const hint = document.getElementById('model-space-hint')
   if (hint && selected && !selected.installed) {
@@ -634,12 +591,11 @@ function renderVisionCards() {
   // without the user opting in.
 }
 
-// Download model if not installed (called during install step)
 async function ensureModelDownloaded(modelId, logBoxId, labelId) {
   if (!modelData) return true
   const allModels = [...modelData.recommended, ...modelData.vision]
   const model = allModels.find((m) => m.id === modelId)
-  if (!model || model.installed) return true // already installed
+  if (!model || model.installed) return true
 
   const logBox = document.getElementById(logBoxId)
   const label = document.getElementById(labelId)
@@ -666,7 +622,6 @@ async function ensureModelDownloaded(modelId, logBoxId, labelId) {
 async function pullEmbeddingModel() {
   const logBox = document.getElementById('install-log')
 
-  // Check if already installed via ollama list
   const models = await window.ember.getOllamaModels()
   if (models && models.some && models.some((m) => m.includes('nomic-embed-text'))) {
     if (logBox) logBox.textContent += 'Embedding model already installed ✓\n'
@@ -690,7 +645,6 @@ async function pullEmbeddingModel() {
     return false
   }
 
-  // Verify it's installed
   const verify = await window.ember.getOllamaModels()
   if (verify && verify.some && verify.some((m) => m.includes('nomic-embed-text'))) {
     if (logBox) logBox.textContent += 'Embedding model installed ✓\n'
@@ -699,10 +653,6 @@ async function pullEmbeddingModel() {
   if (logBox) logBox.textContent += 'Warning: embedding model pull completed but not found in ollama list.\n'
   return false
 }
-
-// ---------------------------------------------------------------------------
-// Screen: Vision model
-// ---------------------------------------------------------------------------
 
 document.getElementById('vision-toggle').addEventListener('change', (e) => {
   const wrap = document.getElementById('vision-model-wrap')
@@ -716,10 +666,6 @@ document.getElementById('vision-toggle').addEventListener('change', (e) => {
     state.vision = null
   }
 })
-
-// ---------------------------------------------------------------------------
-// Screen: API host + Tailscale walkthrough
-// ---------------------------------------------------------------------------
 
 document.querySelectorAll('input[name="host"]').forEach((radio) => {
   radio.addEventListener('change', (e) => {
@@ -735,12 +681,10 @@ document.querySelectorAll('input[name="host"]').forEach((radio) => {
 })
 
 async function runTailscaleWalkthrough() {
-  // Reset all steps
   document.getElementById('ts-step-connect').classList.add('hidden')
   document.getElementById('ts-step-serve').classList.add('hidden')
   document.getElementById('ts-step-phone').classList.add('hidden')
 
-  // Step 1: Check installed
   await tsCheckInstalled()
 }
 
@@ -755,7 +699,6 @@ async function tsCheckInstalled() {
   if (result.ok) {
     icon.textContent = '✅'
     body.innerHTML = `<p>${result.version}</p>`
-    // Proceed to step 2
     document.getElementById('ts-step-connect').classList.remove('hidden')
     await tsCheckConnected()
   } else {
@@ -795,7 +738,6 @@ async function tsCheckConnected() {
       <p>Connected as <strong>${status.hostname || 'this machine'}</strong></p>
       <p>Your Tailscale IP: <span class="ts-ip-display">${ip}</span></p>
     `
-    // Proceed to step 3
     document.getElementById('ts-step-serve').classList.remove('hidden')
   } else {
     icon.textContent = '❌'
@@ -807,7 +749,6 @@ async function tsCheckConnected() {
   }
 }
 
-// Step 3: Set up tailscale serve
 document.getElementById('btn-ts-serve').addEventListener('click', async () => {
   const btn = document.getElementById('btn-ts-serve')
   const resultEl = document.getElementById('ts-serve-result')
@@ -830,7 +771,6 @@ document.getElementById('btn-ts-serve').addEventListener('click', async () => {
     resultEl.classList.remove('hidden')
     resultEl.innerHTML = `Your Ember URL: <span class="ts-url-display">${url}</span>`
 
-    // Show phone step
     document.getElementById('ts-step-phone').classList.remove('hidden')
   } else {
     icon.textContent = '❌'
@@ -841,7 +781,6 @@ document.getElementById('btn-ts-serve').addEventListener('click', async () => {
   }
 })
 
-// Phone app store links
 document.getElementById('ts-phone-ios').addEventListener('click', (e) => {
   e.preventDefault()
   window.ember.openUrl('https://apps.apple.com/app/tailscale/id1470499037')
@@ -850,10 +789,6 @@ document.getElementById('ts-phone-android').addEventListener('click', (e) => {
   e.preventDefault()
   window.ember.openUrl('https://play.google.com/store/apps/details?id=com.tailscale.ipn')
 })
-
-// ---------------------------------------------------------------------------
-// Screen: Ollama model storage
-// ---------------------------------------------------------------------------
 
 async function initOllamaModelsPath() {
   const defaultPath = await window.ember.getDefaultOllamaModels()
@@ -874,13 +809,7 @@ document.getElementById('ollama-models-path').addEventListener('input', (e) => {
   if (e.target.value) state.ollamaModelsPath = e.target.value
 })
 
-// ---------------------------------------------------------------------------
-// Screen: Summary
-// ---------------------------------------------------------------------------
-
-// Populate summary when navigating to it
 document.getElementById('btn-host-next').addEventListener('click', () => {
-  // Collect final state
   if (!state.vaultPath) {
     state.vaultPath = document.getElementById('vault-path-input').placeholder
   }
@@ -914,12 +843,7 @@ document.getElementById('btn-host-next').addEventListener('click', () => {
   document.getElementById('summary-total-size').textContent = `~${totalGB.toFixed(1)} GB`
 })
 
-// ---------------------------------------------------------------------------
-// Screen: Install progress
-// ---------------------------------------------------------------------------
-
 document.getElementById('btn-start-install').addEventListener('click', async () => {
-  // Set Ollama models path if changed from default
   const defaultOllamaPath = await window.ember.getDefaultOllamaModels()
   if (state.ollamaModelsPath && state.ollamaModelsPath !== defaultOllamaPath) {
     await window.ember.setOllamaModelsPath(state.ollamaModelsPath)
@@ -928,10 +852,6 @@ document.getElementById('btn-start-install').addEventListener('click', async () 
   showScreen('screen-install')
   await runInstall()
 })
-
-// ---------------------------------------------------------------------------
-// Fun facts + progress bar
-// ---------------------------------------------------------------------------
 
 const FUN_FACTS = [
   "The term \"artificial intelligence\" was coined at the Dartmouth Conference in 1956.",
@@ -1213,7 +1133,6 @@ async function runStepsFrom(steps, startIndex) {
 async function runInstall() {
   startFunFacts()
 
-  // Guard: emberPath must be set
   if (!state.emberPath) {
     alert('No install path set. Please go back and choose where to install Ember.')
     showScreen('screen-ember-path')
@@ -1223,13 +1142,11 @@ async function runInstall() {
   const logBox = document.getElementById('install-log')
   logBox.textContent = ''
 
-  // Listen for streamed output
   window.ember.onInstallLog(({ step, text }) => {
     logBox.textContent += text
     logBox.scrollTop = logBox.scrollHeight
   })
 
-  // Check if models need downloading
   const needsModelDownload = modelData && !modelData.recommended.find((m) => m.id === state.model)?.installed
   const needsVisionDownload = state.vision && modelData && !modelData.vision.find((m) => m.id === state.vision)?.installed
 
@@ -1266,7 +1183,7 @@ async function runInstall() {
   const steps = [
     { id: 'env',  label: 'Writing configuration...',       run: writeEnv },
     { id: 'venv', label: 'Creating Python environment...', run: runVenvStep },
-    parallelGroup,  // pip + model downloads run concurrently
+    parallelGroup,
     { id: 'apikey', label: 'Setting up API key...', run: () => runStep('apikey'), nonFatal: true },
     { id: 'build-ui', label: "Building Ember's interface...", run: () => runStep('build-ui') },
     { id: 'docker', label: 'Starting search engine...', run: runDockerStep },
@@ -1303,7 +1220,6 @@ async function runInstall() {
 
 function showRetryButton(onRetry) {
   const logBox = document.getElementById('install-log')
-  // Check if retry button already exists
   let retryBtn = document.getElementById('btn-install-retry')
   if (!retryBtn) {
     retryBtn = document.createElement('button')
@@ -1331,7 +1247,6 @@ async function writeEnv() {
 
   if (!result.ok) return false
 
-  // Create the vault directory
   const vaultResult = await window.ember.createVault(state.vaultPath)
   if (!vaultResult.ok) {
     const logBox = document.getElementById('install-log')
@@ -1369,7 +1284,6 @@ async function runPipStep() {
 }
 
 async function runDockerStep() {
-  // Pre-check: is Docker daemon running?
   const daemon = await window.ember.checkDockerDaemon()
   if (!daemon.ok) {
     const logBox = document.getElementById('install-log')
@@ -1384,10 +1298,6 @@ async function runStep(step) {
   const result = await window.ember.runInstallStep(step, state.emberPath)
   return result.ok
 }
-
-// ---------------------------------------------------------------------------
-// Screen: Done
-// ---------------------------------------------------------------------------
 
 // AGPL acknowledgment — proceed to Done screen
 document.getElementById('btn-agpl-acknowledge').addEventListener('click', () => {
@@ -1432,7 +1342,6 @@ document.getElementById('btn-open-ember').addEventListener('click', () => {
   }
 })
 
-// Retry API start
 document.getElementById('btn-retry-api').addEventListener('click', async () => {
   const retryBtn = document.getElementById('btn-retry-api')
   const status = document.getElementById('done-status')
@@ -1529,7 +1438,6 @@ function prepareUpdateScreen(updates) {
   loadReleaseNotes()
 }
 
-// Fetch release_notes.html from the app bundle and inject into the panel.
 async function loadReleaseNotes() {
   const panel = document.getElementById('release-notes-panel')
   const content = document.getElementById('release-notes-content')
@@ -1593,7 +1501,6 @@ function markUpdateRowDone(name) {
   if (icon) icon.textContent = '✨'
 }
 
-// Unified update check from Done screen
 document.getElementById('btn-check-ember-update').addEventListener('click', async () => {
   const btn = document.getElementById('btn-check-ember-update')
   const info = document.getElementById('ember-update-info')
@@ -1631,7 +1538,6 @@ document.getElementById('btn-check-ember-update').addEventListener('click', asyn
   }
 })
 
-// Run ember-2 update (git pull + pip install + docker restart)
 document.getElementById('btn-run-ember-update').addEventListener('click', async () => {
   const btn = document.getElementById('btn-run-ember-update')
   const logBox = document.getElementById('ember-update-log')
@@ -1662,7 +1568,6 @@ document.getElementById('btn-run-ember-update').addEventListener('click', async 
   }
 })
 
-// Auto-start API, poll health, then load version when Done screen appears
 async function loadEmberVersion() {
   const title = document.getElementById('done-title')
   const voice = document.getElementById('done-voice')
@@ -1673,14 +1578,12 @@ async function loadEmberVersion() {
   // Launch button is always available — the launcher script handles everything
   launchBtn.disabled = false
 
-  // Check UI is built before starting
   status.textContent = 'Checking Ember interface...'
   const uiCheck = await window.ember.checkUiBuilt()
   if (!uiCheck.ok) {
     title.textContent = "Almost there."
     voice.textContent = '"My interface didn\'t build correctly. Let me try again."'
     status.textContent = "Ember's interface is missing. Rebuilding..."
-    // Attempt to rebuild
     const rebuildResult = await window.ember.runInstallStep('build-ui', state.emberPath)
     if (!rebuildResult.ok) {
       status.textContent = "Interface build failed. Try reinstalling or check that Node.js is installed."
@@ -1759,7 +1662,6 @@ async function loadEmberVersion() {
     const result = await window.ember.checkEmberUpdate()
     document.getElementById('ember-version-label').textContent = result.installed || 'unknown'
 
-    // Load vault storage estimate
     const storage = await window.ember.getVaultStorage(host)
     if (storage && storage.current_human) {
       document.getElementById('vault-current-size').textContent = storage.current_human
@@ -1776,14 +1678,12 @@ async function loadEmberVersion() {
     document.getElementById('ember-version-label').textContent = 'not started'
   }
 
-  // Show Mac Gatekeeper note
   const platform = await window.ember.getPlatform()
   const gatekeeperNote = document.getElementById('done-gatekeeper-note')
   if (gatekeeperNote && platform === 'darwin') {
     gatekeeperNote.classList.remove('hidden')
   }
 
-  // Show startup task toggle (all platforms)
   const startupRow = document.getElementById('startup-task-row')
   const startupToggle = document.getElementById('startup-task-toggle')
   startupRow.classList.remove('hidden')
@@ -1802,7 +1702,6 @@ async function loadEmberVersion() {
   }
 }
 
-// Startup task toggle (all platforms)
 document.getElementById('startup-task-toggle').addEventListener('change', async (e) => {
   const statusEl = document.getElementById('startup-task-status')
   const result = await window.ember.setStartupTask(state.emberPath, e.target.checked)
@@ -1815,10 +1714,6 @@ document.getElementById('startup-task-toggle').addEventListener('change', async 
     e.target.checked = !e.target.checked // revert
   }
 })
-
-// ---------------------------------------------------------------------------
-// Matrix easter egg — plays when developer mode is toggled on
-// ---------------------------------------------------------------------------
 
 function startMatrixRain(canvas) {
   const ctx = canvas.getContext('2d')
@@ -1888,7 +1783,6 @@ async function playMatrixEasterEgg() {
   const textEl = document.getElementById('matrix-text')
   const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 
-  // ESC key skips the animation at any point
   matrixSkipped = false
   const onEsc = (e) => {
     if (e.key === 'Escape') matrixSkipped = true
@@ -1921,12 +1815,10 @@ async function playMatrixEasterEgg() {
   overlay.setAttribute('role', 'dialog')
   overlay.setAttribute('aria-label', 'Developer mode easter egg animation. Press Escape to skip.')
 
-  // Phase 1: Matrix rain for 4s, then taper to black
   let rainInterval = startMatrixRain(canvas)
   await cancellableWait(4000)
   if (matrixSkipped) { cleanup(rainInterval); return }
 
-  // Taper: accelerate the fade by painting heavier black each frame
   clearInterval(rainInterval)
   const ctx = canvas.getContext('2d')
   for (let i = 0; i < 12; i++) {
@@ -1938,7 +1830,6 @@ async function playMatrixEasterEgg() {
   ctx.fillStyle = '#000'
   ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-  // Phase 2: Type the message on the now-black screen
   await cancellableWait(400)
   if (matrixSkipped) { cleanup(0); return }
   await typeText(textEl, 'Why did you download an installer if you\'re such a cool hacker?')
@@ -1950,11 +1841,9 @@ async function playMatrixEasterEgg() {
   cursor.textContent = '\u2588' // full block character
   textEl.appendChild(cursor)
 
-  // Let the cursor blink for ~5s (CSS handles the blink animation)
   await cancellableWait(5000)
   if (matrixSkipped) { cleanup(0); return }
 
-  // Phase 4: Remove cursor + text, fresh burst of rain for 3s
   textEl.textContent = ''
   rainInterval = startMatrixRain(canvas)
   await cancellableWait(3000)
@@ -1967,7 +1856,6 @@ async function playMatrixEasterEgg() {
 // share the same Matrix animation and apply logic.
 document.querySelectorAll('.dev-mode-trigger, #dev-mode-toggle').forEach((toggle) => {
   toggle.addEventListener('change', async (e) => {
-    // Find the sibling panel (next .dev-mode-panel in the same section)
     const section = e.target.closest('.dev-mode-section') || e.target.closest('section')
     const panel = section.querySelector('.dev-mode-panel')
     if (e.target.checked) {
@@ -2024,10 +1912,6 @@ document.querySelectorAll('.dev-mode-apply-btn, #btn-apply-dev-mode').forEach((b
   })
 })
 
-// ---------------------------------------------------------------------------
-// Installer self-update (electron-updater)
-// ---------------------------------------------------------------------------
-
 window.ember.onInstallerUpdateAvailable((data) => {
   // Don't show the top banner on launch — updates are surfaced via the
   // subtle Welcome-screen banner from checkAllUpdates() instead.
@@ -2056,10 +1940,6 @@ document.getElementById('btn-installer-update').addEventListener('click', async 
   await window.ember.downloadInstallerUpdate()
 })
 
-// ---------------------------------------------------------------------------
-// Screen: Update
-// ---------------------------------------------------------------------------
-
 document.getElementById('btn-skip-update').addEventListener('click', () => {
   showScreen('screen-welcome')
 })
@@ -2077,9 +1957,8 @@ document.getElementById('btn-view-updates').addEventListener('click', () => {
   showScreen('screen-update')
 })
 
-// Unified update — stores pending update info for the Update All button
 let pendingUpdates = null
-let cachedBootUpdates = null // stashed from init() when updates detected on launch
+let cachedBootUpdates = null
 
 document.getElementById('btn-run-update-all').addEventListener('click', async () => {
   if (!pendingUpdates) return
@@ -2123,7 +2002,6 @@ document.getElementById('btn-run-update-all').addEventListener('click', async ()
       }
     }
 
-    // Celebration card holds for ~8s before the next screen transition.
     const summary = celebrationSummary()
     await showCelebration({ version: summary.version, bullet: summary.bullet, durationMs: 8000 })
 
@@ -2158,10 +2036,6 @@ document.getElementById('btn-run-update-all').addEventListener('click', async ()
   }
 })
 
-// ---------------------------------------------------------------------------
-// Welcome: Check for installer updates (manual button)
-// ---------------------------------------------------------------------------
-
 document.getElementById('btn-check-installer-update').addEventListener('click', async () => {
   const btn = document.getElementById('btn-check-installer-update')
   const status = document.getElementById('installer-update-status')
@@ -2170,7 +2044,6 @@ document.getElementById('btn-check-installer-update').addEventListener('click', 
   status.textContent = ''
 
   try {
-    // Use the check-for-update IPC which hits GitHub releases
     const result = await window.ember.checkForUpdate()
     if (result.hasUpdate) {
       status.textContent = `Ember ${result.latestTag} available!`
@@ -2185,10 +2058,6 @@ document.getElementById('btn-check-installer-update').addEventListener('click', 
   btn.textContent = 'Check for Ember updates'
 })
 
-// ---------------------------------------------------------------------------
-// Init
-// ---------------------------------------------------------------------------
-
 // Boot sequence:
 //   1. If an existing ember-2 install is found, check all three repos for updates.
 //   2. If any updates are available, jump straight to the Update screen.
@@ -2196,13 +2065,11 @@ document.getElementById('btn-check-installer-update').addEventListener('click', 
 //      Welcome screen and begin preloading data (install dir, vault, models)
 //      in the background so later screens render instantly.
 async function init() {
-  // Show demo badge if in demo mode
   const demoMode = await window.ember.getDemoMode()
   if (demoMode) {
     document.getElementById('demo-badge').classList.remove('hidden')
   }
 
-  // Check for updates across all three repos (if already installed)
   const emberPath = await window.ember.getEmberPath()
   if (emberPath) state.emberPath = emberPath
 
@@ -2219,7 +2086,6 @@ async function init() {
         document.getElementById('update-available-banner').classList.remove('hidden')
       }
     }
-    // If GitHub unreachable or no updates, fall through to normal flow
   }
 
   // Normal flow — check prerequisites
