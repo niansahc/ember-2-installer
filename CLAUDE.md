@@ -12,6 +12,14 @@ The Ember-2 installer. Built with Electron and electron-builder. Produces a Wind
 
 The installer clones ember-2 and ember-2-ui, builds the UI, installs dependencies, sets up the vault, and configures the API key.
 
+Key optimizations and features:
+- Parallel prerequisite installs (Git, Python, Node, Ollama concurrently; Docker last)
+- Parallel pip + Ollama model downloads during install
+- Unified update checker — checks installer, backend, and UI versions in parallel on startup
+- HTML release notes panel with scrollable "What's new" section on the update screen
+- Installer self-update via electron-updater
+- Developer mode — checkbox on Done/Update screens; creates demo/test vault directories, writes dev config, triggers a Matrix-style easter egg animation
+
 ---
 
 ## Current State
@@ -41,7 +49,7 @@ The installer walks the user through 12 screens:
 
 ## Inter-Repo Dependencies
 
-The installer clones ember-2 and ember-2-ui at specific tags. Frontend must be built from the pinned ember-2-ui tag — never from an unpinned clone. Backend version must be documented in release notes. Mismatched versions will produce an installer that ships stale UI or incompatible backend.
+The installer shallow-clones (`--depth 1`) ember-2 and ember-2-ui at specific tags. Frontend must be built from the pinned ember-2-ui tag — never from an unpinned clone. Backend version must be documented in release notes. Mismatched versions will produce an installer that ships stale UI or incompatible backend.
 
 ---
 
@@ -66,6 +74,7 @@ Vault contents — including names, conversation text, and record IDs — must n
 
 - Electron 33+
 - electron-builder
+- electron-updater (installer self-update)
 - Playwright (e2e tests)
 - Node.js
 
