@@ -110,93 +110,19 @@ When a flaky or condition-dependent test is identified during a release cycle, i
 - No releasing until the human says so
 - If the human says PAUSE — stop and reorient
 - If the human says STOP — drop the topic entirely
-- Use TodoWrite and TodoRead tools to maintain a visible task list for every multi-step task. Update it as work completes.
+- Use TaskCreate and TaskUpdate to maintain a visible task list for every multi-step task. Update it as work completes.
 
 ---
 
 ## Conventional Commits (Required)
 
-All three Ember-2 repos use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) and release-please for automated release PRs.
-
-**Format:** `type(scope): description`
-
-**Types:**
-- `feat` — new feature (bumps minor)
-- `fix` — bug fix (bumps patch)
-- `chore` — maintenance, version bumps, config changes
-- `docs` — documentation only
-- `refactor` — code change that neither fixes a bug nor adds a feature
-- `test` — adding or updating tests
-- `ci` — CI/CD changes
-
-**Breaking changes:** append `!` after the type — e.g., `feat!: redesign install flow`. This bumps major (or minor while pre-1.0).
-
-**Scope** is optional but encouraged — e.g., `feat(installer): ...`, `fix(updater): ...`
-
-**Examples:**
-```
-feat(installer): add nomic-embed-text to model pull flow
-fix(installer): kill and restart API after backend update
-chore: bump version to v0.5.9
-docs: add conventional commit guide to CLAUDE.md
-```
-
-release-please reads these commit messages to auto-generate changelogs and determine version bumps. The release PR is created automatically but requires human approval before merging.
-
----
-
-## Platform Notes
-
-- Windows: primary platform, fully tested
-- Mac: DMG target, Gatekeeper bypass documented, not yet tested on real hardware
-- Linux: AppImage target, keyring fallback implemented, not yet tested on real hardware
+Format: `type(scope): description`. Types: feat, fix, chore, docs, refactor, test, ci. Breaking changes: append `!`. release-please reads these for changelogs and version bumps.
 
 ---
 
 ## Release Process
 
-### Gates — mandatory before any release or patch is cut
-
-**Documentation gate (all three repos):**
-- [ ] CLAUDE.md version and test count current
-- [ ] TDD updated to reflect what shipped (G only)
-- [ ] README reflects current features
-- [ ] CHANGELOG.md current (release-please handles via commits)
-
-**Quality gate:**
-- [ ] All tests passing
-- [ ] Retrieval eval passing with no regression (G only)
-- [ ] No flaky tests carried forward
-
-**Coordination gate:**
-- [ ] All three repos confirm docs and tests green
-- [ ] Human approves before any tag is created
-- [ ] GitHub Release not created until human says go
-
-### Sequence
-
-1. G, M, Y each complete documentation and quality gates
-2. Each reports green to manager
-3. Manager confirms all three green and gets human approval
-4. G coordinates the release — tags all three repos, creates GitHub Releases
-5. Y attaches installer artifacts (.exe, latest.yml)
-6. G verifies all three releases are publicly visible
-7. G reports release URLs — release is not done until this step
-
-### Y independent releases
-
-Y may cut an installer-only release when:
-- Changes are installer-specific only (no backend or UI updates)
-- Human explicitly approves
-- Y completes documentation and quality gates independently
-- Y tags, creates GitHub Release, attaches artifacts, and reports URL
-
-Y does NOT cut independent releases when backend or UI changes are involved — coordinate with G.
-
-### release-please
-
-All three repos use release-please for automated release PRs.
-Conventional commits are required. Release PRs require human approval before merging.
+Full release process, gates, and sequence: run `/pre-release`
 
 ---
 
@@ -207,56 +133,18 @@ Conventional commits are required. Release PRs require human approval before mer
 
 ---
 
-## Repo Color
-YELLOW — ember-2-installer (Electron installer)
-
----
-
 ## Claude Code Efficiency Rules
 
-**Parallel subagents — use them.**
-Any task touching 3+ independent files or with clearly separable subtasks must use parallel subagents. Do not work sequentially when work can be fanned out. Spawn subagents, merge results.
-
-**Hooks — always active:**
-- Auto-run tests after any code edit (pytest for G, npm run test:e2e for M and Y)
-- Auto-reject any changes to private_vault/ or .env files
-
-**Scheduled tasks:**
-- Weekly dependency audit — flag outdated or vulnerable packages in requirements.txt / package.json
-- Pre-release cross-repo consistency check — verify UI matches backend API responses before any release
-
-**Session naming:**
-- Always name sessions descriptively, e.g. `claude -n "vault-citation-backend"`
-- Enables resumption with full context.
+Use parallel subagents for any task touching 3+ independent files. Auto-run tests after code edits. Auto-reject changes to private_vault/ or .env files.
 
 ---
 
 ## Git Hooks (business hours push protection)
 
-Blocks pushes during US Eastern business hours (9am-5pm Mon-Fri). Two layers:
-
-1. **Local pre-push hook** — `hooks/pre-push`. Git hooks are not committed, so install manually after cloning:
-   ```bash
-   cp hooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
-   ```
-
-2. **GitHub Actions check** — `.github/workflows/business-hours-check.yml`. Fails the push workflow if the push arrived during business hours. Catches anything that bypasses the local hook.
-
-Hook handles EST/EDT automatically via Python's `zoneinfo`.
+Blocks pushes during US Eastern business hours (9am-5pm Mon-Fri). Local hook: `hooks/pre-push`. GitHub Actions: `.github/workflows/business-hours-check.yml`.
 
 ---
 
 ## Hooks
 
-Configured in `.claude/settings.json`. Hook scripts live in `.claude/hooks/`.
-
-**Pre-edit: reject .env files** (`reject-env-edit.sh`)
-- Fires on `PreToolUse` for Edit and Write tools
-- Checks `tool_input.file_path` — blocks with exit code 2 if the target is a `.env` file
-- Prevents accidental credential exposure
-
-**Post-edit: auto-run tests** (`run-tests.sh`)
-- Fires on `PostToolUse` for Edit and Write tools
-- Only runs `npm run test:e2e` when the edited file is in `src/` or `tests/` (`.js`, `.html`, `.css`, `.cjs`)
-- Skips for non-source files (CLAUDE.md, package.json, etc.)
-- 300-second timeout to accommodate the full Playwright suite
+Configured in `.claude/settings.json`, scripts in `.claude/hooks/`. Pre-edit hook rejects .env files. Post-edit hook runs `npm run test:e2e` on source file changes.
