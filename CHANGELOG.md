@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.8.0 — 2026-04-18
+
+### Features
+- Register Ember backend as startup task via Task Scheduler (Windows), LaunchAgent (macOS), systemd unit (Linux); auto-registers on first install with opt-out toggle on Done screen
+- Vault storage estimate on Done screen — current size and 30-day projection pulled from backend `/v1/system/vault-storage`
+- Business hours push protection hook — local pre-push hook + GitHub Actions check (EST/EDT-aware)
+
+### Bug Fixes
+- NSIS uninstall hook removes `EmberStartup` scheduled task (fallback path for pre-v0.16.0 installs preserved)
+- Set `state.emberPath` on boot so dev mode and version check work without navigating to the ember-path screen first
+- Default install path is now Program Files (user-writable check still enforced)
+- `autoUpdater` no longer fires on startup — surfaces only via Welcome banner
+- Build output path moved to `C:/temp/ember-dist` to avoid path length limits on Windows
+
+### Tests
+- Bumped Done screen and startup-task timeouts to absorb `loadEmberVersion` runtime now that vault storage and startup registration extend the post-AGPL pipeline
+- Startup-task "unchecked by default" test replaced with "checked by default after auto-registration" to match current product behavior
+- 73 Playwright e2e tests
+
+### Maintenance
+- Pinned `electron-builder` to an exact version (supply chain hygiene)
+- Bumped `@playwright/test`
+- Stripped ~175 noise comments across renderer/main
+- Consolidated top-level imports; removed dead code
+- Expanded `.gitignore`
+- `.release-please-manifest.json` drift fixed — bumped from 0.6.0 to 0.8.0
+
+---
+
 ## v0.7.3 — 2026-04-13
 
 ### Bug Fixes

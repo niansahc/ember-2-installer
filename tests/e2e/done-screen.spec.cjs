@@ -25,7 +25,7 @@ test.describe('Done Screen', () => {
     await expect(window.locator('.screen.active')).toHaveAttribute('id', 'screen-agpl', { timeout: 30000 })
     // Acknowledge AGPL
     await window.locator('#btn-agpl-acknowledge').click()
-    await expect(window.locator('.screen.active')).toHaveAttribute('id', 'screen-done', { timeout: 5000 })
+    await expect(window.locator('.screen.active')).toHaveAttribute('id', 'screen-done', { timeout: 15000 })
   })
 
   test.afterEach(async () => {
@@ -37,8 +37,9 @@ test.describe('Done Screen', () => {
   })
 
   test('Open Ember button becomes enabled after health check', async () => {
-    // In demo mode, health check passes after ~2s
-    await expect(window.locator('#btn-open-ember')).toBeEnabled({ timeout: 10000 })
+    // Demo mode: ~7s from screen-done to btn enabled (2s alreadyRunning + 5s first poll).
+    // Bumped to 20s to absorb system load variance during full-suite runs.
+    await expect(window.locator('#btn-open-ember')).toBeEnabled({ timeout: 20000 })
   })
 
   test('done screen shows version info', async () => {
