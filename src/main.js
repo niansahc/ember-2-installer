@@ -1257,6 +1257,12 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
       })
       if (!cloneOk) { log('UI clone failed.\n'); return { ok: false, stage: 'ui-clone' } }
     } else {
+      // npm install/ci may have rewritten package-lock.json; reset it so git pull doesn't refuse to merge.
+      await new Promise((resolve) => {
+        const proc = spawn('git', ['checkout', '--', 'package-lock.json'], { cwd: uiDir, shell: true })
+        proc.on('close', () => resolve())
+        proc.on('error', () => resolve())
+      })
       const pullOk = await new Promise((resolve) => {
         const proc = spawn('git', ['pull', 'origin', 'main'], { cwd: uiDir, shell: true })
         proc.stdout.on('data', (d) => log(d.toString()))
@@ -1264,7 +1270,10 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
         proc.on('close', (code) => resolve(code === 0))
         proc.on('error', () => resolve(false))
       })
-      if (!pullOk) { log('UI pull failed.\n'); return { ok: false, stage: 'ui-pull' } }
+      if (!pullOk) {
+        log(`UI pull failed in ${uiDir}. The clone is still intact — retrying the update is safe.\n`)
+        return { ok: false, stage: 'ui-pull' }
+      }
     }
 
     log('Installing UI dependencies...\n')
