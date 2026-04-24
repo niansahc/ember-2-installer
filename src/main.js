@@ -21,6 +21,21 @@ function initPaths() {
   INSTALL_PATH_FILE = path.join(USER_DATA, 'ember-install-path.txt')
 }
 
+function apiStartupLogPath() {
+  return path.join(USER_DATA, 'api-startup.log')
+}
+
+// Open (and truncate) the startup log file. Returns a numeric FD suitable for
+// passing to spawn's stdio so the child's stdout/stderr land in the file.
+// Caller must fs.closeSync(fd) after spawn — the child has already inherited it.
+function openApiStartupLogFd() {
+  try {
+    return fs.openSync(apiStartupLogPath(), 'w')
+  } catch {
+    return 'ignore'
+  }
+}
+
 const REPO_BACKEND_SLUG = 'niansahc/ember-2'
 const REPO_UI_SLUG = 'niansahc/ember-2-ui'
 const REPO_INSTALLER_SLUG = 'niansahc/ember-2-installer'
@@ -1117,18 +1132,7 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
       }
     } catch {}
 
-    log('Restarting Docker services...\n')
-    await new Promise((resolve) => {
-      const proc = spawn('docker', ['compose', 'up', '-d', '--build'], {
-        cwd: emberPath, shell: true,
-      })
-      proc.stdout.on('data', (d) => log(d.toString()))
-      proc.stderr.on('data', (d) => log(d.toString()))
-      proc.on('close', () => resolve())
-      proc.on('error', () => resolve())
-    })
-
-    // Kill the old API process so the new code loads on restart
+    // Kill the old API BEFORE docker restart so a lingering uvicorn can't win the port-8000 bind race.
     log('Stopping old API process...\n')
     if (isWin) {
       await new Promise((resolve) => {
@@ -1136,7 +1140,6 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
         proc.on('close', () => resolve())
         proc.on('error', () => resolve())
       })
-      // Also kill any uvicorn on port 8000
       await new Promise((resolve) => {
         const proc = spawn('cmd', ['/c', 'for /f "tokens=5" %a in (\'netstat -aon ^| findstr :8000 ^| findstr LISTENING\') do taskkill /F /PID %a'], { shell: true })
         proc.on('close', () => resolve())
@@ -1149,23 +1152,35 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
         proc.on('error', () => resolve())
       })
     }
-
-    // Wait a moment for the port to free up
     await new Promise((r) => setTimeout(r, 2000))
 
+    log('Restarting Docker services...\n')
+    await new Promise((resolve) => {
+      const proc = spawn('docker', ['compose', 'up', '-d', '--build'], {
+        cwd: emberPath, shell: true,
+      })
+      proc.stdout.on('data', (d) => log(d.toString()))
+      proc.stderr.on('data', (d) => log(d.toString()))
+      proc.on('close', () => resolve())
+      proc.on('error', () => resolve())
+    })
+
     log('Starting updated API...\n')
+    const restartLogFd = openApiStartupLogFd()
+    const restartStdio = restartLogFd === 'ignore' ? 'ignore' : ['ignore', restartLogFd, restartLogFd]
     if (isWin) {
       const apiProc = spawn('cmd', ['/c', 'start_api.bat'], {
-        cwd: emberPath, shell: true, detached: true, stdio: 'ignore',
+        cwd: emberPath, shell: true, detached: true, stdio: restartStdio,
       })
       apiProc.unref()
     } else {
       const pyBinPath = path.join(emberPath, '.venv', 'bin', 'python')
       const apiProc = spawn(pyBinPath, ['-m', 'uvicorn', 'src.api.main:app', '--host', '127.0.0.1', '--port', '8000'], {
-        cwd: emberPath, detached: true, stdio: 'ignore',
+        cwd: emberPath, detached: true, stdio: restartStdio,
       })
       apiProc.unref()
     }
+    if (typeof restartLogFd === 'number') { try { fs.closeSync(restartLogFd) } catch {} }
 
     log('Waiting for API to start...\n')
 
@@ -1257,6 +1272,12 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
       })
       if (!cloneOk) { log('UI clone failed.\n'); return { ok: false, stage: 'ui-clone' } }
     } else {
+      // npm install/ci may have rewritten package-lock.json; reset it so git pull doesn't refuse to merge.
+      await new Promise((resolve) => {
+        const proc = spawn('git', ['checkout', '--', 'package-lock.json'], { cwd: uiDir, shell: true })
+        proc.on('close', () => resolve())
+        proc.on('error', () => resolve())
+      })
       const pullOk = await new Promise((resolve) => {
         const proc = spawn('git', ['pull', 'origin', 'main'], { cwd: uiDir, shell: true })
         proc.stdout.on('data', (d) => log(d.toString()))
@@ -1264,7 +1285,10 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
         proc.on('close', (code) => resolve(code === 0))
         proc.on('error', () => resolve(false))
       })
-      if (!pullOk) { log('UI pull failed.\n'); return { ok: false, stage: 'ui-pull' } }
+      if (!pullOk) {
+        log(`UI pull failed in ${uiDir}. The clone is still intact — retrying the update is safe.\n`)
+        return { ok: false, stage: 'ui-pull' }
+      }
     }
 
     log('Installing UI dependencies...\n')
@@ -1421,42 +1445,84 @@ ipcMain.handle('check-docker-daemon', () => {
   })
 })
 
+ipcMain.handle('check-docker-containers', (_e, { emberPath }) => {
+  // Daemon responding is not enough — search/retrieval containers must actually be running
+  // before the API starts, otherwise early requests fail.
+  return new Promise((resolve) => {
+    if (!emberPath || !fs.existsSync(emberPath)) return resolve({ ok: false, count: 0 })
+    let out = ''
+    const proc = spawn('docker', ['compose', 'ps', '--status', 'running', '-q'], {
+      cwd: emberPath, shell: true,
+    })
+    proc.stdout.on('data', (d) => (out += d.toString()))
+    proc.on('close', (code) => {
+      const count = out.split('\n').filter((l) => l.trim().length > 0).length
+      resolve({ ok: code === 0 && count > 0, count })
+    })
+    proc.on('error', () => resolve({ ok: false, count: 0 }))
+  })
+})
+
 ipcMain.handle('start-api', (_e, { emberPath }) => {
   const isWin = process.platform === 'win32'
+  // Capture child stdio to api-startup.log so failures (missing venv, import errors,
+  // port collisions) aren't swallowed. Tail is surfaced via get-api-startup-log-tail.
+  const logFd = openApiStartupLogFd()
+  const stdio = logFd === 'ignore' ? 'ignore' : ['ignore', logFd, logFd]
   let proc
 
   if (isWin) {
-    // Spawn start_api.bat detached so it survives the installer closing
     proc = spawn('cmd', ['/c', 'start_api.bat'], {
       cwd: emberPath,
       shell: true,
       detached: true,
-      stdio: 'ignore',
+      stdio,
     })
   } else {
     const pyBin = path.join(emberPath, '.venv', 'bin', 'python')
     proc = spawn(pyBin, ['-m', 'uvicorn', 'src.api.main:app', '--host', '127.0.0.1', '--port', '8000'], {
       cwd: emberPath,
       detached: true,
-      stdio: 'ignore',
+      stdio,
     })
   }
 
-  // Unref so the installer can close without killing the API
+  if (typeof logFd === 'number') { try { fs.closeSync(logFd) } catch {} }
   proc.unref()
   return { ok: true }
 })
 
-ipcMain.handle('check-api-health', (_e, { host }) => {
+ipcMain.handle('get-api-startup-log-tail', () => {
+  try {
+    const p = apiStartupLogPath()
+    if (!fs.existsSync(p)) return { tail: '' }
+    const content = fs.readFileSync(p, 'utf-8')
+    const lines = content.split(/\r?\n/)
+    const trimmed = lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines
+    return { tail: trimmed.slice(-50).join('\n') }
+  } catch {
+    return { tail: '' }
+  }
+})
+
+ipcMain.handle('check-api-health', async (_e, { host }) => {
   const targetHost = host || '127.0.0.1'
-  const http = require('http')
-  return new Promise((resolve) => {
-    const req = http.get(`http://${targetHost}:8000/api/health`, { timeout: 3000 }, (res) => {
-      resolve({ ok: res.statusCode === 200 })
+  const probe = (urlPath) => new Promise((resolve) => {
+    const req = http.get(`http://${targetHost}:8000${urlPath}`, { timeout: 3000 }, (res) => {
+      resolve(res.statusCode === 200)
     })
-    req.on('error', () => resolve({ ok: false }))
-    req.on('timeout', () => { req.destroy(); resolve({ ok: false }) })
+    req.on('error', () => resolve(false))
+    req.on('timeout', () => { req.destroy(); resolve(false) })
   })
+  if (await probe('/api/health')) return { ok: true, probe: 'health' }
+  // Fallback: server may be accepting TCP but /api/health not yet initialized.
+  if (await probe('/')) {
+    try {
+      fs.appendFileSync(apiStartupLogPath(), `[installer] /api/health not responding; fallback probe to / succeeded\n`)
+    } catch {}
+    return { ok: true, probe: 'root' }
+  }
+  return { ok: false }
 })
 
 ipcMain.handle('get-vault-storage', (_e, { host }) => {
@@ -2120,6 +2186,9 @@ if (DEMO_MODE) {
   ipcMain.removeHandler('check-docker-daemon')
   ipcMain.handle('check-docker-daemon', async () => ({ ok: true }))
 
+  ipcMain.removeHandler('check-docker-containers')
+  ipcMain.handle('check-docker-containers', async () => ({ ok: true, count: 2 }))
+
   ipcMain.removeHandler('check-venv-lock')
   ipcMain.handle('check-venv-lock', async () => ({ locked: false }))
 
@@ -2128,8 +2197,10 @@ if (DEMO_MODE) {
   ipcMain.removeHandler('check-api-health')
   ipcMain.handle('check-api-health', async () => {
     await sleep(2000)
-    return { ok: true }
+    return { ok: true, probe: 'health' }
   })
+  ipcMain.removeHandler('get-api-startup-log-tail')
+  ipcMain.handle('get-api-startup-log-tail', async () => ({ tail: '' }))
 
   ipcMain.removeHandler('get-vault-storage')
   ipcMain.handle('get-vault-storage', async () => {
