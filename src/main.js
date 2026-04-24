@@ -21,6 +21,21 @@ function initPaths() {
   INSTALL_PATH_FILE = path.join(USER_DATA, 'ember-install-path.txt')
 }
 
+function apiStartupLogPath() {
+  return path.join(USER_DATA, 'api-startup.log')
+}
+
+// Open (and truncate) the startup log file. Returns a numeric FD suitable for
+// passing to spawn's stdio so the child's stdout/stderr land in the file.
+// Caller must fs.closeSync(fd) after spawn — the child has already inherited it.
+function openApiStartupLogFd() {
+  try {
+    return fs.openSync(apiStartupLogPath(), 'w')
+  } catch {
+    return 'ignore'
+  }
+}
+
 const REPO_BACKEND_SLUG = 'niansahc/ember-2'
 const REPO_UI_SLUG = 'niansahc/ember-2-ui'
 const REPO_INSTALLER_SLUG = 'niansahc/ember-2-installer'
@@ -1151,18 +1166,21 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     })
 
     log('Starting updated API...\n')
+    const restartLogFd = openApiStartupLogFd()
+    const restartStdio = restartLogFd === 'ignore' ? 'ignore' : ['ignore', restartLogFd, restartLogFd]
     if (isWin) {
       const apiProc = spawn('cmd', ['/c', 'start_api.bat'], {
-        cwd: emberPath, shell: true, detached: true, stdio: 'ignore',
+        cwd: emberPath, shell: true, detached: true, stdio: restartStdio,
       })
       apiProc.unref()
     } else {
       const pyBinPath = path.join(emberPath, '.venv', 'bin', 'python')
       const apiProc = spawn(pyBinPath, ['-m', 'uvicorn', 'src.api.main:app', '--host', '127.0.0.1', '--port', '8000'], {
-        cwd: emberPath, detached: true, stdio: 'ignore',
+        cwd: emberPath, detached: true, stdio: restartStdio,
       })
       apiProc.unref()
     }
+    if (typeof restartLogFd === 'number') { try { fs.closeSync(restartLogFd) } catch {} }
 
     log('Waiting for API to start...\n')
 
@@ -1447,28 +1465,44 @@ ipcMain.handle('check-docker-containers', (_e, { emberPath }) => {
 
 ipcMain.handle('start-api', (_e, { emberPath }) => {
   const isWin = process.platform === 'win32'
+  // Capture child stdio to api-startup.log so failures (missing venv, import errors,
+  // port collisions) aren't swallowed. Tail is surfaced via get-api-startup-log-tail.
+  const logFd = openApiStartupLogFd()
+  const stdio = logFd === 'ignore' ? 'ignore' : ['ignore', logFd, logFd]
   let proc
 
   if (isWin) {
-    // Spawn start_api.bat detached so it survives the installer closing
     proc = spawn('cmd', ['/c', 'start_api.bat'], {
       cwd: emberPath,
       shell: true,
       detached: true,
-      stdio: 'ignore',
+      stdio,
     })
   } else {
     const pyBin = path.join(emberPath, '.venv', 'bin', 'python')
     proc = spawn(pyBin, ['-m', 'uvicorn', 'src.api.main:app', '--host', '127.0.0.1', '--port', '8000'], {
       cwd: emberPath,
       detached: true,
-      stdio: 'ignore',
+      stdio,
     })
   }
 
-  // Unref so the installer can close without killing the API
+  if (typeof logFd === 'number') { try { fs.closeSync(logFd) } catch {} }
   proc.unref()
   return { ok: true }
+})
+
+ipcMain.handle('get-api-startup-log-tail', () => {
+  try {
+    const p = apiStartupLogPath()
+    if (!fs.existsSync(p)) return { tail: '' }
+    const content = fs.readFileSync(p, 'utf-8')
+    const lines = content.split(/\r?\n/)
+    const trimmed = lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines
+    return { tail: trimmed.slice(-50).join('\n') }
+  } catch {
+    return { tail: '' }
+  }
 })
 
 ipcMain.handle('check-api-health', (_e, { host }) => {
@@ -2155,8 +2189,10 @@ if (DEMO_MODE) {
   ipcMain.removeHandler('check-api-health')
   ipcMain.handle('check-api-health', async () => {
     await sleep(2000)
-    return { ok: true }
+    return { ok: true, probe: 'health' }
   })
+  ipcMain.removeHandler('get-api-startup-log-tail')
+  ipcMain.handle('get-api-startup-log-tail', async () => ({ tail: '' }))
 
   ipcMain.removeHandler('get-vault-storage')
   ipcMain.handle('get-vault-storage', async () => {

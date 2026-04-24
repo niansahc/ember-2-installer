@@ -1697,6 +1697,17 @@ async function loadEmberVersion() {
     document.getElementById('btn-retry-api').style.display = ''
     document.getElementById('done-troubleshooting').classList.remove('hidden')
     document.getElementById('ember-version-label').textContent = 'not started'
+
+    try {
+      const { tail } = await window.ember.getApiStartupLogTail()
+      if (tail) {
+        const pre = document.getElementById('api-startup-log-tail')
+        const label = document.getElementById('api-startup-log-label')
+        pre.textContent = tail
+        pre.classList.remove('hidden')
+        if (label) label.hidden = false
+      }
+    } catch {}
   }
 
   const platform = await window.ember.getPlatform()

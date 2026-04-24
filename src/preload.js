@@ -76,6 +76,7 @@ contextBridge.exposeInMainWorld('ember', {
 
   startApi: (emberPath) => ipcRenderer.invoke('start-api', { emberPath }),
   checkApiHealth: (host) => ipcRenderer.invoke('check-api-health', { host }),
+  getApiStartupLogTail: () => ipcRenderer.invoke('get-api-startup-log-tail'),
   getVaultStorage: (host) => ipcRenderer.invoke('get-vault-storage', { host }),
 
   launchEmber: (emberPath) => ipcRenderer.invoke('launch-ember', { emberPath }),
