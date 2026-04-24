@@ -1505,16 +1505,24 @@ ipcMain.handle('get-api-startup-log-tail', () => {
   }
 })
 
-ipcMain.handle('check-api-health', (_e, { host }) => {
+ipcMain.handle('check-api-health', async (_e, { host }) => {
   const targetHost = host || '127.0.0.1'
-  const http = require('http')
-  return new Promise((resolve) => {
-    const req = http.get(`http://${targetHost}:8000/api/health`, { timeout: 3000 }, (res) => {
-      resolve({ ok: res.statusCode === 200 })
+  const probe = (urlPath) => new Promise((resolve) => {
+    const req = http.get(`http://${targetHost}:8000${urlPath}`, { timeout: 3000 }, (res) => {
+      resolve(res.statusCode === 200)
     })
-    req.on('error', () => resolve({ ok: false }))
-    req.on('timeout', () => { req.destroy(); resolve({ ok: false }) })
+    req.on('error', () => resolve(false))
+    req.on('timeout', () => { req.destroy(); resolve(false) })
   })
+  if (await probe('/api/health')) return { ok: true, probe: 'health' }
+  // Fallback: server may be accepting TCP but /api/health not yet initialized.
+  if (await probe('/')) {
+    try {
+      fs.appendFileSync(apiStartupLogPath(), `[installer] /api/health not responding; fallback probe to / succeeded\n`)
+    } catch {}
+    return { ok: true, probe: 'root' }
+  }
+  return { ok: false }
 })
 
 ipcMain.handle('get-vault-storage', (_e, { host }) => {
