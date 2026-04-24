@@ -1117,18 +1117,7 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
       }
     } catch {}
 
-    log('Restarting Docker services...\n')
-    await new Promise((resolve) => {
-      const proc = spawn('docker', ['compose', 'up', '-d', '--build'], {
-        cwd: emberPath, shell: true,
-      })
-      proc.stdout.on('data', (d) => log(d.toString()))
-      proc.stderr.on('data', (d) => log(d.toString()))
-      proc.on('close', () => resolve())
-      proc.on('error', () => resolve())
-    })
-
-    // Kill the old API process so the new code loads on restart
+    // Kill the old API BEFORE docker restart so a lingering uvicorn can't win the port-8000 bind race.
     log('Stopping old API process...\n')
     if (isWin) {
       await new Promise((resolve) => {
@@ -1136,7 +1125,6 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
         proc.on('close', () => resolve())
         proc.on('error', () => resolve())
       })
-      // Also kill any uvicorn on port 8000
       await new Promise((resolve) => {
         const proc = spawn('cmd', ['/c', 'for /f "tokens=5" %a in (\'netstat -aon ^| findstr :8000 ^| findstr LISTENING\') do taskkill /F /PID %a'], { shell: true })
         proc.on('close', () => resolve())
@@ -1149,9 +1137,18 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
         proc.on('error', () => resolve())
       })
     }
-
-    // Wait a moment for the port to free up
     await new Promise((r) => setTimeout(r, 2000))
+
+    log('Restarting Docker services...\n')
+    await new Promise((resolve) => {
+      const proc = spawn('docker', ['compose', 'up', '-d', '--build'], {
+        cwd: emberPath, shell: true,
+      })
+      proc.stdout.on('data', (d) => log(d.toString()))
+      proc.stderr.on('data', (d) => log(d.toString()))
+      proc.on('close', () => resolve())
+      proc.on('error', () => resolve())
+    })
 
     log('Starting updated API...\n')
     if (isWin) {
