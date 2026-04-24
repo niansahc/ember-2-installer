@@ -1632,6 +1632,27 @@ async function loadEmberVersion() {
       return
     }
 
+    // Daemon is up, but containers may still be pulling/starting. Poll container readiness
+    // so the API doesn't spawn before retrieval services accept requests.
+    status.textContent = 'Checking services...'
+    let containersReady = false
+    for (let i = 0; i < 20; i++) {
+      const c = await window.ember.checkDockerContainers(state.emberPath)
+      if (c.ok) { containersReady = true; break }
+      status.textContent = `Waiting for services to start... (${(i + 1) * 3}s)`
+      await new Promise((r) => setTimeout(r, 3000))
+    }
+    if (!containersReady) {
+      title.textContent = "Almost there."
+      voice.textContent = '"My services aren\'t running yet."'
+      status.textContent = "Docker services didn't start within 60 seconds. Try relaunching Ember."
+      btn.disabled = false
+      document.getElementById('btn-retry-api').style.display = ''
+      document.getElementById('done-troubleshooting').classList.remove('hidden')
+      document.getElementById('ember-version-label').textContent = 'not started'
+      return
+    }
+
     status.textContent = 'Starting Ember...'
     await window.ember.startApi(state.emberPath)
   }

@@ -72,6 +72,7 @@ contextBridge.exposeInMainWorld('ember', {
     ipcRenderer.on('ember-update-log', (_e, text) => fn(text)),
 
   checkDockerDaemon: () => ipcRenderer.invoke('check-docker-daemon'),
+  checkDockerContainers: (emberPath) => ipcRenderer.invoke('check-docker-containers', { emberPath }),
 
   startApi: (emberPath) => ipcRenderer.invoke('start-api', { emberPath }),
   checkApiHealth: (host) => ipcRenderer.invoke('check-api-health', { host }),

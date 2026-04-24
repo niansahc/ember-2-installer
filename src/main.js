@@ -1427,6 +1427,24 @@ ipcMain.handle('check-docker-daemon', () => {
   })
 })
 
+ipcMain.handle('check-docker-containers', (_e, { emberPath }) => {
+  // Daemon responding is not enough — search/retrieval containers must actually be running
+  // before the API starts, otherwise early requests fail.
+  return new Promise((resolve) => {
+    if (!emberPath || !fs.existsSync(emberPath)) return resolve({ ok: false, count: 0 })
+    let out = ''
+    const proc = spawn('docker', ['compose', 'ps', '--status', 'running', '-q'], {
+      cwd: emberPath, shell: true,
+    })
+    proc.stdout.on('data', (d) => (out += d.toString()))
+    proc.on('close', (code) => {
+      const count = out.split('\n').filter((l) => l.trim().length > 0).length
+      resolve({ ok: code === 0 && count > 0, count })
+    })
+    proc.on('error', () => resolve({ ok: false, count: 0 }))
+  })
+})
+
 ipcMain.handle('start-api', (_e, { emberPath }) => {
   const isWin = process.platform === 'win32'
   let proc
@@ -2125,6 +2143,9 @@ if (DEMO_MODE) {
 
   ipcMain.removeHandler('check-docker-daemon')
   ipcMain.handle('check-docker-daemon', async () => ({ ok: true }))
+
+  ipcMain.removeHandler('check-docker-containers')
+  ipcMain.handle('check-docker-containers', async () => ({ ok: true, count: 2 }))
 
   ipcMain.removeHandler('check-venv-lock')
   ipcMain.handle('check-venv-lock', async () => ({ locked: false }))
