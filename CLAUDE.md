@@ -124,6 +124,8 @@ Format: `type(scope): description`. Types: feat, fix, chore, docs, refactor, tes
 
 Full release process, gates, and sequence: run `/pre-release`
 
+Release-please PRs (title format: "chore(main): release X.Y.Z") must NEVER have auto-merge enabled. These PRs require explicit human approval and manual merge only. The human decides when a release is cut. All other PR types (feat, fix, docs, test, chore non-release) may use auto-merge as normal.
+
 ---
 
 ## Known Issues
