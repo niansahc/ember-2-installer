@@ -1,29 +1,20 @@
-<!-- Release notes for v0.15.0 — rendered in the update screen panel. -->
+<!-- Release notes for v0.17.0 — rendered in the update screen panel. -->
 
-<p class="rn-p"><span class="rn-strong">TLDR:</span> v0.15.0 is a quality of life release. Ember got smarter about when to search, better at citing where her answers come from, and faster overall.</p>
-
-<h2 class="rn-h2">Web Search</h2>
-<div class="rn-li"><span class="rn-strong">Ask-first mode:</span> Ember asks before searching. She flags the gap and checks if you want her to look it up.</div>
-<div class="rn-li"><span class="rn-strong">Autonomous mode:</span> Toggle in Settings if you'd rather she just handle it.</div>
-<div class="rn-li"><span class="rn-strong">Broader triggers:</span> Current events, financial data, sports, culture, and time-sensitive queries now route to web search without you having to spell it out.</div>
-
-<h2 class="rn-h2">Memory and Retrieval</h2>
-<div class="rn-li"><span class="rn-strong">Temporal decay:</span> Recent records score higher than older ones on the same query. Last week outweighs last month.</div>
-<div class="rn-li"><span class="rn-strong">Source citations:</span> Every response now shows where it came from. Source: Vault, Source: Web Search, Source: LLM, or any combination.</div>
+<p class="rn-p"><span class="rn-strong">TLDR:</span> v0.17.0 is about daily usability. Ember is more honest with you, smarter about when to reach for the web, and the things that were broken — the stop button, the mobile header, the installer updates, the reminder that vanished — are fixed.</p>
 
 <h2 class="rn-h2">Character and Behavior</h2>
-<div class="rn-li"><span class="rn-strong">Parenthetical question loop fixed:</span> Ember was ending responses with questions in parentheses and continuing after you asked her to stop. Fixed.</div>
-<div class="rn-li"><span class="rn-strong">Topic fixation fixed:</span> When you say you don't want to talk about something, she drops it.</div>
-<div class="rn-li"><span class="rn-strong">Lowercase bug fixed:</span> Internal reasoning traces were leaking into the stream and lowercasing everything. Fixed.</div>
-<div class="rn-li"><span class="rn-strong">Constitutional review overhaul:</span> Review now asks three targeted questions instead of sending the full constitution. Faster and more accurate.</div>
+<div class="rn-li"><span class="rn-strong">Anti-sycophancy:</span> Ember doesn't cave now. She held positions before, but had a pattern of softening when pushed. That's been addressed in both the behavior rules and her character document. She'll update her view when you give her a good reason. Not because you pushed back.</div>
+<div class="rn-li"><span class="rn-strong">Register:</span> Ember was slipping into a therapeutic register on emotional topics — reframing, reflecting, gently redirecting. The coaching filter's been extended to catch more of those patterns before they reach you.</div>
 
-<h2 class="rn-h2">Security and Privacy</h2>
-<div class="rn-li"><span class="rn-strong">Change PIN:</span> Now available in Settings under Security.</div>
-<div class="rn-li"><span class="rn-strong">Disk encryption check:</span> Ember checks whether full disk encryption is enabled and shows a reminder if it isn't.</div>
+<h2 class="rn-h2">Web Search</h2>
+<div class="rn-li"><span class="rn-strong">Ask-first classifier:</span> Ember now routes queries through a three-stage intent classifier before deciding whether to search. She asks when there's real uncertainty, searches autonomously when the intent is clear.</div>
 
-<h2 class="rn-h2">Services</h2>
-<div class="rn-li"><span class="rn-strong">Auto-start:</span> The API starts automatically at login on Windows, macOS, and Linux.</div>
-<div class="rn-li"><span class="rn-strong">Service controls:</span> Stop and restart the API from the glowing dot in the corner of the UI.</div>
+<h2 class="rn-h2">Tasks and Reminders</h2>
+<div class="rn-li"><span class="rn-strong">Time-qualified reminders work:</span> "Remind me at 5pm to stop working" now creates the task. The previous bug broke silently on any phrase between "remind me" and "to." Fixed.</div>
 
-<h2 class="rn-h2">Developer Tools</h2>
-<div class="rn-li"><span class="rn-strong">Vault switcher:</span> Switch between live, demo, and test vaults without restarting. Enable developer mode during install or via EMBER_DEV_MODE=true in .env.</div>
+<h2 class="rn-h2">Mobile</h2>
+<div class="rn-li"><span class="rn-strong">Header collapse:</span> The header fits on a single row at 360px. Vault badge, model name, and feature icons hide at mobile width. Bare mode, vault toggle, and export move into a ⋯ overflow menu. Desktop is unchanged.</div>
+
+<h2 class="rn-h2">Controls and Updates</h2>
+<div class="rn-li"><span class="rn-strong">Shut Down Ember works:</span> The button now calls a real endpoint and cleanly stops the API. Previous behavior: 404, swallowed silently, nothing happened.</div>
+<div class="rn-li"><span class="rn-strong">Installer updates everything:</span> The update flow now pulls all three repos. Previously only the backend updated and the UI stayed behind. Also fixed: dirty package-lock.json was silently aborting UI pulls.</div>
