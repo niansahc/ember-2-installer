@@ -509,16 +509,13 @@ ipcMain.handle('detect-hardware', async () => {
     gpu = 'Unknown'
   }
 
-  // Thresholds based on model memory requirements: 14B models need ~9 GB
-  // VRAM/RAM so 32 GB gives comfortable headroom; 8B models need ~5 GB so
-  // 12 GB is the practical floor; below that only 7B fits.
   let recommendation
-  if (totalRamGB >= 32) {
-    recommendation = { model: 'qwen2.5:14b', reason: `${totalRamGB} GB RAM — larger model fits comfortably` }
-  } else if (totalRamGB >= 12) {
+  if (totalRamGB >= 16) {
+    recommendation = { model: 'qwen3:14b', reason: `${totalRamGB} GB RAM — higher-capability dense model fits` }
+  } else if (totalRamGB >= 8) {
     recommendation = { model: 'qwen3:8b', reason: `${totalRamGB} GB RAM — best overall for Ember` }
   } else {
-    recommendation = { model: 'mistral:7b', reason: `${totalRamGB} GB RAM — lightweight model recommended` }
+    recommendation = { model: 'qwen3:4b', reason: `${totalRamGB} GB RAM — low-RAM Qwen 3 variant recommended` }
   }
 
   return { ram: totalRamGB, gpu, recommendation }
@@ -542,16 +539,14 @@ ipcMain.handle('get-recommended-models', async () => {
   } catch {}
 
   const recommended = [
-    { id: 'qwen3:8b', name: 'Qwen 3 8B', desc: 'Best overall for Ember. Strongest preference expression and memory grounding. 8 GB RAM.', size: '~4.9 GB', recommended: true },
-    { id: 'qwen2.5:14b', name: 'Qwen 2.5 14B', desc: 'Best self-attribution (9.0) — knows whose words are whose. Needs 16 GB RAM and is slower.', size: '~9 GB' },
-    { id: 'gemma3:12b', name: 'Gemma 3 12B', desc: 'Best memory grounding among larger models. Safety-focused architecture. 12 GB RAM.', size: '~8.1 GB' },
-    { id: 'phi4:14b', name: 'Phi 4 14B', desc: 'Strong reasoning but weak conversational presence. Ember sounds clinical with this model.', size: '~9.1 GB' },
-    { id: 'mistral:7b', name: 'Mistral 7B', desc: 'Smallest and fastest. Only choice if you have 6-7 GB RAM. Limited but functional.', size: '~4.1 GB' },
+    { id: 'qwen3:4b', name: 'Qwen 3 4B', desc: 'Needs 5 GB RAM. Low-RAM Qwen 3 variant for older or modest hardware. Recommended on architecture and hardware fit; not yet evaluated on Ember-specific prompts.', size: '~2.5 GB' },
+    { id: 'qwen3:8b', name: 'Qwen 3 8B', desc: 'Needs 8 GB RAM. Pareto winner across evaluated dimensions for Ember — strongest preference expression and memory grounding at this footprint.', size: '~4.9 GB', recommended: true },
+    { id: 'qwen3:14b', name: 'Qwen 3 14B', desc: 'Needs 16 GB RAM. Higher-capability dense Qwen 3 variant. Recommended on architecture and hardware fit; not yet evaluated on Ember-specific prompts.', size: '~9 GB' },
+    { id: 'qwen3:30b-a3b', name: 'Qwen 3 30B MoE', desc: 'Needs 24 GB RAM. Faster per-token inference than qwen3:14b at comparable quality because only 3B parameters activate per token. Largest disk footprint. Not yet evaluated on Ember-specific prompts.', size: '~18 GB' },
   ]
 
   const visionModels = [
     { id: 'llama3.2-vision:11b', name: 'Llama 3.2 Vision 11B', desc: 'Can analyze images you share', size: '~6.4 GB', recommended: true },
-    { id: 'llava:13b', name: 'LLaVA 13B', desc: 'Alternative vision model', size: '~8 GB' },
   ]
 
   return {
@@ -2279,17 +2274,15 @@ if (DEMO_MODE) {
   ipcMain.removeHandler('get-recommended-models')
   ipcMain.handle('get-recommended-models', async () => ({
     recommended: [
-      { id: 'qwen3:8b', name: 'Qwen 3 8B', desc: 'Best overall for Ember. Strongest preference expression and memory grounding. 8 GB RAM.', size: '~4.9 GB', recommended: true, installed: true },
-      { id: 'qwen2.5:14b', name: 'Qwen 2.5 14B', desc: 'Best self-attribution (9.0) — knows whose words are whose. Needs 16 GB RAM and is slower.', size: '~9 GB', installed: true },
-      { id: 'gemma3:12b', name: 'Gemma 3 12B', desc: 'Best memory grounding among larger models. Safety-focused architecture. 12 GB RAM.', size: '~8.1 GB', installed: false },
-      { id: 'mistral:7b', name: 'Mistral 7B', desc: 'Smallest and fastest. Only choice if you have 6-7 GB RAM. Limited but functional.', size: '~4.1 GB', installed: true },
-      { id: 'deepseek-r1:8b', name: 'DeepSeek R1 8B', desc: 'Strong at analysis and code', size: '~4.9 GB', installed: false },
+      { id: 'qwen3:4b', name: 'Qwen 3 4B', desc: 'Needs 5 GB RAM. Low-RAM Qwen 3 variant for older or modest hardware. Recommended on architecture and hardware fit; not yet evaluated on Ember-specific prompts.', size: '~2.5 GB', installed: false },
+      { id: 'qwen3:8b', name: 'Qwen 3 8B', desc: 'Needs 8 GB RAM. Pareto winner across evaluated dimensions for Ember — strongest preference expression and memory grounding at this footprint.', size: '~4.9 GB', recommended: true, installed: true },
+      { id: 'qwen3:14b', name: 'Qwen 3 14B', desc: 'Needs 16 GB RAM. Higher-capability dense Qwen 3 variant. Recommended on architecture and hardware fit; not yet evaluated on Ember-specific prompts.', size: '~9 GB', installed: true },
+      { id: 'qwen3:30b-a3b', name: 'Qwen 3 30B MoE', desc: 'Needs 24 GB RAM. Faster per-token inference than qwen3:14b at comparable quality because only 3B parameters activate per token. Largest disk footprint. Not yet evaluated on Ember-specific prompts.', size: '~18 GB', installed: false },
     ],
     vision: [
       { id: 'llama3.2-vision:11b', name: 'Llama 3.2 Vision 11B', desc: 'Can analyze images you share', size: '~6.4 GB', recommended: true, installed: true },
-      { id: 'llava:13b', name: 'LLaVA 13B', desc: 'Alternative vision model', size: '~8 GB', installed: false },
     ],
-    installed: ['qwen2.5:14b', 'mistral:7b', 'llama3.2-vision:11b'],
+    installed: ['qwen3:8b', 'qwen3:14b', 'llama3.2-vision:11b'],
   }))
 }
 

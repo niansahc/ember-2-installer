@@ -814,12 +814,12 @@ document.getElementById('btn-host-next').addEventListener('click', () => {
     state.vaultPath = document.getElementById('vault-path-input').placeholder
   }
 
-  const modelSizes = { 'qwen2.5:14b': 9, 'gemma3:12b': 8.1, 'phi4:14b': 9.1, 'mistral:7b': 4.1, 'qwen3:8b': 4.9 }
-  const visionSizes = { 'llama3.2-vision:11b': 6.4, 'llava:13b': 8 }
+  const modelSizes = { 'qwen3:4b': 2.5, 'qwen3:8b': 4.9, 'qwen3:14b': 9, 'qwen3:30b-a3b': 18 }
+  const visionSizes = { 'llama3.2-vision:11b': 6.4 }
 
   document.getElementById('summary-ember-path').textContent = state.emberPath || 'Not set'
   document.getElementById('summary-vault-path').textContent = state.vaultPath || 'Not set'
-  document.getElementById('summary-model').textContent = state.model || 'qwen2.5:14b'
+  document.getElementById('summary-model').textContent = state.model || 'qwen3:8b'
   document.getElementById('summary-ollama-path').textContent = state.ollamaModelsPath || '~/.ollama/models'
 
   const modelGB = modelSizes[state.model] || 5

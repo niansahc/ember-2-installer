@@ -24,7 +24,7 @@ Key optimizations and features:
 
 ## Current State
 
-v0.7.3. 73 Playwright tests passing. Produces Windows NSIS installer (primary), Mac DMG, and Linux AppImage (both best-effort until tested on real hardware).
+v0.8.1. 73 Playwright tests passing. Produces Windows NSIS installer (primary), Mac DMG, and Linux AppImage (both best-effort until tested on real hardware).
 
 ---
 
