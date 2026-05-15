@@ -118,6 +118,8 @@ When a flaky or condition-dependent test is identified during a release cycle, i
 
 Format: `type(scope): description`. Types: feat, fix, chore, docs, refactor, test, ci. Breaking changes: append `!`. release-please reads these for changelogs and version bumps.
 
+**No Claude attribution.** Never add `Co-Authored-By: Claude` or any Claude attribution to commit messages or PR bodies. Attribution is acknowledged in `docs/BUILDING_EMBER.md`, nowhere else.
+
 ---
 
 ## Release Process
