@@ -539,7 +539,7 @@ ipcMain.handle('get-recommended-models', async () => {
   } catch {}
 
   const recommended = [
-    { id: 'qwen3:4b', name: 'Qwen 3 4B', desc: 'Needs 5 GB RAM. Low-RAM Qwen 3 variant for older or modest hardware. Recommended on architecture and hardware fit; not yet evaluated on Ember-specific prompts.', size: '~2.5 GB' },
+    { id: 'qwen3:4b', name: 'Qwen 3 4B', desc: 'Needs 5 GB RAM. Low-RAM Qwen 3 variant for older or modest hardware. Evaluated on Ember-specific prompts; competitive with qwen3:8b at lower resource requirements.', size: '~2.5 GB' },
     { id: 'qwen3:8b', name: 'Qwen 3 8B', desc: 'Needs 8 GB RAM. Pareto winner across evaluated dimensions for Ember — strongest preference expression and memory grounding at this footprint.', size: '~4.9 GB', recommended: true },
     { id: 'qwen3:14b', name: 'Qwen 3 14B', desc: 'Needs 16 GB RAM. Higher-capability dense Qwen 3 variant. Recommended on architecture and hardware fit; not yet evaluated on Ember-specific prompts.', size: '~9 GB' },
     { id: 'qwen3:30b-a3b', name: 'Qwen 3 30B MoE', desc: 'Needs 24 GB RAM. Faster per-token inference than qwen3:14b at comparable quality because only 3B parameters activate per token. Largest disk footprint. Not yet evaluated on Ember-specific prompts.', size: '~18 GB' },
@@ -2274,7 +2274,7 @@ if (DEMO_MODE) {
   ipcMain.removeHandler('get-recommended-models')
   ipcMain.handle('get-recommended-models', async () => ({
     recommended: [
-      { id: 'qwen3:4b', name: 'Qwen 3 4B', desc: 'Needs 5 GB RAM. Low-RAM Qwen 3 variant for older or modest hardware. Recommended on architecture and hardware fit; not yet evaluated on Ember-specific prompts.', size: '~2.5 GB', installed: false },
+      { id: 'qwen3:4b', name: 'Qwen 3 4B', desc: 'Needs 5 GB RAM. Low-RAM Qwen 3 variant for older or modest hardware. Evaluated on Ember-specific prompts; competitive with qwen3:8b at lower resource requirements.', size: '~2.5 GB', installed: false },
       { id: 'qwen3:8b', name: 'Qwen 3 8B', desc: 'Needs 8 GB RAM. Pareto winner across evaluated dimensions for Ember — strongest preference expression and memory grounding at this footprint.', size: '~4.9 GB', recommended: true, installed: true },
       { id: 'qwen3:14b', name: 'Qwen 3 14B', desc: 'Needs 16 GB RAM. Higher-capability dense Qwen 3 variant. Recommended on architecture and hardware fit; not yet evaluated on Ember-specific prompts.', size: '~9 GB', installed: true },
       { id: 'qwen3:30b-a3b', name: 'Qwen 3 30B MoE', desc: 'Needs 24 GB RAM. Faster per-token inference than qwen3:14b at comparable quality because only 3B parameters activate per token. Largest disk footprint. Not yet evaluated on Ember-specific prompts.', size: '~18 GB', installed: false },
