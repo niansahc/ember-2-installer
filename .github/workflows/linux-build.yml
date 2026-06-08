@@ -1,0 +1,53 @@
+name: Linux Build
+
+# Builds the Linux AppImage and runs the demo-mode Playwright suite on Linux.
+# This is the only automated verification surface for Linux support: the demo
+# suite proves the Electron app boots, IPC bridges, and all screens render on
+# Linux. It does NOT exercise the real system integrations (systemctl, docker,
+# lspci, package managers) — those remain best-effort and untested on hardware.
+#
+# Windows is unaffected: this job never runs Windows builds or tests.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Electron/Playwright system libraries (incl. xvfb)
+        run: npx playwright install-deps
+
+      - name: Build Linux AppImage
+        run: npm run build:linux
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ember-setup-linux-appimage
+          path: dist-linux/*.AppImage
+          if-no-files-found: error
+
+      - name: Run demo-mode e2e suite (headless via xvfb)
+        run: xvfb-run -a npm run test:e2e
