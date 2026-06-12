@@ -25,6 +25,14 @@ function readBuilderConfig() {
   return yaml.load(fs.readFileSync(path.join(repoRoot, 'electron-builder.yml'), 'utf8'))
 }
 
+function workflowPath(name) {
+  return path.join(repoRoot, '.github', 'workflows', name)
+}
+
+function readWorkflowRaw(name) {
+  return fs.readFileSync(workflowPath(name), 'utf8')
+}
+
 test('build:linux directs output away from the Windows output dir', () => {
   const pkg = readPackageJson()
   const script = pkg.scripts['build:linux']
@@ -53,6 +61,18 @@ test('release_notes.html is bundled (files allowlist includes it)', () => {
   // demo suite, which reads the repo-root file directly.
   const cfg = readBuilderConfig()
   expect(cfg.files).toContain('release_notes.html')
+})
+
+test('Windows CI builds the app and runs the e2e suite on windows-latest', () => {
+  // Windows is the primary platform but was only ever built/tested on the dev's
+  // machine. This job is the automated verification surface for it.
+  const wf = yaml.load(readWorkflowRaw('windows-build.yml'))
+  const job = wf.jobs['windows-build']
+  expect(job).toBeTruthy()
+  expect(job['runs-on']).toBe('windows-latest')
+  const runs = job.steps.map((s) => s.run || '').join('\n')
+  expect(runs).toContain('--win')
+  expect(runs).toContain('npm run test:e2e')
 })
 
 test('Windows build output dir stays at C:/temp/ember-dist (no regression)', () => {
