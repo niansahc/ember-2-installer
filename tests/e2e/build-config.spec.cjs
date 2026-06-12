@@ -75,6 +75,28 @@ test('Windows CI builds the app and runs the e2e suite on windows-latest', () =>
   expect(runs).toContain('npm run test:e2e')
 })
 
+test('release workflow publishes win/mac/linux artifacts on a published release', () => {
+  // electron-updater needs latest*.yml attached to the GitHub Release; nothing
+  // built/attached it before. The release fires only when the human merges the
+  // release-please PR (draft: false), so triggering on release:published keeps it
+  // human-gated. Assert the trigger from raw text — YAML 1.1 parses the `on:` key
+  // as the boolean true, so it isn't reliably reachable as wf.on.
+  const raw = readWorkflowRaw('release.yml')
+  expect(raw).toMatch(/on:\s*[\r\n]+\s*release:/)
+  expect(raw).toMatch(/types:\s*\[?\s*published/)
+
+  const wf = yaml.load(raw)
+  const jobs = Object.values(wf.jobs)
+  const runsOn = jobs.map((j) => j['runs-on'])
+  expect(runsOn).toEqual(expect.arrayContaining(['windows-latest', 'macos-latest', 'ubuntu-latest']))
+
+  const allRuns = jobs.flatMap((j) => j.steps.map((s) => s.run || '')).join('\n')
+  expect(allRuns).toContain('--win')
+  expect(allRuns).toContain('--mac')
+  expect(allRuns).toContain('--linux')
+  expect(allRuns).toContain('--publish')
+})
+
 test('Windows build output dir stays at C:/temp/ember-dist (no regression)', () => {
   // Load-bearing: this path keeps build output off OneDrive (sync churn) and
   // under the Windows MAX_PATH limit for electron-builder's deep node_modules

@@ -1,63 +1,79 @@
 # Release Workflow
 
+## What the installer is (and isn't)
+
+The installer is the Electron **setup wizard** only. Its packaged binary contains just the wizard
+(`src/**`, `assets/**`, `release_notes.html`). It does **not** bundle the backend or the frontend:
+at install time it clones ember-2 and ember-2-ui onto the user's machine and builds the UI there
+(the `build-ui` step in `src/main.js`). So releasing the installer is just packaging the wizard —
+there is no frontend build at release time.
+
 ## How electron-updater Works
 
-electron-updater checks GitHub Releases API for a published release containing latest.yml. It does NOT use git tags. A tag without a published release is invisible to the update checker.
+electron-updater checks the GitHub Releases API for a published release containing a `latest*.yml`
+(per platform: `latest.yml`, `latest-mac.yml`, `latest-linux.yml`). It does NOT use git tags. A tag
+without a published release is invisible to the update checker.
 
-Three files must be present for auto-update to work:
-- latest.yml -- attached to the GitHub Release by electron-builder; tells the running app what version is available
-- app-update.yml -- embedded inside the packaged app at build time; tells the running app which GitHub repo to check
-- The installer binary (.exe, .dmg, .AppImage)
+Three things must be present for auto-update to work:
+- `latest*.yml` -- attached to the GitHub Release by electron-builder; tells the running app what
+  version is available
+- `app-update.yml` -- embedded inside the packaged app at build time; tells the running app which
+  GitHub repo to check
+- The installer binary (`.exe`, `.dmg`, `.AppImage`)
 
-If app-update.yml is missing from an installed version, that version can never auto-update. The user must reinstall manually.
+If `app-update.yml` is missing from an installed version, that version can never auto-update; the
+user must reinstall manually. In-app self-update is wired for Windows; on Linux it is a manual
+AppImage download and on macOS it is untested (see `download-installer-update` in `src/main.js`).
 
 ## Three-Repo Version Coordination
 
-ember-2-installer is the source of truth for what ships together. Each release of the installer must pin specific versions of:
-- ember-2 (backend) -- the git tag or commit included
-- ember-2-ui (frontend) -- the git tag or commit built and bundled
+ember-2-installer is the source of truth for what ships together. Document the ember-2 (backend)
+and ember-2-ui (frontend) versions a release expects in that release's notes.
 
-Document these versions in the release notes for every release.
+## Automated Release (implemented)
 
-## Frontend Build Requirement
+Release is automated via GitHub Actions and stays human-gated:
 
-The frontend (ember-2-ui) must be freshly built from the correct tagged source before packaging. electron-updater cannot build on the user's machine. Users do not have Node.js or dev dependencies installed. The built dist is bundled into the installer binary.
+1. **release-please** (`.github/workflows/release-please.yml`) maintains a release PR with the
+   auto-generated changelog and version bump. Per CLAUDE.md these PRs are **never** auto-merged.
+2. When the human merges the release PR, release-please creates a **published** GitHub Release
+   (`draft: false` in `release-please-config.json`) at tag `vX.Y.Z`.
+3. **`.github/workflows/release.yml`** fires on `release: published` and runs three jobs
+   (windows-latest, macos-latest, ubuntu-latest), each `electron-builder --<platform> --publish
+   always`, attaching that platform's installer plus its `latest*.yml` to the release.
 
-Never package a stale frontend dist. Always build from the pinned ember-2-ui version as part of the release process.
+Conventional commits (`feat:`, `fix:`, `chore:` ...) drive the semver bump. The workflow never cuts
+a release on its own — it only reacts to the human-merged release PR.
 
-## Current Manual Release Process (pre-automation)
+### Signing / Gatekeeper caveats
 
-Until GitHub Actions CI is in place, the manual release process is:
+Artifacts are currently unsigned: the Windows `.exe` triggers SmartScreen and the macOS `.dmg` is
+not notarized (Gatekeeper-blocked; right-click-open to run). Code signing is tracked separately.
 
-1. Bump version in package.json
-2. git pull the pinned ember-2-ui tag
-3. cd ember-2-ui && npm ci && npm run build
-4. Copy dist output to installer's expected location
-5. Run electron-builder
-6. Verify app-update.yml is present in build output
-7. Verify latest.yml was attached to the GitHub Release
-8. Publish the GitHub Release (not draft)
-9. Verify the release is visible at https://github.com/niansahc/ember-2-installer/releases
+## CI Verification
 
-## Planned: GitHub Actions Automation (v0.14.0)
+- **`windows-build.yml`** -- builds the app (`--win --dir`) and runs the full Playwright suite on
+  windows-latest (the primary platform) on every PR / push to main.
+- **`linux-build.yml`** -- builds the AppImage and runs the suite on Linux via xvfb.
 
-The target workflow:
-- Release Please maintains a release PR with auto-generated changelog and version bump
-- Merging the release PR creates a tag and a GitHub Release
-- A GitHub Actions workflow triggered on release publication:
-  1. Clones ember-2-ui at the pinned tag
-  2. Runs npm ci and npm run build
-  3. Downloads the pinned ember-2 backend release artifact
-  4. Runs electron-builder --publish always
-  5. Attaches all artifacts to the GitHub Release automatically
-- Conventional commits (feat:, fix:, chore:) drive automatic semver bumping
+Both run the demo-mode suite only; real system integrations (docker, systemctl, package managers)
+remain best-effort and untested on hardware.
 
-Until this is in place, the manual checklist above applies to every release.
+## Manual Release (fallback)
+
+If you must release by hand:
+
+1. Bump the version in `package.json` (normally release-please does this).
+2. `npm ci`
+3. `npx electron-builder --<platform> --publish always` with `GH_TOKEN` set -- or run a local build
+   and upload the installer binary + `latest*.yml` to the published (non-draft) GitHub Release.
+4. Verify `app-update.yml` is in the build output and `latest*.yml` is attached to the release.
 
 ## Failure Modes to Watch
 
 - Draft release: electron-updater sees nothing; users get no update notification; no error shown
-- Missing latest.yml: update checker finds the release but cannot read version info; silent failure
-- Missing app-update.yml: affected installed versions can never auto-update; requires manual reinstall
-- Stale frontend: backend updates, frontend does not; silent API incompatibilities
+- Missing `latest*.yml`: update checker finds the release but cannot read version info; silent
+  failure
+- Missing `app-update.yml`: affected installed versions can never auto-update; requires manual
+  reinstall
 - Version not bumped: electron-updater compares versions and concludes no update available

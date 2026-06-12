@@ -1,0 +1,72 @@
+name: Release
+
+# Builds and publishes the installer for all three platforms when a GitHub
+# Release is published. release-please creates the published release only when
+# the human merges the release PR (draft: false in release-please-config.json),
+# so this never cuts a release on its own — it stays human-gated.
+#
+# electron-builder --publish always attaches each platform's installer plus its
+# latest*.yml (the file electron-updater reads to detect new versions); the
+# publish target (github / niansahc / ember-2-installer) comes from
+# electron-builder.yml.
+#
+# The installer is the Electron setup wizard ONLY. ember-2 (backend) and
+# ember-2-ui (frontend) are cloned and built on the user's machine at install
+# time, so there is deliberately no frontend build step here.
+#
+# Artifacts are unsigned: the Windows .exe triggers SmartScreen and the macOS
+# DMG is not notarized (Gatekeeper-blocked — right-click-open to run). Code
+# signing is tracked separately. Linux in-app self-update is disabled in
+# main.js, so the AppImage is a manual download.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  publish-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Build and publish Windows installer
+        run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Build and publish macOS DMG
+        run: npx electron-builder --mac --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No signing identity on CI — don't attempt to sign/notarize.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+  publish-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Build and publish Linux AppImage
+        run: npx electron-builder --linux --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
