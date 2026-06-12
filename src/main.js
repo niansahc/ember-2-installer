@@ -136,11 +136,19 @@ app.on('window-all-closed', () => {
 })
 
 ipcMain.handle('download-installer-update', async () => {
+  // AppImage self-replacement via electron-updater is untested on real Linux
+  // hardware, so we don't drive it here. Backend/UI update checks still work;
+  // the installer itself is updated by downloading a fresh AppImage manually.
+  if (process.platform === 'linux') {
+    return { ok: false, manual: true, message: 'On Linux, download the latest AppImage from the GitHub Releases page.' }
+  }
   if (autoUpdater) autoUpdater.downloadUpdate()
   return true
 })
 
 ipcMain.handle('install-installer-update', () => {
+  // No-op on Linux — see download-installer-update.
+  if (process.platform === 'linux') return
   if (autoUpdater) autoUpdater.quitAndInstall()
 })
 
@@ -745,13 +753,18 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
       proc.on('error', () => resolve(false))
     })
     if (!daemonUp) {
-      mainWindow.webContents.send('install-log', { step, text: 'Docker daemon not running — starting Docker Desktop...\n' })
       if (isWin) {
+        mainWindow.webContents.send('install-log', { step, text: 'Docker daemon not running — starting Docker Desktop...\n' })
         spawn('cmd', ['/c', 'start', '', 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe'], { shell: true })
       } else if (process.platform === 'darwin') {
+        mainWindow.webContents.send('install-log', { step, text: 'Docker daemon not running — starting Docker Desktop...\n' })
         spawn('open', ['-a', 'Docker'], { shell: true })
       } else {
-        spawn('systemctl', ['--user', 'start', 'docker-desktop'], { shell: true })
+        // Linux: do not auto-start. Docker Engine is a system service requiring
+        // root, and Docker Desktop is non-standard here — starting it from a GUI
+        // app would silently fail. Guide the user and keep polling so the step
+        // recovers if they start Docker during the wait window below.
+        mainWindow.webContents.send('install-log', { step, text: 'Docker daemon not running. On Linux, start it manually — e.g. "sudo systemctl start docker" — and make sure your user is in the "docker" group. Waiting for Docker...\n' })
       }
       let ready = false
       for (let i = 0; i < 20; i++) {
@@ -765,7 +778,10 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
         mainWindow.webContents.send('install-log', { step, text: 'Waiting for Docker daemon...\n' })
       }
       if (!ready) {
-        mainWindow.webContents.send('install-log', { step, text: 'Docker daemon did not start in time. Please start Docker Desktop manually and retry.\n' })
+        const retryHint = process.platform === 'linux'
+          ? 'Docker daemon is not available. Start Docker (e.g. "sudo systemctl start docker"), confirm "docker info" works, then retry.'
+          : 'Docker daemon did not start in time. Please start Docker Desktop manually and retry.'
+        mainWindow.webContents.send('install-log', { step, text: `${retryHint}\n` })
         mainWindow.webContents.send('install-step-done', { step, ok: false })
         return { ok: false }
       }
@@ -1052,10 +1068,16 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
   }
   const uiLatest = uiRelease?.tag_name?.replace(/^v/, '') || null
 
+  // Linux has no in-app installer self-update (AppImage self-replacement is
+  // untested on hardware), so don't raise the auto-update banner there — its
+  // button would drive a no-op download. Backend/UI checks below are unaffected.
+  // manual=true lets the renderer optionally surface a "download manually" hint.
+  const installerSelfUpdate = process.platform !== 'linux'
   return {
     reachable: !!(installerRelease || backendRelease || uiRelease),
     installer: {
-      hasUpdate: installerLatest && installerInstalled !== installerLatest,
+      hasUpdate: installerSelfUpdate && installerLatest && installerInstalled !== installerLatest,
+      manual: !installerSelfUpdate,
       installed: installerInstalled,
       latest: installerLatest,
       notes: firstBullet(installerRelease?.body),
@@ -1714,9 +1736,13 @@ ipcMain.handle('set-startup-task', async (_e, { emberPath, enabled }) => {
     const execStart = useWatchdog
       ? `${venvPython} ${watchdog}`
       : `/bin/bash ${scriptPath}`
+    // After=network.target only — do not hard-order on docker.service. On many
+    // Linux setups Docker runs as a system unit (or isn't present as a user-
+    // visible unit at all), so coupling the user service to docker.service can
+    // delay or confuse startup. The API tolerates Docker not being up yet.
     const unit = `[Unit]
 Description=Ember-2 API
-After=network.target docker.service
+After=network.target
 
 [Service]
 Type=simple
@@ -1832,6 +1858,17 @@ ipcMain.handle('get-platform', () => process.platform)
 ipcMain.handle('restart-computer', () => {
   if (process.platform === 'win32') {
     spawn('shutdown', ['/r', '/t', '30', '/c', 'Restarting for Docker Desktop setup. Run Ember Setup again after restart.'], { shell: true })
+  } else if (process.platform === 'linux') {
+    // A GUI app can't run "sudo shutdown" (no terminal for the password prompt),
+    // and a reboot/re-login is what actually applies docker-group membership.
+    // Ask the user to do it themselves rather than firing a command that fails.
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Reboot needed',
+      message: 'Please reboot, or log out and back in, to finish Docker setup.',
+      detail: 'Adding your user to the "docker" group only takes effect after a new login session. Once you have logged back in, run Ember Setup again.',
+      buttons: ['OK'],
+    })
   } else {
     spawn('sudo', ['shutdown', '-r', '+1', 'Restarting for Docker setup. Run Ember Setup again after restart.'], { shell: true })
   }

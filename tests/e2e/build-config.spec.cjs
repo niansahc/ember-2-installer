@@ -1,0 +1,55 @@
+// Build-configuration contract tests.
+//
+// These guard the cross-platform build invariants for the Ember Setup installer:
+//   - Windows output stays at C:/temp/ember-dist (load-bearing: avoids OneDrive
+//     sync churn and Windows MAX_PATH limits on the deep node_modules tree).
+//   - The Linux build directs its output elsewhere and ships the metadata an
+//     AppImage / .desktop entry needs.
+//
+// They read the real config files (package.json, electron-builder.yml) so a
+// regression in the build wiring fails the suite on any platform, including the
+// Linux CI job that has no way to run a full build to completion quickly.
+
+const { test, expect } = require('@playwright/test')
+const fs = require('fs')
+const path = require('path')
+const yaml = require('js-yaml')
+
+const repoRoot = path.resolve(__dirname, '..', '..')
+
+function readPackageJson() {
+  return JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
+}
+
+function readBuilderConfig() {
+  return yaml.load(fs.readFileSync(path.join(repoRoot, 'electron-builder.yml'), 'utf8'))
+}
+
+test('build:linux directs output away from the Windows output dir', () => {
+  const pkg = readPackageJson()
+  const script = pkg.scripts['build:linux']
+  expect(script).toBeTruthy()
+  // Linux must not inherit the Windows C:/temp path; it overrides output to dist-linux.
+  expect(script).toContain('-c.directories.output=dist-linux')
+  expect(script).not.toContain('C:/temp')
+})
+
+test('Linux build ships AppImage target with desktop-entry metadata', () => {
+  const cfg = readBuilderConfig()
+  expect(cfg.linux).toBeTruthy()
+  expect(cfg.linux.target).toBe('AppImage')
+  // category + maintainer populate the AppImage's .desktop entry; electron-builder
+  // warns and produces a less-integrated artifact without them.
+  expect(cfg.linux.category).toBeTruthy()
+  expect(cfg.linux.maintainer).toBeTruthy()
+})
+
+test('Windows build output dir stays at C:/temp/ember-dist (no regression)', () => {
+  // Load-bearing: this path keeps build output off OneDrive (sync churn) and
+  // under the Windows MAX_PATH limit for electron-builder's deep node_modules
+  // tree. Linux overrides output via the build:linux script, never by changing
+  // this line. If this fails, the Windows build is at risk — do not "fix" it by
+  // editing the test.
+  const cfg = readBuilderConfig()
+  expect(cfg.directories.output).toBe('C:/temp/ember-dist')
+})
