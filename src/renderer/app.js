@@ -1166,6 +1166,17 @@ async function runStepsFrom(steps, startIndex) {
   return true
 }
 
+// Demo/dev-only test seam: registers a raw install-log listener that is NOT
+// removed, simulating the leftover from a prior failed install. Lets e2e prove
+// runInstall binds idempotently (no duplicate log output). Never used in prod.
+function addRawInstallLogListener() {
+  const logBox = document.getElementById('install-log')
+  window.ember.onInstallLog(({ text }) => {
+    logBox.textContent += text
+    logBox.scrollTop = logBox.scrollHeight
+  })
+}
+
 async function runInstall() {
   startFunFacts()
 
@@ -1178,6 +1189,10 @@ async function runInstall() {
   const logBox = document.getElementById('install-log')
   logBox.textContent = ''
 
+  // Bind idempotently: a prior install that failed leaves this listener attached
+  // (retry reuses it, so it isn't removed on failure). Without clearing first,
+  // re-entering runInstall would stack a second listener and double every log line.
+  window.ember.removeAllListeners('install-log')
   window.ember.onInstallLog(({ step, text }) => {
     logBox.textContent += text
     logBox.scrollTop = logBox.scrollHeight
@@ -1253,7 +1268,6 @@ async function runInstall() {
 
   if (ok) {
     window.ember.removeAllListeners('install-log')
-    window.ember.removeAllListeners('install-step-done')
     stopFunFacts()
     updateProgressBar(flat.length, flat.length)
     showScreen('screen-agpl')
@@ -2149,7 +2163,7 @@ async function init() {
     document.getElementById('demo-badge').classList.remove('hidden')
     // Demo/dev-only test seam: lets e2e drive the render path with crafted input
     // to prove dynamic values are escaped. Never exposed in packaged builds.
-    window.__emberTest = { buildModelCard }
+    window.__emberTest = { buildModelCard, addRawInstallLogListener }
   }
 
   const emberPath = await window.ember.getEmberPath()
