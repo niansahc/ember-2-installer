@@ -5,6 +5,7 @@ const { spawn, execSync } = require('child_process')
 const https = require('https')
 const http = require('http')
 const os = require('os')
+const { isNewer } = require('./lib/version')
 
 const IS_PACKAGED = app.isPackaged
 const HAS_REAL_FLAG = process.argv.includes('--real')
@@ -181,7 +182,7 @@ ipcMain.handle('check-ember-update', async () => {
   const latest = await fetchLatestRelease()
   if (!latest || !latest.tag_name) return { hasUpdate: false, installed }
 
-  const hasUpdate = installed && installed !== latest.tag_name
+  const hasUpdate = installed && isNewer(latest.tag_name, installed)
   return {
     hasUpdate,
     installed: installed || 'unknown',
@@ -949,7 +950,7 @@ ipcMain.handle('check-for-update', async () => {
   const latest = await fetchLatestRelease(REPO_BACKEND_SLUG)
   if (!latest) return { hasUpdate: false }
 
-  const hasUpdate = installed && installed !== latest.tag_name
+  const hasUpdate = installed && isNewer(latest.tag_name, installed)
   return {
     hasUpdate,
     installedTag: installed,
@@ -1076,21 +1077,21 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
   return {
     reachable: !!(installerRelease || backendRelease || uiRelease),
     installer: {
-      hasUpdate: installerSelfUpdate && installerLatest && installerInstalled !== installerLatest,
+      hasUpdate: installerSelfUpdate && installerLatest && isNewer(installerLatest, installerInstalled),
       manual: !installerSelfUpdate,
       installed: installerInstalled,
       latest: installerLatest,
       notes: firstBullet(installerRelease?.body),
     },
     backend: {
-      hasUpdate: backendLatest && (!backendInstalled || backendInstalled !== backendLatest),
+      hasUpdate: backendLatest && (!backendInstalled || isNewer(backendLatest, backendInstalled)),
       installed: backendInstalled || 'unknown',
       latest: backendLatest,
       apiRunning: backendApiRunning,
       notes: firstBullet(backendRelease?.body),
     },
     ui: {
-      hasUpdate: uiLatest && (!uiInstalled || uiInstalled !== uiLatest),
+      hasUpdate: uiLatest && (!uiInstalled || isNewer(uiLatest, uiInstalled)),
       installed: uiInstalled || 'unknown',
       latest: uiLatest,
       notes: firstBullet(uiRelease?.body),
