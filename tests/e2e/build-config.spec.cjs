@@ -44,6 +44,17 @@ test('Linux build ships AppImage target with desktop-entry metadata', () => {
   expect(cfg.linux.maintainer).toBeTruthy()
 })
 
+test('release_notes.html is bundled (files allowlist includes it)', () => {
+  // get-release-notes (src/main.js) reads release_notes.html from the app root,
+  // but the `files` allowlist is opt-in: anything not matched is left out of the
+  // asar. release_notes.html lives at the repo root (neither src/** nor assets/**),
+  // so it must be listed explicitly or the "What's new" panel renders empty in
+  // every packaged build. This guards that regression — it can't be caught by the
+  // demo suite, which reads the repo-root file directly.
+  const cfg = readBuilderConfig()
+  expect(cfg.files).toContain('release_notes.html')
+})
+
 test('Windows build output dir stays at C:/temp/ember-dist (no regression)', () => {
   // Load-bearing: this path keeps build output off OneDrive (sync churn) and
   // under the Windows MAX_PATH limit for electron-builder's deep node_modules
