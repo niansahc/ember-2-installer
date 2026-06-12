@@ -518,25 +518,56 @@ async function loadHardwareInfo() {
   }
 }
 
+// Build a single model card element. Dynamic values (name, desc, size) are
+// data-supplied — they originate from `ollama list` output and the curated
+// catalog — so they are set via textContent, never interpolated into markup, to
+// keep this off the innerHTML injection surface. Shared by the recommended and
+// vision renderers.
+function buildModelCard(m, { selected = false, showRecommendedBadge = false } = {}) {
+  const card = document.createElement('div')
+  card.className = `model-card ${selected ? 'selected' : ''}`
+
+  const radio = document.createElement('div')
+  radio.className = 'model-card-radio'
+
+  const info = document.createElement('div')
+  info.className = 'model-card-info'
+  const name = document.createElement('div')
+  name.className = 'model-card-name'
+  name.textContent = m.name
+  const desc = document.createElement('div')
+  desc.className = 'model-card-desc'
+  desc.textContent = m.desc
+  info.append(name, desc)
+
+  card.append(radio, info)
+
+  if (showRecommendedBadge && m.recommended) {
+    const badge = document.createElement('span')
+    badge.className = 'model-card-badge recommended'
+    badge.textContent = 'Recommended'
+    card.appendChild(badge)
+  }
+
+  const status = document.createElement('span')
+  if (m.installed) {
+    status.className = 'model-card-badge installed'
+    status.textContent = 'Installed'
+  } else {
+    status.className = 'model-card-badge download'
+    status.textContent = `Download ${m.size}`
+  }
+  card.appendChild(status)
+
+  return card
+}
+
 function renderModelCards() {
   const container = document.getElementById('model-cards')
   container.innerHTML = ''
 
   for (const m of modelData.recommended) {
-    const card = document.createElement('div')
-    card.className = `model-card ${m.id === state.model ? 'selected' : ''}`
-    card.innerHTML = `
-      <div class="model-card-radio"></div>
-      <div class="model-card-info">
-        <div class="model-card-name">${m.name}</div>
-        <div class="model-card-desc">${m.desc}</div>
-      </div>
-      ${m.recommended ? '<span class="model-card-badge recommended">Recommended</span>' : ''}
-      ${m.installed
-        ? '<span class="model-card-badge installed">Installed</span>'
-        : `<span class="model-card-badge download">Download ${m.size}</span>`
-      }
-    `
+    const card = buildModelCard(m, { selected: m.id === state.model, showRecommendedBadge: true })
     card.addEventListener('click', () => selectModel(m.id, container))
     container.appendChild(card)
   }
@@ -565,19 +596,7 @@ function renderVisionCards() {
   container.innerHTML = ''
 
   for (const m of modelData.vision) {
-    const card = document.createElement('div')
-    card.className = `model-card ${m.id === state.vision ? 'selected' : ''}`
-    card.innerHTML = `
-      <div class="model-card-radio"></div>
-      <div class="model-card-info">
-        <div class="model-card-name">${m.name}</div>
-        <div class="model-card-desc">${m.desc}</div>
-      </div>
-      ${m.installed
-        ? '<span class="model-card-badge installed">Installed</span>'
-        : `<span class="model-card-badge download">Download ${m.size}</span>`
-      }
-    `
+    const card = buildModelCard(m, { selected: m.id === state.vision, showRecommendedBadge: false })
     card.addEventListener('click', () => {
       state.vision = m.id
       container.querySelectorAll('.model-card').forEach((c) => c.classList.remove('selected'))
@@ -698,7 +717,10 @@ async function tsCheckInstalled() {
 
   if (result.ok) {
     icon.textContent = '✅'
-    body.innerHTML = `<p>${result.version}</p>`
+    body.innerHTML = ''
+    const versionP = document.createElement('p')
+    versionP.textContent = result.version
+    body.appendChild(versionP)
     document.getElementById('ts-step-connect').classList.remove('hidden')
     await tsCheckConnected()
   } else {
@@ -734,10 +756,20 @@ async function tsCheckConnected() {
     // API always binds to localhost — Tailscale handles external routing
     state.host = '127.0.0.1'
     state.tailscaleIp = ip
-    body.innerHTML = `
-      <p>Connected as <strong>${status.hostname || 'this machine'}</strong></p>
-      <p>Your Tailscale IP: <span class="ts-ip-display">${ip}</span></p>
-    `
+    // hostname/ip come from `tailscale status` output — insert as text, not markup.
+    body.innerHTML = ''
+    const connectedP = document.createElement('p')
+    connectedP.append('Connected as ')
+    const hostStrong = document.createElement('strong')
+    hostStrong.textContent = status.hostname || 'this machine'
+    connectedP.appendChild(hostStrong)
+    const ipP = document.createElement('p')
+    ipP.append('Your Tailscale IP: ')
+    const ipSpan = document.createElement('span')
+    ipSpan.className = 'ts-ip-display'
+    ipSpan.textContent = ip
+    ipP.appendChild(ipSpan)
+    body.append(connectedP, ipP)
     document.getElementById('ts-step-serve').classList.remove('hidden')
   } else {
     icon.textContent = '❌'
@@ -769,7 +801,11 @@ document.getElementById('btn-ts-serve').addEventListener('click', async () => {
     const url = dnsName ? `https://${dnsName}` : `http://${state.tailscaleIp || '127.0.0.1'}:8000`
     btn.classList.add('hidden')
     resultEl.classList.remove('hidden')
-    resultEl.innerHTML = `Your Ember URL: <span class="ts-url-display">${url}</span>`
+    resultEl.textContent = 'Your Ember URL: '
+    const urlSpan = document.createElement('span')
+    urlSpan.className = 'ts-url-display'
+    urlSpan.textContent = url
+    resultEl.appendChild(urlSpan)
 
     document.getElementById('ts-step-phone').classList.remove('hidden')
   } else {
@@ -1197,7 +1233,13 @@ async function runInstall() {
       const div = document.createElement('div')
       div.className = 'install-step'
       div.id = `step-${step.id}`
-      div.innerHTML = `<span class="step-icon">⏳</span><span class="step-label">${step.label}</span>`
+      const stepIcon = document.createElement('span')
+      stepIcon.className = 'step-icon'
+      stepIcon.textContent = '⏳'
+      const stepLabel = document.createElement('span')
+      stepLabel.className = 'step-label'
+      stepLabel.textContent = step.label
+      div.append(stepIcon, stepLabel)
       const dockerEl = document.getElementById('step-docker')
       if (dockerEl) {
         stepsContainer.insertBefore(div, dockerEl)
@@ -1444,6 +1486,11 @@ async function loadReleaseNotes() {
   try {
     const result = await window.ember.getReleaseNotes()
     if (result.ok && result.html.trim()) {
+      // Trust boundary: this is the ONE intentional HTML sink. result.html comes
+      // from release_notes.html, a static file we author and bundle into the asar
+      // (see get-release-notes in main.js) — not from network or user input. Every
+      // other dynamic value in this renderer is inserted via textContent. Do not
+      // route remote or user-supplied content through here without sanitizing.
       content.innerHTML = result.html
       panel.classList.remove('hidden')
     } else {
@@ -2100,6 +2147,9 @@ async function init() {
   const demoMode = await window.ember.getDemoMode()
   if (demoMode) {
     document.getElementById('demo-badge').classList.remove('hidden')
+    // Demo/dev-only test seam: lets e2e drive the render path with crafted input
+    // to prove dynamic values are escaped. Never exposed in packaged builds.
+    window.__emberTest = { buildModelCard }
   }
 
   const emberPath = await window.ember.getEmberPath()
