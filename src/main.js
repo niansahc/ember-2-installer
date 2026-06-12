@@ -6,6 +6,7 @@ const https = require('https')
 const http = require('http')
 const os = require('os')
 const { isNewer } = require('./lib/version')
+const { releaseSummary } = require('./lib/notes')
 
 const IS_PACKAGED = app.isPackaged
 const HAS_REAL_FLAG = process.argv.includes('--real')
@@ -960,29 +961,6 @@ ipcMain.handle('check-for-update', async () => {
   }
 })
 
-// Extract a short one-line summary from a GitHub release body — the first
-// bullet wins. Used by the update screen "what's new" notes so each row
-// shows something more useful than just a version bump.
-function firstBullet(body) {
-  if (!body) return ''
-  const lines = body.split('\n')
-  for (const line of lines) {
-    const m = line.match(/^\s*[-*]\s+(.+?)\s*$/)
-    if (m) {
-      return m[1]
-        .replace(/\*\*/g, '')
-        .replace(/`/g, '')
-        .replace(/\[(.+?)\]\(.+?\)/g, '$1')
-        .slice(0, 120)
-    }
-  }
-  for (const line of lines) {
-    const t = line.trim()
-    if (t && !t.startsWith('#') && !t.startsWith('---')) return t.slice(0, 120)
-  }
-  return ''
-}
-
 function fetchLatestRelease(repo = REPO_BACKEND_SLUG) {
   return new Promise((resolve) => {
     const options = {
@@ -1081,20 +1059,20 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
       manual: !installerSelfUpdate,
       installed: installerInstalled,
       latest: installerLatest,
-      notes: firstBullet(installerRelease?.body),
+      notes: releaseSummary(installerRelease?.body),
     },
     backend: {
       hasUpdate: backendLatest && (!backendInstalled || isNewer(backendLatest, backendInstalled)),
       installed: backendInstalled || 'unknown',
       latest: backendLatest,
       apiRunning: backendApiRunning,
-      notes: firstBullet(backendRelease?.body),
+      notes: releaseSummary(backendRelease?.body),
     },
     ui: {
       hasUpdate: uiLatest && (!uiInstalled || isNewer(uiLatest, uiInstalled)),
       installed: uiInstalled || 'unknown',
       latest: uiLatest,
-      notes: firstBullet(uiRelease?.body),
+      notes: releaseSummary(uiRelease?.body),
     },
   }
 })
