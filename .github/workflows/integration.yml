@@ -1,0 +1,41 @@
+name: Integration
+
+# Hermetic --real integration tests (ADR 0001): a real git subprocess against a
+# local bare repo + temp dirs. No Electron, no xvfb, no network, no external
+# daemon. Runs on both OSes because cloneRepo uses shell:true, whose arg/path
+# handling diverges between cmd.exe (Windows) and sh (Unix) -- and Windows is the
+# primary platform, where the clone path most needs to hold.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run hermetic integration tests
+        run: npm run test:integration
