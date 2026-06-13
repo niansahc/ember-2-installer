@@ -8,6 +8,7 @@ const os = require('os')
 const { isNewer } = require('./lib/version')
 const { releaseSummary } = require('./lib/notes')
 const { buildEnvFile } = require('./lib/env')
+const { uiSourceDir, uiTargetDir, uiIndexFile } = require('./lib/paths')
 
 const IS_PACKAGED = app.isPackaged
 const HAS_REAL_FLAG = process.argv.includes('--real')
@@ -789,9 +790,9 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     mainWindow.webContents.send('install-step-done', { step, ok: true })
     return { ok: true }
   } else if (step === 'build-ui') {
-    const uiDir = path.join(path.dirname(emberPath), 'ember-2-ui')
+    const uiDir = uiSourceDir(emberPath)
     const uiDistDir = path.join(uiDir, 'dist')
-    const targetUiDir = path.join(emberPath, 'ui')
+    const targetUiDir = uiTargetDir(emberPath)
 
     if (!fs.existsSync(uiDir)) {
       const cloneOk = await new Promise((resolve) => {
@@ -969,7 +970,7 @@ function fetchLatestReleaseWithTimeout(repo, timeoutMs = 4000) {
 
 ipcMain.handle('check-all-updates', async (_e, { host }) => {
   const emberPath = getEmberPath()
-  const uiDir = emberPath ? path.join(path.dirname(emberPath), 'ember-2-ui') : null
+  const uiDir = emberPath ? uiSourceDir(emberPath) : null
 
   const [installerRelease, backendRelease, uiRelease, healthData] = await Promise.all([
     fetchLatestReleaseWithTimeout(REPO_INSTALLER_SLUG),
@@ -1057,7 +1058,7 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
   const pyBin = isWin
     ? `"${path.join(emberPath, '.venv', 'Scripts', 'python.exe')}"`
     : path.join(emberPath, '.venv', 'bin', 'python')
-  const uiDir = path.join(path.dirname(emberPath), 'ember-2-ui')
+  const uiDir = uiSourceDir(emberPath)
   const log = (text) => mainWindow.webContents.send('update-all-log', text)
 
   if (updates.backend) {
@@ -1299,7 +1300,7 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     // Remove .env now that the key is baked into the bundle
     try { fs.unlinkSync(path.join(uiDir, '.env')) } catch {}
 
-    const targetUiDir = path.join(emberPath, 'ui')
+    const targetUiDir = uiTargetDir(emberPath)
     try {
       if (fs.existsSync(targetUiDir)) fs.rmSync(targetUiDir, { recursive: true })
       fs.cpSync(path.join(uiDir, 'dist'), targetUiDir, { recursive: true })
@@ -1339,8 +1340,8 @@ ipcMain.handle('run-git-pull', async (_e) => {
   })
   if (!pullOk) return { ok: false }
 
-  const uiDir = path.join(path.dirname(emberPath), 'ember-2-ui')
-  const targetUiDir = path.join(emberPath, 'ui')
+  const uiDir = uiSourceDir(emberPath)
+  const targetUiDir = uiTargetDir(emberPath)
 
   if (!fs.existsSync(uiDir)) {
     log('Cloning ember-2-ui...\n')
@@ -1401,7 +1402,7 @@ ipcMain.handle('run-git-pull', async (_e) => {
 ipcMain.handle('check-ui-built', () => {
   const emberPath = getEmberPath()
   if (!emberPath) return { ok: false }
-  const indexPath = path.join(emberPath, 'ui', 'index.html')
+  const indexPath = uiIndexFile(emberPath)
   return { ok: fs.existsSync(indexPath) }
 })
 
