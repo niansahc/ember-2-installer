@@ -9,6 +9,7 @@ const { isNewer } = require('./lib/version')
 const { releaseSummary } = require('./lib/notes')
 const { buildEnvFile } = require('./lib/env')
 const { uiSourceDir, uiTargetDir, uiIndexFile } = require('./lib/paths')
+const { cloneRepo } = require('./exec/clone')
 
 const IS_PACKAGED = app.isPackaged
 const HAS_REAL_FLAG = process.argv.includes('--real')
@@ -43,7 +44,7 @@ function openApiStartupLogFd() {
 const REPO_BACKEND_SLUG = 'niansahc/ember-2'
 const REPO_UI_SLUG = 'niansahc/ember-2-ui'
 const REPO_INSTALLER_SLUG = 'niansahc/ember-2-installer'
-const REPO_BACKEND_URL = `https://github.com/${REPO_BACKEND_SLUG}.git`
+// Backend clone URL now lives in src/exec/clone.js as cloneRepo's default.
 const REPO_UI_URL = `https://github.com/${REPO_UI_SLUG}.git`
 
 // In dev, ember-2 is a sibling folder two levels up from src/
@@ -368,37 +369,25 @@ ipcMain.handle('pick-ember-folder', async () => {
   return result.canceled ? null : result.filePaths[0]
 })
 
-ipcMain.handle('clone-ember-repo', (_e, { parentDir }) => {
-  return new Promise((resolve) => {
-    const targetDir = path.join(parentDir, 'ember-2')
-    if (fs.existsSync(targetDir)) {
-      return resolve({ ok: true, path: targetDir, message: 'Already exists' })
-    }
-    try {
-      fs.mkdirSync(parentDir, { recursive: true })
-    } catch (err) {
-      return resolve({ ok: false, error: `Cannot create directory: ${err.message}` })
-    }
-    const proc = spawn('git', ['clone', '--depth', '1', REPO_BACKEND_URL], {
-      cwd: parentDir,
-      shell: true,
-    })
-    proc.stdout.on('data', (d) => {
-      mainWindow.webContents.send('clone-progress', d.toString())
-    })
-    proc.stderr.on('data', (d) => {
-      mainWindow.webContents.send('clone-progress', d.toString())
-    })
-    proc.on('close', (code) => {
-      if (code === 0) {
-        saveEmberPath(targetDir)
-        resolve({ ok: true, path: targetDir })
-      } else {
-        resolve({ ok: false })
-      }
-    })
-    proc.on('error', (err) => resolve({ ok: false, error: err.message }))
+ipcMain.handle('clone-ember-repo', async (_e, { parentDir }) => {
+  const targetDir = path.join(parentDir, 'ember-2')
+  if (fs.existsSync(targetDir)) {
+    return { ok: true, path: targetDir, message: 'Already exists' }
+  }
+  try {
+    fs.mkdirSync(parentDir, { recursive: true })
+  } catch (err) {
+    return { ok: false, error: `Cannot create directory: ${err.message}` }
+  }
+  const result = await cloneRepo({
+    targetDir,
+    onData: (text) => mainWindow.webContents.send('clone-progress', text),
   })
+  if (result.ok) {
+    saveEmberPath(targetDir)
+    return { ok: true, path: targetDir }
+  }
+  return { ok: false, error: result.error }
 })
 
 ipcMain.handle('check-target-path', (_e, { parentDir }) => {
@@ -427,29 +416,22 @@ ipcMain.handle('update-existing-ember', (_e, { emberPath }) => {
   })
 })
 
-ipcMain.handle('fresh-install-ember', (_e, { parentDir }) => {
-  return new Promise((resolve) => {
-    const targetDir = path.join(parentDir, 'ember-2')
-    try {
-      if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true })
-    } catch (err) {
-      return resolve({ ok: false, error: `Cannot remove existing directory: ${err.message}` })
-    }
-    const proc = spawn('git', ['clone', '--depth', '1', REPO_BACKEND_URL], {
-      cwd: parentDir, shell: true,
-    })
-    proc.stdout.on('data', (d) => mainWindow.webContents.send('clone-progress', d.toString()))
-    proc.stderr.on('data', (d) => mainWindow.webContents.send('clone-progress', d.toString()))
-    proc.on('close', (code) => {
-      if (code === 0) {
-        saveEmberPath(targetDir)
-        resolve({ ok: true, path: targetDir })
-      } else {
-        resolve({ ok: false })
-      }
-    })
-    proc.on('error', (err) => resolve({ ok: false, error: err.message }))
+ipcMain.handle('fresh-install-ember', async (_e, { parentDir }) => {
+  const targetDir = path.join(parentDir, 'ember-2')
+  try {
+    if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true })
+  } catch (err) {
+    return { ok: false, error: `Cannot remove existing directory: ${err.message}` }
+  }
+  const result = await cloneRepo({
+    targetDir,
+    onData: (text) => mainWindow.webContents.send('clone-progress', text),
   })
+  if (result.ok) {
+    saveEmberPath(targetDir)
+    return { ok: true, path: targetDir }
+  }
+  return { ok: false, error: result.error }
 })
 
 ipcMain.handle('get-default-install-dir', () => {
