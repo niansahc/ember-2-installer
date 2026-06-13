@@ -7,6 +7,7 @@ const http = require('http')
 const os = require('os')
 const { isNewer } = require('./lib/version')
 const { releaseSummary } = require('./lib/notes')
+const { buildEnvFile } = require('./lib/env')
 
 const IS_PACKAGED = app.isPackaged
 const HAS_REAL_FLAG = process.argv.includes('--real')
@@ -615,37 +616,8 @@ ipcMain.handle('pull-ollama-model', (_e, model) => {
 
 ipcMain.handle('write-env', (_e, { emberPath, vault, model, vision, host }) => {
   try {
-    const vaultFwd = vault.replace(/\\/g, '/')
-    const lines = [
-      '# Written by Ember Setup Wizard\n',
-      '\n',
-      '# ── Vault ─────────────────────────────────────────────────────────\n',
-      `PRIVATE_VAULT_PATH=${vaultFwd}\n`,
-      '\n',
-      '# ── API Host ───────────────────────────────────────────────────────\n',
-      `EMBER_HOST=${host}\n`,
-      '\n',
-      '# ── Models ─────────────────────────────────────────────────────────\n',
-      `EMBER_MODEL=${model}\n`,
-    ]
-    if (vision) {
-      lines.push(`EMBER_VISION_MODEL=${vision}\n`)
-    } else {
-      lines.push('# EMBER_VISION_MODEL=  (vision disabled)\n')
-    }
-    const credStoreNames = {
-      win32: 'Windows Credential Manager',
-      darwin: 'macOS Keychain',
-      linux: 'system keyring (SecretService)',
-    }
-    const credStore = credStoreNames[process.platform] || 'OS credential store'
-    lines.push(
-      '\n',
-      '# ── API Key ────────────────────────────────────────────────────────\n',
-      `# API key is stored in ${credStore} — not here.\n`,
-      '# Run: python scripts/set_api_key.py\n',
-    )
-    fs.writeFileSync(path.join(emberPath, '.env'), lines.join(''), 'utf-8')
+    const contents = buildEnvFile({ vault, host, model, vision, platform: process.platform })
+    fs.writeFileSync(path.join(emberPath, '.env'), contents, 'utf-8')
     return { ok: true }
   } catch (err) {
     return { ok: false, error: err.message }
