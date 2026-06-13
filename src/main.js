@@ -5,6 +5,11 @@ const { spawn, execSync } = require('child_process')
 const https = require('https')
 const http = require('http')
 const os = require('os')
+const { isNewer } = require('./lib/version')
+const { releaseSummary } = require('./lib/notes')
+const { buildEnvFile } = require('./lib/env')
+const { uiSourceDir, uiTargetDir, uiIndexFile } = require('./lib/paths')
+const { cloneRepo } = require('./exec/clone')
 
 const IS_PACKAGED = app.isPackaged
 const HAS_REAL_FLAG = process.argv.includes('--real')
@@ -39,7 +44,7 @@ function openApiStartupLogFd() {
 const REPO_BACKEND_SLUG = 'niansahc/ember-2'
 const REPO_UI_SLUG = 'niansahc/ember-2-ui'
 const REPO_INSTALLER_SLUG = 'niansahc/ember-2-installer'
-const REPO_BACKEND_URL = `https://github.com/${REPO_BACKEND_SLUG}.git`
+// Backend clone URL now lives in src/exec/clone.js as cloneRepo's default.
 const REPO_UI_URL = `https://github.com/${REPO_UI_SLUG}.git`
 
 // In dev, ember-2 is a sibling folder two levels up from src/
@@ -181,7 +186,7 @@ ipcMain.handle('check-ember-update', async () => {
   const latest = await fetchLatestRelease()
   if (!latest || !latest.tag_name) return { hasUpdate: false, installed }
 
-  const hasUpdate = installed && installed !== latest.tag_name
+  const hasUpdate = installed && isNewer(latest.tag_name, installed)
   return {
     hasUpdate,
     installed: installed || 'unknown',
@@ -364,37 +369,25 @@ ipcMain.handle('pick-ember-folder', async () => {
   return result.canceled ? null : result.filePaths[0]
 })
 
-ipcMain.handle('clone-ember-repo', (_e, { parentDir }) => {
-  return new Promise((resolve) => {
-    const targetDir = path.join(parentDir, 'ember-2')
-    if (fs.existsSync(targetDir)) {
-      return resolve({ ok: true, path: targetDir, message: 'Already exists' })
-    }
-    try {
-      fs.mkdirSync(parentDir, { recursive: true })
-    } catch (err) {
-      return resolve({ ok: false, error: `Cannot create directory: ${err.message}` })
-    }
-    const proc = spawn('git', ['clone', '--depth', '1', REPO_BACKEND_URL], {
-      cwd: parentDir,
-      shell: true,
-    })
-    proc.stdout.on('data', (d) => {
-      mainWindow.webContents.send('clone-progress', d.toString())
-    })
-    proc.stderr.on('data', (d) => {
-      mainWindow.webContents.send('clone-progress', d.toString())
-    })
-    proc.on('close', (code) => {
-      if (code === 0) {
-        saveEmberPath(targetDir)
-        resolve({ ok: true, path: targetDir })
-      } else {
-        resolve({ ok: false })
-      }
-    })
-    proc.on('error', (err) => resolve({ ok: false, error: err.message }))
+ipcMain.handle('clone-ember-repo', async (_e, { parentDir }) => {
+  const targetDir = path.join(parentDir, 'ember-2')
+  if (fs.existsSync(targetDir)) {
+    return { ok: true, path: targetDir, message: 'Already exists' }
+  }
+  try {
+    fs.mkdirSync(parentDir, { recursive: true })
+  } catch (err) {
+    return { ok: false, error: `Cannot create directory: ${err.message}` }
+  }
+  const result = await cloneRepo({
+    targetDir,
+    onData: (text) => mainWindow.webContents.send('clone-progress', text),
   })
+  if (result.ok) {
+    saveEmberPath(targetDir)
+    return { ok: true, path: targetDir }
+  }
+  return { ok: false, error: result.error }
 })
 
 ipcMain.handle('check-target-path', (_e, { parentDir }) => {
@@ -423,29 +416,22 @@ ipcMain.handle('update-existing-ember', (_e, { emberPath }) => {
   })
 })
 
-ipcMain.handle('fresh-install-ember', (_e, { parentDir }) => {
-  return new Promise((resolve) => {
-    const targetDir = path.join(parentDir, 'ember-2')
-    try {
-      if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true })
-    } catch (err) {
-      return resolve({ ok: false, error: `Cannot remove existing directory: ${err.message}` })
-    }
-    const proc = spawn('git', ['clone', '--depth', '1', REPO_BACKEND_URL], {
-      cwd: parentDir, shell: true,
-    })
-    proc.stdout.on('data', (d) => mainWindow.webContents.send('clone-progress', d.toString()))
-    proc.stderr.on('data', (d) => mainWindow.webContents.send('clone-progress', d.toString()))
-    proc.on('close', (code) => {
-      if (code === 0) {
-        saveEmberPath(targetDir)
-        resolve({ ok: true, path: targetDir })
-      } else {
-        resolve({ ok: false })
-      }
-    })
-    proc.on('error', (err) => resolve({ ok: false, error: err.message }))
+ipcMain.handle('fresh-install-ember', async (_e, { parentDir }) => {
+  const targetDir = path.join(parentDir, 'ember-2')
+  try {
+    if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true })
+  } catch (err) {
+    return { ok: false, error: `Cannot remove existing directory: ${err.message}` }
+  }
+  const result = await cloneRepo({
+    targetDir,
+    onData: (text) => mainWindow.webContents.send('clone-progress', text),
   })
+  if (result.ok) {
+    saveEmberPath(targetDir)
+    return { ok: true, path: targetDir }
+  }
+  return { ok: false, error: result.error }
 })
 
 ipcMain.handle('get-default-install-dir', () => {
@@ -613,37 +599,8 @@ ipcMain.handle('pull-ollama-model', (_e, model) => {
 
 ipcMain.handle('write-env', (_e, { emberPath, vault, model, vision, host }) => {
   try {
-    const vaultFwd = vault.replace(/\\/g, '/')
-    const lines = [
-      '# Written by Ember Setup Wizard\n',
-      '\n',
-      '# ── Vault ─────────────────────────────────────────────────────────\n',
-      `PRIVATE_VAULT_PATH=${vaultFwd}\n`,
-      '\n',
-      '# ── API Host ───────────────────────────────────────────────────────\n',
-      `EMBER_HOST=${host}\n`,
-      '\n',
-      '# ── Models ─────────────────────────────────────────────────────────\n',
-      `EMBER_MODEL=${model}\n`,
-    ]
-    if (vision) {
-      lines.push(`EMBER_VISION_MODEL=${vision}\n`)
-    } else {
-      lines.push('# EMBER_VISION_MODEL=  (vision disabled)\n')
-    }
-    const credStoreNames = {
-      win32: 'Windows Credential Manager',
-      darwin: 'macOS Keychain',
-      linux: 'system keyring (SecretService)',
-    }
-    const credStore = credStoreNames[process.platform] || 'OS credential store'
-    lines.push(
-      '\n',
-      '# ── API Key ────────────────────────────────────────────────────────\n',
-      `# API key is stored in ${credStore} — not here.\n`,
-      '# Run: python scripts/set_api_key.py\n',
-    )
-    fs.writeFileSync(path.join(emberPath, '.env'), lines.join(''), 'utf-8')
+    const contents = buildEnvFile({ vault, host, model, vision, platform: process.platform })
+    fs.writeFileSync(path.join(emberPath, '.env'), contents, 'utf-8')
     return { ok: true }
   } catch (err) {
     return { ok: false, error: err.message }
@@ -815,9 +772,9 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     mainWindow.webContents.send('install-step-done', { step, ok: true })
     return { ok: true }
   } else if (step === 'build-ui') {
-    const uiDir = path.join(path.dirname(emberPath), 'ember-2-ui')
+    const uiDir = uiSourceDir(emberPath)
     const uiDistDir = path.join(uiDir, 'dist')
-    const targetUiDir = path.join(emberPath, 'ui')
+    const targetUiDir = uiTargetDir(emberPath)
 
     if (!fs.existsSync(uiDir)) {
       const cloneOk = await new Promise((resolve) => {
@@ -949,7 +906,7 @@ ipcMain.handle('check-for-update', async () => {
   const latest = await fetchLatestRelease(REPO_BACKEND_SLUG)
   if (!latest) return { hasUpdate: false }
 
-  const hasUpdate = installed && installed !== latest.tag_name
+  const hasUpdate = installed && isNewer(latest.tag_name, installed)
   return {
     hasUpdate,
     installedTag: installed,
@@ -958,29 +915,6 @@ ipcMain.handle('check-for-update', async () => {
     publishedAt: latest.published_at,
   }
 })
-
-// Extract a short one-line summary from a GitHub release body — the first
-// bullet wins. Used by the update screen "what's new" notes so each row
-// shows something more useful than just a version bump.
-function firstBullet(body) {
-  if (!body) return ''
-  const lines = body.split('\n')
-  for (const line of lines) {
-    const m = line.match(/^\s*[-*]\s+(.+?)\s*$/)
-    if (m) {
-      return m[1]
-        .replace(/\*\*/g, '')
-        .replace(/`/g, '')
-        .replace(/\[(.+?)\]\(.+?\)/g, '$1')
-        .slice(0, 120)
-    }
-  }
-  for (const line of lines) {
-    const t = line.trim()
-    if (t && !t.startsWith('#') && !t.startsWith('---')) return t.slice(0, 120)
-  }
-  return ''
-}
 
 function fetchLatestRelease(repo = REPO_BACKEND_SLUG) {
   return new Promise((resolve) => {
@@ -1018,7 +952,7 @@ function fetchLatestReleaseWithTimeout(repo, timeoutMs = 4000) {
 
 ipcMain.handle('check-all-updates', async (_e, { host }) => {
   const emberPath = getEmberPath()
-  const uiDir = emberPath ? path.join(path.dirname(emberPath), 'ember-2-ui') : null
+  const uiDir = emberPath ? uiSourceDir(emberPath) : null
 
   const [installerRelease, backendRelease, uiRelease, healthData] = await Promise.all([
     fetchLatestReleaseWithTimeout(REPO_INSTALLER_SLUG),
@@ -1076,24 +1010,24 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
   return {
     reachable: !!(installerRelease || backendRelease || uiRelease),
     installer: {
-      hasUpdate: installerSelfUpdate && installerLatest && installerInstalled !== installerLatest,
+      hasUpdate: installerSelfUpdate && installerLatest && isNewer(installerLatest, installerInstalled),
       manual: !installerSelfUpdate,
       installed: installerInstalled,
       latest: installerLatest,
-      notes: firstBullet(installerRelease?.body),
+      notes: releaseSummary(installerRelease?.body),
     },
     backend: {
-      hasUpdate: backendLatest && (!backendInstalled || backendInstalled !== backendLatest),
+      hasUpdate: backendLatest && (!backendInstalled || isNewer(backendLatest, backendInstalled)),
       installed: backendInstalled || 'unknown',
       latest: backendLatest,
       apiRunning: backendApiRunning,
-      notes: firstBullet(backendRelease?.body),
+      notes: releaseSummary(backendRelease?.body),
     },
     ui: {
-      hasUpdate: uiLatest && (!uiInstalled || uiInstalled !== uiLatest),
+      hasUpdate: uiLatest && (!uiInstalled || isNewer(uiLatest, uiInstalled)),
       installed: uiInstalled || 'unknown',
       latest: uiLatest,
-      notes: firstBullet(uiRelease?.body),
+      notes: releaseSummary(uiRelease?.body),
     },
   }
 })
@@ -1106,7 +1040,7 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
   const pyBin = isWin
     ? `"${path.join(emberPath, '.venv', 'Scripts', 'python.exe')}"`
     : path.join(emberPath, '.venv', 'bin', 'python')
-  const uiDir = path.join(path.dirname(emberPath), 'ember-2-ui')
+  const uiDir = uiSourceDir(emberPath)
   const log = (text) => mainWindow.webContents.send('update-all-log', text)
 
   if (updates.backend) {
@@ -1348,7 +1282,7 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     // Remove .env now that the key is baked into the bundle
     try { fs.unlinkSync(path.join(uiDir, '.env')) } catch {}
 
-    const targetUiDir = path.join(emberPath, 'ui')
+    const targetUiDir = uiTargetDir(emberPath)
     try {
       if (fs.existsSync(targetUiDir)) fs.rmSync(targetUiDir, { recursive: true })
       fs.cpSync(path.join(uiDir, 'dist'), targetUiDir, { recursive: true })
@@ -1388,8 +1322,8 @@ ipcMain.handle('run-git-pull', async (_e) => {
   })
   if (!pullOk) return { ok: false }
 
-  const uiDir = path.join(path.dirname(emberPath), 'ember-2-ui')
-  const targetUiDir = path.join(emberPath, 'ui')
+  const uiDir = uiSourceDir(emberPath)
+  const targetUiDir = uiTargetDir(emberPath)
 
   if (!fs.existsSync(uiDir)) {
     log('Cloning ember-2-ui...\n')
@@ -1450,7 +1384,7 @@ ipcMain.handle('run-git-pull', async (_e) => {
 ipcMain.handle('check-ui-built', () => {
   const emberPath = getEmberPath()
   if (!emberPath) return { ok: false }
-  const indexPath = path.join(emberPath, 'ui', 'index.html')
+  const indexPath = uiIndexFile(emberPath)
   return { ok: fs.existsSync(indexPath) }
 })
 

@@ -1,0 +1,42 @@
+name: Windows Build
+
+# Builds the Windows app (unpacked) and runs the demo-mode Playwright suite on
+# windows-latest — the primary, only-fully-validated platform, previously built
+# and tested only on the developer's machine. --dir keeps it fast (no NSIS
+# packaging); the demo suite proves the Electron app boots, IPC bridges, and all
+# screens render on Windows. Playwright drives Electron headlessly, so no xvfb is
+# needed (unlike the Linux job).
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows app (unpacked)
+        run: npx electron-builder --win --dir
+
+      - name: Run demo-mode e2e suite
+        run: npm run test:e2e

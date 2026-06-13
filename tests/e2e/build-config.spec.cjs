@@ -25,6 +25,14 @@ function readBuilderConfig() {
   return yaml.load(fs.readFileSync(path.join(repoRoot, 'electron-builder.yml'), 'utf8'))
 }
 
+function workflowPath(name) {
+  return path.join(repoRoot, '.github', 'workflows', name)
+}
+
+function readWorkflowRaw(name) {
+  return fs.readFileSync(workflowPath(name), 'utf8')
+}
+
 test('build:linux directs output away from the Windows output dir', () => {
   const pkg = readPackageJson()
   const script = pkg.scripts['build:linux']
@@ -42,6 +50,51 @@ test('Linux build ships AppImage target with desktop-entry metadata', () => {
   // warns and produces a less-integrated artifact without them.
   expect(cfg.linux.category).toBeTruthy()
   expect(cfg.linux.maintainer).toBeTruthy()
+})
+
+test('release_notes.html is bundled (files allowlist includes it)', () => {
+  // get-release-notes (src/main.js) reads release_notes.html from the app root,
+  // but the `files` allowlist is opt-in: anything not matched is left out of the
+  // asar. release_notes.html lives at the repo root (neither src/** nor assets/**),
+  // so it must be listed explicitly or the "What's new" panel renders empty in
+  // every packaged build. This guards that regression — it can't be caught by the
+  // demo suite, which reads the repo-root file directly.
+  const cfg = readBuilderConfig()
+  expect(cfg.files).toContain('release_notes.html')
+})
+
+test('Windows CI builds the app and runs the e2e suite on windows-latest', () => {
+  // Windows is the primary platform but was only ever built/tested on the dev's
+  // machine. This job is the automated verification surface for it.
+  const wf = yaml.load(readWorkflowRaw('windows-build.yml'))
+  const job = wf.jobs['windows-build']
+  expect(job).toBeTruthy()
+  expect(job['runs-on']).toBe('windows-latest')
+  const runs = job.steps.map((s) => s.run || '').join('\n')
+  expect(runs).toContain('--win')
+  expect(runs).toContain('npm run test:e2e')
+})
+
+test('release workflow publishes win/mac/linux artifacts on a published release', () => {
+  // electron-updater needs latest*.yml attached to the GitHub Release; nothing
+  // built/attached it before. The release fires only when the human merges the
+  // release-please PR (draft: false), so triggering on release:published keeps it
+  // human-gated. Assert the trigger from raw text — YAML 1.1 parses the `on:` key
+  // as the boolean true, so it isn't reliably reachable as wf.on.
+  const raw = readWorkflowRaw('release.yml')
+  expect(raw).toMatch(/on:\s*[\r\n]+\s*release:/)
+  expect(raw).toMatch(/types:\s*\[?\s*published/)
+
+  const wf = yaml.load(raw)
+  const jobs = Object.values(wf.jobs)
+  const runsOn = jobs.map((j) => j['runs-on'])
+  expect(runsOn).toEqual(expect.arrayContaining(['windows-latest', 'macos-latest', 'ubuntu-latest']))
+
+  const allRuns = jobs.flatMap((j) => j.steps.map((s) => s.run || '')).join('\n')
+  expect(allRuns).toContain('--win')
+  expect(allRuns).toContain('--mac')
+  expect(allRuns).toContain('--linux')
+  expect(allRuns).toContain('--publish')
 })
 
 test('Windows build output dir stays at C:/temp/ember-dist (no regression)', () => {

@@ -12,6 +12,10 @@ directories:
 files:
   - src/**/*
   - assets/**/*
+  # Bundled into the asar root so get-release-notes (src/main.js) can read it in
+  # packaged builds. Without this the "What's new" panel renders empty in every
+  # shipped installer; it only works in dev because the repo-root file is present.
+  - release_notes.html
 
 win:
   target: nsis
