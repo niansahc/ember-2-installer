@@ -1,31 +1,26 @@
 # Installer E2E Tests
 
-## Status: Infrastructure only (not yet runnable)
+## Status: Running
 
-Playwright Electron tests require `--remote-debugging-pipe` support,
-which was added in Electron 29. The installer currently uses Electron
-28.3.3. Until we upgrade to Electron 29+, these tests cannot launch
-the app.
+The suite runs against the packaged Electron app via Playwright's
+`_electron.launch()`. The installer is on Electron 33, which supports the
+`--remote-debugging-pipe` transport Playwright requires, so the tests launch
+and drive the app directly.
 
-The test files are written and correct. Once the Electron version is
-bumped, they should pass without changes.
-
-## To run (after Electron upgrade)
+## To run
 
 ```
 npm run test:e2e
 ```
 
-## Blocked by
-
-- Electron 28.3.3 does not support `--remote-debugging-pipe`
-- Playwright 1.58+ requires this flag for `_electron.launch()`
-- Upgrade path: bump `electron` in package.json to `^29.0.0` or later
-- Risk: electron-builder compatibility, autoUpdater changes, potential
-  breaking changes in Electron 29
+Tests run in demo mode by default — every IPC handler that would touch real
+infrastructure (git, pip, docker, ollama, tailscale, filesystem) is replaced
+with a fake returning realistic data. No live services are contacted.
 
 ## Test files
 
-- `navigation.spec.cjs` — screen flow, Next/Back buttons, prereq rendering
-- `agpl.spec.cjs` — AGPL screen content and acknowledge button
-- `hardware.spec.cjs` — hardware summary rendering on model screen
+The `tests/e2e/` directory holds the Playwright specs (`*.spec.cjs`) covering
+screen navigation, prerequisite detection, install location, vault setup,
+model and vision selection, the AGPL screen, the install/done/update screens,
+release notes rendering, dev mode, XSS/leak guards, and build config. Run the
+command above for the full, current inventory and pass count.
