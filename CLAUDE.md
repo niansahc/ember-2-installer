@@ -8,7 +8,7 @@ If you are not in C:\Users\nians\OneDrive\Desktop\Ember-2\ember-2-installer, sto
 
 ## What This Repo Is
 
-The Ember-2 installer. Built with Electron and electron-builder. Produces a Windows NSIS installer, Mac DMG, and Linux AppImage.
+The Ember-2 installer. Built with Electron and electron-builder. Produces a Windows NSIS installer (built and verified). Mac DMG and Linux AppImage targets are configured in electron-builder but have not been built or verified on real hardware.
 
 The installer clones ember-2 and ember-2-ui, builds the UI, installs dependencies, sets up the vault, and configures the API key.
 
@@ -24,7 +24,7 @@ Key optimizations and features:
 
 ## Current State
 
-v0.8.1. 107 Playwright tests passing. Produces Windows NSIS installer (primary), Mac DMG, and Linux AppImage (both best-effort until tested on real hardware).
+v0.8.1. 107 Playwright tests passing. Builds and ships the Windows NSIS installer (primary, verified). Mac DMG and Linux AppImage targets are configured but not yet built or verified on real hardware.
 
 ---
 
