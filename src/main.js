@@ -16,6 +16,13 @@ const HAS_REAL_FLAG = process.argv.includes('--real')
 const DEMO_MODE = !IS_PACKAGED && !HAS_REAL_FLAG
 // Opt-in: demo mode pretends updates exist so the update screen can be inspected.
 const HAS_DEMO_UPDATES_FLAG = process.argv.includes('--demo-updates')
+// Test seam (issue #12): --demo-fail=<channel>[,<channel>] forces the named IPC
+// channels to reject, so the renderer's IPC-failure handling can be exercised.
+const DEMO_FAIL_CHANNELS = (process.argv.find((a) => a.startsWith('--demo-fail=')) || '')
+  .replace('--demo-fail=', '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean)
 
 // Deferred until app is ready — getPath() is not available at require time.
 let USER_DATA
@@ -2255,6 +2262,15 @@ if (DEMO_MODE) {
     ],
     installed: ['qwen3:8b', 'qwen3:14b', 'llama3.2-vision:11b'],
   }))
+
+  // Test seam (issue #12): make selected channels reject on purpose. Registered
+  // last so it overrides any demo handler for the same channel.
+  for (const channel of DEMO_FAIL_CHANNELS) {
+    ipcMain.removeHandler(channel)
+    ipcMain.handle(channel, async () => {
+      throw new Error(`[demo-fail] ${channel} rejected on purpose`)
+    })
+  }
 }
 
 function sleep(ms) {
