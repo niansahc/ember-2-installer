@@ -12,6 +12,7 @@
     "build:win": "electron-builder --win",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
+    "test:integration": "playwright test --config playwright.integration.config.cjs",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux -c.directories.output=dist-linux"
   },
