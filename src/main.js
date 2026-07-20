@@ -202,11 +202,7 @@ ipcMain.handle('run-ember-update', async () => {
   if (!emberPath) return { ok: false }
 
   // Step 0: Reset version.json — it gets modified locally and blocks git pull
-  await new Promise((resolve) => {
-    const proc = spawn('git', ['checkout', '--', 'version.json'], { cwd: emberPath, shell: true })
-    proc.on('close', () => resolve())
-    proc.on('error', () => resolve())
-  })
+  await run('git', ['checkout', '--', 'version.json'], { cwd: emberPath })
 
   // Step 1: git pull origin main (explicit remote/branch avoids tracking issues)
   const pullOk = await new Promise((resolve) => {
@@ -682,11 +678,7 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     cmd = pyBin
     args = ['-m', 'pip', 'install', '-r', 'requirements.txt']
   } else if (step === 'docker') {
-    const daemonUp = await new Promise((resolve) => {
-      const proc = spawn('docker', ['info'], { shell: true })
-      proc.on('close', (code) => resolve(code === 0))
-      proc.on('error', () => resolve(false))
-    })
+    const daemonUp = (await run('docker', ['info'])).ok
     if (!daemonUp) {
       if (isWin) {
         mainWindow.webContents.send('install-log', { step, text: 'Docker daemon not running — starting Docker Desktop...\n' })
@@ -704,11 +696,7 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
       let ready = false
       for (let i = 0; i < 20; i++) {
         await new Promise((r) => setTimeout(r, 3000))
-        ready = await new Promise((resolve) => {
-          const proc = spawn('docker', ['info'], { shell: true })
-          proc.on('close', (code) => resolve(code === 0))
-          proc.on('error', () => resolve(false))
-        })
+        ready = (await run('docker', ['info'])).ok
         if (ready) break
         mainWindow.webContents.send('install-log', { step, text: 'Waiting for Docker daemon...\n' })
       }
@@ -1014,11 +1002,7 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     log('Updating Ember backend...\n')
     // Reset version.json before pull — it gets modified locally by the
     // installer/API and causes "Your local changes would be overwritten"
-    await new Promise((resolve) => {
-      const proc = spawn('git', ['checkout', '--', 'version.json'], { cwd: emberPath, shell: true })
-      proc.on('close', () => resolve())
-      proc.on('error', () => resolve())
-    })
+    await run('git', ['checkout', '--', 'version.json'], { cwd: emberPath })
     const pullOk = await new Promise((resolve) => {
       const proc = spawn('git', ['pull', 'origin', 'main'], { cwd: emberPath, shell: true })
       proc.stdout.on('data', (d) => log(d.toString()))
@@ -1053,22 +1037,10 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     // Kill the old API BEFORE docker restart so a lingering uvicorn can't win the port-8000 bind race.
     log('Stopping old API process...\n')
     if (isWin) {
-      await new Promise((resolve) => {
-        const proc = spawn('taskkill', ['/F', '/FI', 'WINDOWTITLE eq start_api*'], { shell: true })
-        proc.on('close', () => resolve())
-        proc.on('error', () => resolve())
-      })
-      await new Promise((resolve) => {
-        const proc = spawn('cmd', ['/c', 'for /f "tokens=5" %a in (\'netstat -aon ^| findstr :8000 ^| findstr LISTENING\') do taskkill /F /PID %a'], { shell: true })
-        proc.on('close', () => resolve())
-        proc.on('error', () => resolve())
-      })
+      await run('taskkill', ['/F', '/FI', 'WINDOWTITLE eq start_api*'])
+      await run('cmd', ['/c', 'for /f "tokens=5" %a in (\'netstat -aon ^| findstr :8000 ^| findstr LISTENING\') do taskkill /F /PID %a'])
     } else {
-      await new Promise((resolve) => {
-        const proc = spawn('pkill', ['-f', 'uvicorn.*src.api.main'], { shell: true })
-        proc.on('close', () => resolve())
-        proc.on('error', () => resolve())
-      })
+      await run('pkill', ['-f', 'uvicorn.*src.api.main'])
     }
     await new Promise((r) => setTimeout(r, 2000))
 
@@ -1181,11 +1153,7 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
       if (!cloneOk) { log('UI clone failed.\n'); return { ok: false, stage: 'ui-clone' } }
     } else {
       // npm install/ci may have rewritten package-lock.json; reset it so git pull doesn't refuse to merge.
-      await new Promise((resolve) => {
-        const proc = spawn('git', ['checkout', '--', 'package-lock.json'], { cwd: uiDir, shell: true })
-        proc.on('close', () => resolve())
-        proc.on('error', () => resolve())
-      })
+      await run('git', ['checkout', '--', 'package-lock.json'], { cwd: uiDir })
       const pullOk = await new Promise((resolve) => {
         const proc = spawn('git', ['pull', 'origin', 'main'], { cwd: uiDir, shell: true })
         proc.stdout.on('data', (d) => log(d.toString()))
@@ -1256,11 +1224,7 @@ ipcMain.handle('run-git-pull', async (_e) => {
   const log = (text) => mainWindow.webContents.send('install-log', { step: 'update', text })
 
   // Reset version.json before pull — modified locally, blocks git pull
-  await new Promise((resolve) => {
-    const proc = spawn('git', ['checkout', '--', 'version.json'], { cwd: emberPath, shell: true })
-    proc.on('close', () => resolve())
-    proc.on('error', () => resolve())
-  })
+  await run('git', ['checkout', '--', 'version.json'], { cwd: emberPath })
 
   log('Pulling ember-2...\n')
   const pullOk = await new Promise((resolve) => {
@@ -1338,12 +1302,9 @@ ipcMain.handle('check-ui-built', () => {
   return { ok: fs.existsSync(indexPath) }
 })
 
-ipcMain.handle('check-docker-daemon', () => {
-  return new Promise((resolve) => {
-    const proc = spawn('docker', ['info'], { shell: true })
-    proc.on('close', (code) => resolve({ ok: code === 0 }))
-    proc.on('error', () => resolve({ ok: false }))
-  })
+ipcMain.handle('check-docker-daemon', async () => {
+  const r = await run('docker', ['info'])
+  return { ok: r.ok }
 })
 
 ipcMain.handle('check-docker-containers', async (_e, { emberPath }) => {
@@ -1508,11 +1469,9 @@ ipcMain.handle('set-startup-task', async (_e, { emberPath, enabled }) => {
 
   if (plat === 'win32') {
     if (!enabled) {
-      return new Promise((resolve) => {
-        const proc = spawn('schtasks', ['/Delete', '/TN', STARTUP_TASK_NAME, '/F'], { shell: true })
-        proc.on('close', (code) => resolve({ ok: code === 0 || code === 1 })) // 1 = task didn't exist
-        proc.on('error', () => resolve({ ok: false }))
-      })
+      // exit 1 = task didn't exist; treat as success (unchanged from before)
+      const r = await run('schtasks', ['/Delete', '/TN', STARTUP_TASK_NAME, '/F'], { okCodes: [0, 1] })
+      return { ok: r.ok }
     }
     // Use watchdog.py via venv Python — handles API lifecycle, crash recovery,
     // and signal-based restart/stop. Falls back to launch_ember.bat if watchdog
@@ -1529,23 +1488,16 @@ ipcMain.handle('set-startup-task', async (_e, { emberPath, enabled }) => {
       }
       taskCommand = `"${fallback}"`
     }
-    return new Promise((resolve) => {
-      const proc = spawn('schtasks', [
-        '/Create', '/TN', STARTUP_TASK_NAME, '/TR', taskCommand,
-        '/SC', 'ONLOGON', '/RL', 'LIMITED', '/F',
-      ], { shell: true })
-      proc.on('close', (code) => resolve({ ok: code === 0 }))
-      proc.on('error', () => resolve({ ok: false }))
-    })
+    const r = await run('schtasks', [
+      '/Create', '/TN', STARTUP_TASK_NAME, '/TR', taskCommand,
+      '/SC', 'ONLOGON', '/RL', 'LIMITED', '/F',
+    ])
+    return { ok: r.ok }
   }
 
   if (plat === 'darwin') {
     if (!enabled) {
-      await new Promise((resolve) => {
-        const proc = spawn('launchctl', ['unload', LAUNCHAGENT_PATH], { shell: true })
-        proc.on('close', () => resolve())
-        proc.on('error', () => resolve())
-      })
+      await run('launchctl', ['unload', LAUNCHAGENT_PATH])
       try { fs.unlinkSync(LAUNCHAGENT_PATH) } catch {}
       return { ok: true }
     }
@@ -1585,20 +1537,13 @@ ipcMain.handle('set-startup-task', async (_e, { emberPath, enabled }) => {
     } catch (err) {
       return { ok: false, error: `Failed to write plist: ${err.message}` }
     }
-    return new Promise((resolve) => {
-      const proc = spawn('launchctl', ['load', LAUNCHAGENT_PATH], { shell: true })
-      proc.on('close', (code) => resolve({ ok: code === 0 }))
-      proc.on('error', () => resolve({ ok: false }))
-    })
+    const r = await run('launchctl', ['load', LAUNCHAGENT_PATH])
+    return { ok: r.ok }
   }
 
   if (plat === 'linux') {
     if (!enabled) {
-      await new Promise((resolve) => {
-        const proc = spawn('systemctl', ['--user', 'disable', 'ember-2.service'], { shell: true })
-        proc.on('close', () => resolve())
-        proc.on('error', () => resolve())
-      })
+      await run('systemctl', ['--user', 'disable', 'ember-2.service'])
       try { fs.unlinkSync(SYSTEMD_UNIT_PATH) } catch {}
       return { ok: true }
     }
@@ -1636,30 +1581,20 @@ WantedBy=default.target
     } catch (err) {
       return { ok: false, error: `Failed to write unit file: ${err.message}` }
     }
-    await new Promise((resolve) => {
-      const proc = spawn('systemctl', ['--user', 'daemon-reload'], { shell: true })
-      proc.on('close', () => resolve())
-      proc.on('error', () => resolve())
-    })
-    return new Promise((resolve) => {
-      const proc = spawn('systemctl', ['--user', 'enable', 'ember-2.service'], { shell: true })
-      proc.on('close', (code) => resolve({ ok: code === 0 }))
-      proc.on('error', () => resolve({ ok: false }))
-    })
+    await run('systemctl', ['--user', 'daemon-reload'])
+    const r = await run('systemctl', ['--user', 'enable', 'ember-2.service'])
+    return { ok: r.ok }
   }
 
   return { ok: false, error: `Unsupported platform: ${plat}` }
 })
 
-ipcMain.handle('get-startup-task', () => {
+ipcMain.handle('get-startup-task', async () => {
   const plat = process.platform
 
   if (plat === 'win32') {
-    return new Promise((resolve) => {
-      const proc = spawn('schtasks', ['/Query', '/TN', STARTUP_TASK_NAME], { shell: true })
-      proc.on('close', (code) => resolve({ enabled: code === 0 }))
-      proc.on('error', () => resolve({ enabled: false }))
-    })
+    const r = await run('schtasks', ['/Query', '/TN', STARTUP_TASK_NAME])
+    return { enabled: r.ok }
   }
 
   if (plat === 'darwin') {
@@ -1667,11 +1602,8 @@ ipcMain.handle('get-startup-task', () => {
   }
 
   if (plat === 'linux') {
-    return new Promise((resolve) => {
-      const proc = spawn('systemctl', ['--user', 'is-enabled', 'ember-2.service'], { shell: true })
-      proc.on('close', (code) => resolve({ enabled: code === 0 }))
-      proc.on('error', () => resolve({ enabled: false }))
-    })
+    const r = await run('systemctl', ['--user', 'is-enabled', 'ember-2.service'])
+    return { enabled: r.ok }
   }
 
   return { enabled: false }
@@ -1701,13 +1633,10 @@ ipcMain.handle('get-default-ollama-models', () => {
   return path.join(os.homedir(), '.ollama', 'models')
 })
 
-ipcMain.handle('set-ollama-models-path', (_e, modelsPath) => {
+ipcMain.handle('set-ollama-models-path', async (_e, modelsPath) => {
   if (process.platform === 'win32') {
-    return new Promise((resolve) => {
-      const proc = spawn('setx', ['OLLAMA_MODELS', modelsPath], { shell: true })
-      proc.on('close', (code) => resolve({ ok: code === 0 }))
-      proc.on('error', () => resolve({ ok: false }))
-    })
+    const r = await run('setx', ['OLLAMA_MODELS', modelsPath])
+    return { ok: r.ok }
   }
 
   const profilePath = process.platform === 'darwin'

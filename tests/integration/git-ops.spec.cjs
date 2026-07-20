@@ -51,4 +51,23 @@ test.describe('run() git-family paths', () => {
     expect(r.ok).toBe(false)
     expect(r.error).toBeNull() // it exited non-zero; it did not fail to spawn
   })
+
+  test('git checkout -- <file> restores a locally modified file (the reset path)', async () => {
+    const repo = path.join(tmp, 'repo')
+    fs.mkdirSync(repo)
+    git(['init', '--initial-branch=main'], repo)
+    const vf = path.join(repo, 'version.json')
+    fs.writeFileSync(vf, '{"tag":"v1.0.0"}\n')
+    git(['add', '.'], repo)
+    commit(repo, 'init')
+    // Local edit — this is what blocks git pull in production before the reset.
+    fs.writeFileSync(vf, '{"tag":"LOCAL-EDIT"}\n')
+
+    const r = await run('git', ['checkout', '--', 'version.json'], { cwd: repo })
+    expect(r.ok).toBe(true)
+    // Assert on content, not exact bytes — core.autocrlf may rewrite line endings.
+    const restored = fs.readFileSync(vf, 'utf-8')
+    expect(restored).toContain('v1.0.0')
+    expect(restored).not.toContain('LOCAL-EDIT')
+  })
 })
