@@ -10,6 +10,7 @@ const { releaseSummary } = require('./lib/notes')
 const { buildEnvFile } = require('./lib/env')
 const { uiSourceDir, uiTargetDir, uiIndexFile } = require('./lib/paths')
 const { cloneRepo } = require('./exec/clone')
+const { run } = require('./exec/run')
 
 const IS_PACKAGED = app.isPackaged
 const HAS_REAL_FLAG = process.argv.includes('--real')
@@ -179,15 +180,8 @@ ipcMain.handle('check-ember-update', async () => {
   }
 
   if (!installed) {
-    installed = await new Promise((resolve) => {
-      const proc = spawn('git', ['describe', '--tags', '--abbrev=0'], {
-        cwd: emberPath, shell: true,
-      })
-      let out = ''
-      proc.stdout.on('data', (d) => (out += d))
-      proc.on('close', (code) => resolve(code === 0 ? out.trim() : null))
-      proc.on('error', () => resolve(null))
-    })
+    const describe = await run('git', ['describe', '--tags', '--abbrev=0'], { cwd: emberPath })
+    installed = describe.ok ? describe.stdout.trim() : null
   }
 
   const latest = await fetchLatestRelease()
@@ -261,15 +255,11 @@ ipcMain.handle('run-ember-update', async () => {
     proc.on('error', () => resolve(false))
   })
 
-  const newTag = await new Promise((resolve) => {
-    const proc = spawn('git', ['describe', '--tags', '--abbrev=0'], {
-      cwd: emberPath, shell: true,
-    })
-    let out = ''
-    proc.stdout.on('data', (d) => (out += d))
-    proc.on('close', () => resolve(out.trim()))
-    proc.on('error', () => resolve(null))
-  })
+  // Divergence preserved (tracked as a #7 follow-up bug): unlike
+  // check-ember-update above, this ignores the exit code and returns whatever
+  // git printed on a non-zero exit. Only a spawn error yields null.
+  const newTagResult = await run('git', ['describe', '--tags', '--abbrev=0'], { cwd: emberPath })
+  const newTag = newTagResult.error === null ? newTagResult.stdout.trim() : null
   if (newTag) {
     const vf = path.join(emberPath, 'version.json')
     fs.writeFileSync(vf, JSON.stringify({ tag: newTag }, null, 2), 'utf-8')
@@ -307,17 +297,15 @@ ipcMain.handle('check-prerequisites', async () => {
 })
 
 function probe(cmd) {
-  return new Promise((resolve) => {
-    const [bin, ...args] = cmd
-    const proc = spawn(bin, args, { shell: true })
-    let out = ''
-    proc.stdout.on('data', (d) => (out += d))
-    proc.stderr.on('data', (d) => (out += d))
-    proc.on('close', (code) => {
-      resolve({ ok: code === 0, version: out.trim().split('\n')[0] })
-    })
-    proc.on('error', () => resolve({ ok: false, version: null }))
-  })
+  const [bin, ...args] = cmd
+  // onData rebuilds the merged stdout+stderr buffer in arrival order, matching
+  // the original (some tools print --version to stderr). version is taken from
+  // whatever was printed on any exit; only a spawn error yields null.
+  let out = ''
+  return run(bin, args, { onData: (chunk) => (out += chunk) }).then((r) => ({
+    ok: r.ok,
+    version: r.error === null ? out.trim().split('\n')[0] : null,
+  }))
 }
 
 const WINGET_PACKAGES = {
@@ -526,17 +514,9 @@ ipcMain.handle('detect-hardware', async () => {
 ipcMain.handle('get-recommended-models', async () => {
   let installed = []
   try {
-    const result = await new Promise((resolve) => {
-      const proc = spawn('ollama', ['list'], { shell: true })
-      let out = ''
-      proc.stdout.on('data', (d) => (out += d))
-      proc.on('close', () => {
-        const lines = out.trim().split('\n').slice(1)
-        resolve(lines.map((l) => l.split(/\s+/)[0]).filter(Boolean))
-      })
-      proc.on('error', () => resolve([]))
-    })
-    installed = result
+    const { stdout, error } = await run('ollama', ['list'])
+    const lines = error === null ? stdout.trim().split('\n').slice(1) : []
+    installed = lines.map((l) => l.split(/\s+/)[0]).filter(Boolean)
   } catch {}
 
   const recommended = [
@@ -575,19 +555,10 @@ ipcMain.handle('create-vault', (_e, vaultPath) => {
 })
 
 ipcMain.handle('get-ollama-models', async () => {
-  return new Promise((resolve) => {
-    const proc = spawn('ollama', ['list'], { shell: true })
-    let out = ''
-    proc.stdout.on('data', (d) => (out += d))
-    proc.on('close', () => {
-      const lines = out.trim().split('\n').slice(1)
-      const models = lines
-        .map((l) => l.split(/\s+/)[0])
-        .filter(Boolean)
-      resolve(models)
-    })
-    proc.on('error', () => resolve([]))
-  })
+  const { stdout, error } = await run('ollama', ['list'])
+  if (error !== null) return []
+  const lines = stdout.trim().split('\n').slice(1)
+  return lines.map((l) => l.split(/\s+/)[0]).filter(Boolean)
 })
 
 ipcMain.handle('pull-ollama-model', (_e, model) => {
@@ -758,15 +729,8 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     let healthy = false
     for (let i = 0; i < 20; i++) {
       await new Promise((r) => setTimeout(r, 3000))
-      healthy = await new Promise((resolve) => {
-        const proc = spawn('docker', ['compose', 'ps', '--status', 'running', '-q'], {
-          cwd: emberPath, shell: true,
-        })
-        let out = ''
-        proc.stdout.on('data', (d) => (out += d.toString()))
-        proc.on('close', (code) => resolve(code === 0 && out.trim().length > 0))
-        proc.on('error', () => resolve(false))
-      })
+      const psResult = await run('docker', ['compose', 'ps', '--status', 'running', '-q'], { cwd: emberPath })
+      healthy = psResult.ok && psResult.stdout.trim().length > 0
       if (healthy) break
       mainWindow.webContents.send('install-log', { step, text: 'Waiting for search engine container...\n' })
     }
@@ -816,19 +780,15 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     // bake it into the bundle.  Without this the built frontend ships with an
     // empty API key and every authenticated request to the backend fails.
     mainWindow.webContents.send('install-log', { step, text: 'Injecting API key into UI build...\n' })
-    const apiKey = await new Promise((resolve) => {
-      let out = ''
-      const proc = spawn(pyBin, ['scripts/set_api_key.py', '--non-interactive'], {
-        cwd: emberPath, shell: true,
-      })
-      proc.stdout.on('data', (d) => (out += d))
-      proc.stderr.on('data', (d) => mainWindow.webContents.send('install-log', { step, text: d.toString() }))
-      proc.on('close', () => {
-        const match = out.match(/Key:\s*(.+)/)
-        resolve(match ? match[1].trim() : null)
-      })
-      proc.on('error', () => resolve(null))
+    const keyResult = await run(pyBin, ['scripts/set_api_key.py', '--non-interactive'], {
+      cwd: emberPath,
+      // stdout is captured for the key; stderr streams to the install log.
+      onData: (chunk, stream) => {
+        if (stream === 'stderr') mainWindow.webContents.send('install-log', { step, text: chunk })
+      },
     })
+    const keyMatch = keyResult.error === null ? keyResult.stdout.match(/Key:\s*(.+)/) : null
+    const apiKey = keyMatch ? keyMatch[1].trim() : null
     if (apiKey) {
       const uiEnvPath = path.join(uiDir, '.env')
       fs.writeFileSync(uiEnvPath, `VITE_EMBER_API_URL=/v1\nVITE_EMBER_API_KEY=${apiKey}\n`, 'utf-8')
@@ -1182,13 +1142,8 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
   // installs may be missing nomic-embed-text and retrieval will silently
   // fail without it.
   log('Checking embedding model...\n')
-  const ollamaModels = await new Promise((resolve) => {
-    const proc = spawn('ollama', ['list'], { shell: true })
-    let out = ''
-    proc.stdout.on('data', (d) => (out += d))
-    proc.on('close', () => resolve(out))
-    proc.on('error', () => resolve(''))
-  })
+  const ollamaListResult = await run('ollama', ['list'])
+  const ollamaModels = ollamaListResult.error === null ? ollamaListResult.stdout : ''
   if (!ollamaModels.includes('nomic-embed-text')) {
     log('Pulling embedding model (nomic-embed-text)...\n')
     const pullOk = await new Promise((resolve) => {
@@ -1199,13 +1154,8 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
       proc.on('error', () => resolve(false))
     })
     if (pullOk) {
-      const verify = await new Promise((resolve) => {
-        const proc = spawn('ollama', ['list'], { shell: true })
-        let out = ''
-        proc.stdout.on('data', (d) => (out += d))
-        proc.on('close', () => resolve(out.includes('nomic-embed-text')))
-        proc.on('error', () => resolve(false))
-      })
+      const verifyResult = await run('ollama', ['list'])
+      const verify = verifyResult.error === null && verifyResult.stdout.includes('nomic-embed-text')
       log(verify ? 'Embedding model installed ✓\n' : 'Warning: embedding model pull completed but not found.\n')
     } else {
       log('Warning: failed to pull embedding model. Embeddings may not work.\n')
@@ -1260,18 +1210,11 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     if (!npmOk) { log('npm ci failed.\n'); return { ok: false, stage: 'ui-npm' } }
 
     log('Injecting API key...\n')
-    const apiKey = await new Promise((resolve) => {
-      let out = ''
-      const proc = spawn(pyBin, ['scripts/set_api_key.py', '--non-interactive'], {
-        cwd: emberPath, shell: true,
-      })
-      proc.stdout.on('data', (d) => (out += d))
-      proc.on('close', () => {
-        const match = out.match(/Key:\s*(.+)/)
-        resolve(match ? match[1].trim() : null)
-      })
-      proc.on('error', () => resolve(null))
-    })
+    // Divergence preserved (tracked as a #7 follow-up bug): unlike the build-ui
+    // step, this drops the script's stderr rather than streaming it to the log.
+    const keyResult = await run(pyBin, ['scripts/set_api_key.py', '--non-interactive'], { cwd: emberPath })
+    const keyMatch = keyResult.error === null ? keyResult.stdout.match(/Key:\s*(.+)/) : null
+    const apiKey = keyMatch ? keyMatch[1].trim() : null
     if (apiKey) {
       fs.writeFileSync(path.join(uiDir, '.env'), `VITE_EMBER_API_URL=/v1\nVITE_EMBER_API_KEY=${apiKey}\n`, 'utf-8')
     }
@@ -1403,22 +1346,14 @@ ipcMain.handle('check-docker-daemon', () => {
   })
 })
 
-ipcMain.handle('check-docker-containers', (_e, { emberPath }) => {
+ipcMain.handle('check-docker-containers', async (_e, { emberPath }) => {
   // Daemon responding is not enough — search/retrieval containers must actually be running
   // before the API starts, otherwise early requests fail.
-  return new Promise((resolve) => {
-    if (!emberPath || !fs.existsSync(emberPath)) return resolve({ ok: false, count: 0 })
-    let out = ''
-    const proc = spawn('docker', ['compose', 'ps', '--status', 'running', '-q'], {
-      cwd: emberPath, shell: true,
-    })
-    proc.stdout.on('data', (d) => (out += d.toString()))
-    proc.on('close', (code) => {
-      const count = out.split('\n').filter((l) => l.trim().length > 0).length
-      resolve({ ok: code === 0 && count > 0, count })
-    })
-    proc.on('error', () => resolve({ ok: false, count: 0 }))
-  })
+  if (!emberPath || !fs.existsSync(emberPath)) return { ok: false, count: 0 }
+  const psResult = await run('docker', ['compose', 'ps', '--status', 'running', '-q'], { cwd: emberPath })
+  if (psResult.error !== null) return { ok: false, count: 0 }
+  const count = psResult.stdout.split('\n').filter((l) => l.trim().length > 0).length
+  return { ok: psResult.ok && count > 0, count }
 })
 
 ipcMain.handle('start-api', (_e, { emberPath }) => {
@@ -1822,68 +1757,45 @@ ipcMain.handle('check-tailscale-installed', async () => {
 })
 
 ipcMain.handle('check-tailscale-status', async () => {
-  return new Promise((resolve) => {
-    const proc = spawn('tailscale', ['status', '--json'], { shell: true })
-    let out = ''
-    proc.stdout.on('data', (d) => (out += d))
-    proc.stderr.on('data', (d) => (out += d))
-    proc.on('close', (code) => {
-      if (code !== 0) return resolve({ ok: false })
-      try {
-        const status = JSON.parse(out)
-        resolve({ ok: true, hostname: status.Self?.HostName || null })
-      } catch {
-        resolve({ ok: true, hostname: null })
-      }
-    })
-    proc.on('error', () => resolve({ ok: false }))
-  })
+  let out = ''
+  const r = await run('tailscale', ['status', '--json'], { onData: (chunk) => (out += chunk) })
+  if (!r.ok) return { ok: false }
+  try {
+    const status = JSON.parse(out)
+    return { ok: true, hostname: status.Self?.HostName || null }
+  } catch {
+    return { ok: true, hostname: null }
+  }
 })
 
 ipcMain.handle('get-tailscale-ip', async () => {
-  return new Promise((resolve) => {
-    const proc = spawn('tailscale', ['ip', '-4'], { shell: true })
-    let out = ''
-    proc.stdout.on('data', (d) => (out += d))
-    proc.on('close', (code) => {
-      const ip = out.trim()
-      resolve(code === 0 && ip ? { ok: true, ip } : { ok: false })
-    })
-    proc.on('error', () => resolve({ ok: false }))
-  })
+  const r = await run('tailscale', ['ip', '-4'])
+  const ip = r.stdout.trim()
+  return r.ok && ip ? { ok: true, ip } : { ok: false }
 })
 
 ipcMain.handle('run-tailscale-serve', async () => {
   // Always proxy to localhost — Tailscale handles external routing itself.
   // The API binds to 127.0.0.1 and Tailscale serve forwards traffic to it.
-  return new Promise((resolve) => {
-    const proc = spawn('tailscale', ['serve', '--bg', '--https=443', 'http://127.0.0.1:8000'], { shell: true })
-    let out = ''
-    proc.stdout.on('data', (d) => (out += d))
-    proc.stderr.on('data', (d) => (out += d))
-    proc.on('close', (code) => resolve({ ok: code === 0, output: out.trim() }))
-    proc.on('error', (err) => resolve({ ok: false, output: err.message }))
+  let out = ''
+  const r = await run('tailscale', ['serve', '--bg', '--https=443', 'http://127.0.0.1:8000'], {
+    onData: (chunk) => (out += chunk),
   })
+  if (r.error !== null) return { ok: false, output: r.error }
+  return { ok: r.ok, output: out.trim() }
 })
 
 ipcMain.handle('get-tailscale-dns', async () => {
-  return new Promise((resolve) => {
-    const proc = spawn('tailscale', ['status', '--json'], { shell: true })
-    let out = ''
-    proc.stdout.on('data', (d) => (out += d))
-    proc.on('close', (code) => {
-      if (code !== 0) return resolve(null)
-      try {
-        const status = JSON.parse(out)
-        const dns = status.Self?.DNSName
-        // DNSName ends with a trailing dot, strip it
-        resolve(dns ? dns.replace(/\.$/, '') : null)
-      } catch {
-        resolve(null)
-      }
-    })
-    proc.on('error', () => resolve(null))
-  })
+  const r = await run('tailscale', ['status', '--json'])
+  if (!r.ok) return null
+  try {
+    const status = JSON.parse(r.stdout)
+    const dns = status.Self?.DNSName
+    // DNSName ends with a trailing dot, strip it
+    return dns ? dns.replace(/\.$/, '') : null
+  } catch {
+    return null
+  }
 })
 
 // Demo mode: every IPC handler that touches real infrastructure is replaced
