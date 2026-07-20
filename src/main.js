@@ -205,17 +205,8 @@ ipcMain.handle('run-ember-update', async () => {
   await run('git', ['checkout', '--', 'version.json'], { cwd: emberPath })
 
   // Step 1: git pull origin main (explicit remote/branch avoids tracking issues)
-  const pullOk = await new Promise((resolve) => {
-    const proc = spawn('git', ['pull', 'origin', 'main'], { cwd: emberPath, shell: true })
-    proc.stdout.on('data', (d) => {
-      mainWindow.webContents.send('ember-update-log', d.toString())
-    })
-    proc.stderr.on('data', (d) => {
-      mainWindow.webContents.send('ember-update-log', d.toString())
-    })
-    proc.on('close', (code) => resolve(code === 0))
-    proc.on('error', () => resolve(false))
-  })
+  const emberLog = (chunk) => mainWindow.webContents.send('ember-update-log', chunk)
+  const pullOk = (await run('git', ['pull', 'origin', 'main'], { cwd: emberPath, onData: emberLog })).ok
   if (!pullOk) return { ok: false }
 
   const isWin = process.platform === 'win32'
@@ -223,33 +214,13 @@ ipcMain.handle('run-ember-update', async () => {
     ? path.join(emberPath, '.venv', 'Scripts', 'python.exe')
     : path.join(emberPath, '.venv', 'bin', 'python')
 
-  const pipOk = await new Promise((resolve) => {
-    const proc = spawn(pyBin, ['-m', 'pip', 'install', '-r', 'requirements.txt'], {
-      cwd: emberPath, shell: true,
-    })
-    proc.stdout.on('data', (d) => {
-      mainWindow.webContents.send('ember-update-log', d.toString())
-    })
-    proc.stderr.on('data', (d) => {
-      mainWindow.webContents.send('ember-update-log', d.toString())
-    })
-    proc.on('close', (code) => resolve(code === 0))
-    proc.on('error', () => resolve(false))
-  })
+  const pipOk = (await run(pyBin, ['-m', 'pip', 'install', '-r', 'requirements.txt'], {
+    cwd: emberPath, onData: emberLog,
+  })).ok
 
-  const dockerOk = await new Promise((resolve) => {
-    const proc = spawn('docker', ['compose', 'up', '-d', '--build'], {
-      cwd: emberPath, shell: true,
-    })
-    proc.stdout.on('data', (d) => {
-      mainWindow.webContents.send('ember-update-log', d.toString())
-    })
-    proc.stderr.on('data', (d) => {
-      mainWindow.webContents.send('ember-update-log', d.toString())
-    })
-    proc.on('close', (code) => resolve(code === 0))
-    proc.on('error', () => resolve(false))
-  })
+  const dockerOk = (await run('docker', ['compose', 'up', '-d', '--build'], {
+    cwd: emberPath, onData: emberLog,
+  })).ok
 
   // Divergence preserved (tracked as a #7 follow-up bug): unlike
   // check-ember-update above, this ignores the exit code and returns whatever
@@ -312,31 +283,21 @@ const WINGET_PACKAGES = {
   docker: 'Docker.DockerDesktop',
 }
 
-ipcMain.handle('install-prerequisite', (_e, { name }) => {
+ipcMain.handle('install-prerequisite', async (_e, { name }) => {
   if (process.platform !== 'win32') {
-    return Promise.resolve({ ok: false, error: 'Auto-install is only available on Windows. Please install manually.' })
+    return { ok: false, error: 'Auto-install is only available on Windows. Please install manually.' }
   }
 
   const packageId = WINGET_PACKAGES[name]
-  if (!packageId) return Promise.resolve({ ok: false, error: `Unknown: ${name}` })
+  if (!packageId) return { ok: false, error: `Unknown: ${name}` }
 
-  return new Promise((resolve) => {
-    const proc = spawn('winget', ['install', '--id', packageId, '--silent', '--accept-package-agreements', '--accept-source-agreements'], {
-      shell: true,
-    })
-    proc.stdout.on('data', (d) => {
-      mainWindow.webContents.send('prereq-install-progress', { name, text: d.toString() })
-    })
-    proc.stderr.on('data', (d) => {
-      mainWindow.webContents.send('prereq-install-progress', { name, text: d.toString() })
-    })
-    proc.on('close', (code) => {
-      // winget returns 0 on success, -1978335189 if already installed
-      const ok = code === 0 || code === -1978335189
-      resolve({ ok, needsRestart: name === 'docker' })
-    })
-    proc.on('error', (err) => resolve({ ok: false, error: err.message }))
+  // winget returns 0 on success, -1978335189 if the package is already installed.
+  const r = await run('winget', ['install', '--id', packageId, '--silent', '--accept-package-agreements', '--accept-source-agreements'], {
+    okCodes: [0, -1978335189],
+    onData: (chunk) => mainWindow.webContents.send('prereq-install-progress', { name, text: chunk }),
   })
+  if (r.error !== null) return { ok: false, error: r.error }
+  return { ok: r.ok, needsRestart: name === 'docker' }
 })
 
 ipcMain.handle('check-winget', async () => {
@@ -394,17 +355,15 @@ ipcMain.handle('check-target-path', (_e, { parentDir }) => {
   }
 })
 
-ipcMain.handle('update-existing-ember', (_e, { emberPath }) => {
-  return new Promise((resolve) => {
-    const proc = spawn('git', ['pull', 'origin', 'main'], { cwd: emberPath, shell: true })
-    proc.stdout.on('data', (d) => mainWindow.webContents.send('clone-progress', d.toString()))
-    proc.stderr.on('data', (d) => mainWindow.webContents.send('clone-progress', d.toString()))
-    proc.on('close', (code) => {
-      saveEmberPath(emberPath)
-      resolve({ ok: code === 0, path: emberPath })
-    })
-    proc.on('error', (err) => resolve({ ok: false, error: err.message }))
+ipcMain.handle('update-existing-ember', async (_e, { emberPath }) => {
+  const r = await run('git', ['pull', 'origin', 'main'], {
+    cwd: emberPath,
+    onData: (chunk) => mainWindow.webContents.send('clone-progress', chunk),
   })
+  if (r.error !== null) return { ok: false, error: r.error }
+  // saveEmberPath fires on any exit (even a failed pull), matching prior behavior.
+  saveEmberPath(emberPath)
+  return { ok: r.ok, path: emberPath }
 })
 
 ipcMain.handle('fresh-install-ember', async (_e, { parentDir }) => {
@@ -557,18 +516,12 @@ ipcMain.handle('get-ollama-models', async () => {
   return lines.map((l) => l.split(/\s+/)[0]).filter(Boolean)
 })
 
-ipcMain.handle('pull-ollama-model', (_e, model) => {
-  return new Promise((resolve) => {
-    const proc = spawn('ollama', ['pull', model], { shell: true })
-    proc.stdout.on('data', (d) => {
-      mainWindow.webContents.send('ollama-pull-progress', d.toString())
-    })
-    proc.stderr.on('data', (d) => {
-      mainWindow.webContents.send('ollama-pull-progress', d.toString())
-    })
-    proc.on('close', (code) => resolve({ ok: code === 0 }))
-    proc.on('error', (err) => resolve({ ok: false, error: err.message }))
+ipcMain.handle('pull-ollama-model', async (_e, model) => {
+  const r = await run('ollama', ['pull', model], {
+    onData: (chunk) => mainWindow.webContents.send('ollama-pull-progress', chunk),
   })
+  if (r.error !== null) return { ok: false, error: r.error }
+  return { ok: r.ok }
 })
 
 ipcMain.handle('write-env', (_e, { emberPath, vault, model, vision, host }) => {
@@ -652,13 +605,7 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     : path.join(emberPath, '.venv', 'bin', 'python')
 
   if (step === 'apikey') {
-    const keyExists = await new Promise((resolve) => {
-      const proc = spawn(pyBin, ['scripts/set_api_key.py', '--check'], {
-        cwd: emberPath, shell: true,
-      })
-      proc.on('close', (code) => resolve(code === 0))
-      proc.on('error', () => resolve(false))
-    })
+    const keyExists = (await run(pyBin, ['scripts/set_api_key.py', '--check'], { cwd: emberPath })).ok
 
     if (keyExists) {
       mainWindow.webContents.send('install-log', { step, text: 'API key already configured ✓\n' })
@@ -736,15 +683,10 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     const targetUiDir = uiTargetDir(emberPath)
 
     if (!fs.existsSync(uiDir)) {
-      const cloneOk = await new Promise((resolve) => {
-        const proc = spawn('git', ['clone', '--depth', '1', REPO_UI_URL], {
-          cwd: path.dirname(emberPath), shell: true,
-        })
-        proc.stdout.on('data', (d) => mainWindow.webContents.send('install-log', { step, text: d.toString() }))
-        proc.stderr.on('data', (d) => mainWindow.webContents.send('install-log', { step, text: d.toString() }))
-        proc.on('close', (code) => resolve(code === 0))
-        proc.on('error', () => resolve(false))
-      })
+      const cloneOk = (await run('git', ['clone', '--depth', '1', REPO_UI_URL], {
+        cwd: path.dirname(emberPath),
+        onData: (chunk) => mainWindow.webContents.send('install-log', { step, text: chunk }),
+      })).ok
       if (!cloneOk) {
         mainWindow.webContents.send('install-step-done', { step, ok: false })
         return { ok: false }
@@ -752,13 +694,10 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     }
 
     mainWindow.webContents.send('install-log', { step, text: 'Installing UI dependencies...\n' })
-    const npmOk = await new Promise((resolve) => {
-      const proc = spawn('npm', ['ci'], { cwd: uiDir, shell: true })
-      proc.stdout.on('data', (d) => mainWindow.webContents.send('install-log', { step, text: d.toString() }))
-      proc.stderr.on('data', (d) => mainWindow.webContents.send('install-log', { step, text: d.toString() }))
-      proc.on('close', (code) => resolve(code === 0))
-      proc.on('error', () => resolve(false))
-    })
+    const npmOk = (await run('npm', ['ci'], {
+      cwd: uiDir,
+      onData: (chunk) => mainWindow.webContents.send('install-log', { step, text: chunk }),
+    })).ok
     if (!npmOk) {
       mainWindow.webContents.send('install-step-done', { step, ok: false })
       return { ok: false }
@@ -786,13 +725,10 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     }
 
     mainWindow.webContents.send('install-log', { step, text: 'Building Ember UI...\n' })
-    const buildOk = await new Promise((resolve) => {
-      const proc = spawn('npm', ['run', 'build'], { cwd: uiDir, shell: true })
-      proc.stdout.on('data', (d) => mainWindow.webContents.send('install-log', { step, text: d.toString() }))
-      proc.stderr.on('data', (d) => mainWindow.webContents.send('install-log', { step, text: d.toString() }))
-      proc.on('close', (code) => resolve(code === 0))
-      proc.on('error', () => resolve(false))
-    })
+    const buildOk = (await run('npm', ['run', 'build'], {
+      cwd: uiDir,
+      onData: (chunk) => mainWindow.webContents.send('install-log', { step, text: chunk }),
+    })).ok
     if (!buildOk) {
       mainWindow.webContents.send('install-step-done', { step, ok: false })
       return { ok: false }
@@ -822,25 +758,16 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
   return runSpawn(cmd, args, emberPath, step)
 })
 
+// Thin adapter over run(): streams both stdout and stderr to the install-log
+// channel and fires install-step-done on completion. The IPC side-effects live
+// here, not in run() — callers at run-install-step rely on those events.
 function runSpawn(cmd, args, cwd, step) {
-  return new Promise((resolve) => {
-    const proc = spawn(cmd, args, { cwd, shell: true })
-
-    proc.stdout.on('data', (d) => {
-      mainWindow.webContents.send('install-log', { step, text: d.toString() })
-    })
-    proc.stderr.on('data', (d) => {
-      mainWindow.webContents.send('install-log', { step, text: d.toString() })
-    })
-    proc.on('close', (code) => {
-      const ok = code === 0
-      mainWindow.webContents.send('install-step-done', { step, ok })
-      resolve({ ok })
-    })
-    proc.on('error', (err) => {
-      mainWindow.webContents.send('install-step-done', { step, ok: false })
-      resolve({ ok: false, error: err.message })
-    })
+  return run(cmd, args, {
+    cwd,
+    onData: (chunk) => mainWindow.webContents.send('install-log', { step, text: chunk }),
+  }).then((r) => {
+    mainWindow.webContents.send('install-step-done', { step, ok: r.ok })
+    return r.error !== null ? { ok: false, error: r.error } : { ok: r.ok }
   })
 }
 
@@ -1003,25 +930,13 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     // Reset version.json before pull — it gets modified locally by the
     // installer/API and causes "Your local changes would be overwritten"
     await run('git', ['checkout', '--', 'version.json'], { cwd: emberPath })
-    const pullOk = await new Promise((resolve) => {
-      const proc = spawn('git', ['pull', 'origin', 'main'], { cwd: emberPath, shell: true })
-      proc.stdout.on('data', (d) => log(d.toString()))
-      proc.stderr.on('data', (d) => log(d.toString()))
-      proc.on('close', (code) => resolve(code === 0))
-      proc.on('error', () => resolve(false))
-    })
+    const pullOk = (await run('git', ['pull', 'origin', 'main'], { cwd: emberPath, onData: log })).ok
     if (!pullOk) { log('Backend update failed.\n'); return { ok: false, stage: 'backend-pull' } }
 
     log('Installing Python dependencies...\n')
-    const pipOk = await new Promise((resolve) => {
-      const proc = spawn(pyBin, ['-m', 'pip', 'install', '-r', 'requirements.txt'], {
-        cwd: emberPath, shell: true,
-      })
-      proc.stdout.on('data', (d) => log(d.toString()))
-      proc.stderr.on('data', (d) => log(d.toString()))
-      proc.on('close', (code) => resolve(code === 0))
-      proc.on('error', () => resolve(false))
-    })
+    const pipOk = (await run(pyBin, ['-m', 'pip', 'install', '-r', 'requirements.txt'], {
+      cwd: emberPath, onData: log,
+    })).ok
     if (!pipOk) log('Warning: pip install had issues, continuing...\n')
 
     let pulledVersion = null
@@ -1045,15 +960,9 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     await new Promise((r) => setTimeout(r, 2000))
 
     log('Restarting Docker services...\n')
-    await new Promise((resolve) => {
-      const proc = spawn('docker', ['compose', 'up', '-d', '--build'], {
-        cwd: emberPath, shell: true,
-      })
-      proc.stdout.on('data', (d) => log(d.toString()))
-      proc.stderr.on('data', (d) => log(d.toString()))
-      proc.on('close', () => resolve())
-      proc.on('error', () => resolve())
-    })
+    // Divergence preserved (tracked as a #7 follow-up bug): unlike run-ember-update,
+    // this discards the compose exit code — a failed restart is not surfaced.
+    await run('docker', ['compose', 'up', '-d', '--build'], { cwd: emberPath, onData: log })
 
     log('Starting updated API...\n')
     const restartLogFd = openApiStartupLogFd()
@@ -1118,13 +1027,7 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
   const ollamaModels = ollamaListResult.error === null ? ollamaListResult.stdout : ''
   if (!ollamaModels.includes('nomic-embed-text')) {
     log('Pulling embedding model (nomic-embed-text)...\n')
-    const pullOk = await new Promise((resolve) => {
-      const proc = spawn('ollama', ['pull', 'nomic-embed-text'], { shell: true })
-      proc.stdout.on('data', (d) => log(d.toString()))
-      proc.stderr.on('data', (d) => log(d.toString()))
-      proc.on('close', (code) => resolve(code === 0))
-      proc.on('error', () => resolve(false))
-    })
+    const pullOk = (await run('ollama', ['pull', 'nomic-embed-text'], { onData: log })).ok
     if (pullOk) {
       const verifyResult = await run('ollama', ['list'])
       const verify = verifyResult.error === null && verifyResult.stdout.includes('nomic-embed-text')
@@ -1141,26 +1044,14 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     log('Updating Ember UI...\n')
     if (!fs.existsSync(uiDir)) {
       log('Cloning ember-2-ui...\n')
-      const cloneOk = await new Promise((resolve) => {
-        const proc = spawn('git', ['clone', '--depth', '1', REPO_UI_URL], {
-          cwd: path.dirname(emberPath), shell: true,
-        })
-        proc.stdout.on('data', (d) => log(d.toString()))
-        proc.stderr.on('data', (d) => log(d.toString()))
-        proc.on('close', (code) => resolve(code === 0))
-        proc.on('error', () => resolve(false))
-      })
+      const cloneOk = (await run('git', ['clone', '--depth', '1', REPO_UI_URL], {
+        cwd: path.dirname(emberPath), onData: log,
+      })).ok
       if (!cloneOk) { log('UI clone failed.\n'); return { ok: false, stage: 'ui-clone' } }
     } else {
       // npm install/ci may have rewritten package-lock.json; reset it so git pull doesn't refuse to merge.
       await run('git', ['checkout', '--', 'package-lock.json'], { cwd: uiDir })
-      const pullOk = await new Promise((resolve) => {
-        const proc = spawn('git', ['pull', 'origin', 'main'], { cwd: uiDir, shell: true })
-        proc.stdout.on('data', (d) => log(d.toString()))
-        proc.stderr.on('data', (d) => log(d.toString()))
-        proc.on('close', (code) => resolve(code === 0))
-        proc.on('error', () => resolve(false))
-      })
+      const pullOk = (await run('git', ['pull', 'origin', 'main'], { cwd: uiDir, onData: log })).ok
       if (!pullOk) {
         log(`UI pull failed in ${uiDir}. The clone is still intact — retrying the update is safe.\n`)
         return { ok: false, stage: 'ui-pull' }
@@ -1168,13 +1059,7 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     }
 
     log('Installing UI dependencies...\n')
-    const npmOk = await new Promise((resolve) => {
-      const proc = spawn('npm', ['ci'], { cwd: uiDir, shell: true })
-      proc.stdout.on('data', (d) => log(d.toString()))
-      proc.stderr.on('data', (d) => log(d.toString()))
-      proc.on('close', (code) => resolve(code === 0))
-      proc.on('error', () => resolve(false))
-    })
+    const npmOk = (await run('npm', ['ci'], { cwd: uiDir, onData: log })).ok
     if (!npmOk) { log('npm ci failed.\n'); return { ok: false, stage: 'ui-npm' } }
 
     log('Injecting API key...\n')
@@ -1188,13 +1073,7 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     }
 
     log('Building UI...\n')
-    const buildOk = await new Promise((resolve) => {
-      const proc = spawn('npm', ['run', 'build'], { cwd: uiDir, shell: true })
-      proc.stdout.on('data', (d) => log(d.toString()))
-      proc.stderr.on('data', (d) => log(d.toString()))
-      proc.on('close', (code) => resolve(code === 0))
-      proc.on('error', () => resolve(false))
-    })
+    const buildOk = (await run('npm', ['run', 'build'], { cwd: uiDir, onData: log })).ok
     if (!buildOk) { log('UI build failed.\n'); return { ok: false, stage: 'ui-build' } }
 
     // Remove .env now that the key is baked into the bundle
@@ -1227,13 +1106,7 @@ ipcMain.handle('run-git-pull', async (_e) => {
   await run('git', ['checkout', '--', 'version.json'], { cwd: emberPath })
 
   log('Pulling ember-2...\n')
-  const pullOk = await new Promise((resolve) => {
-    const proc = spawn('git', ['pull', 'origin', 'main'], { cwd: emberPath, shell: true })
-    proc.stdout.on('data', (d) => log(d.toString()))
-    proc.stderr.on('data', (d) => log(d.toString()))
-    proc.on('close', (code) => resolve(code === 0))
-    proc.on('error', () => resolve(false))
-  })
+  const pullOk = (await run('git', ['pull', 'origin', 'main'], { cwd: emberPath, onData: log })).ok
   if (!pullOk) return { ok: false }
 
   const uiDir = uiSourceDir(emberPath)
@@ -1241,46 +1114,22 @@ ipcMain.handle('run-git-pull', async (_e) => {
 
   if (!fs.existsSync(uiDir)) {
     log('Cloning ember-2-ui...\n')
-    const cloneOk = await new Promise((resolve) => {
-      const proc = spawn('git', ['clone', '--depth', '1', REPO_UI_URL], {
-        cwd: path.dirname(emberPath), shell: true,
-      })
-      proc.stdout.on('data', (d) => log(d.toString()))
-      proc.stderr.on('data', (d) => log(d.toString()))
-      proc.on('close', (code) => resolve(code === 0))
-      proc.on('error', () => resolve(false))
-    })
+    const cloneOk = (await run('git', ['clone', '--depth', '1', REPO_UI_URL], {
+      cwd: path.dirname(emberPath), onData: log,
+    })).ok
     if (!cloneOk) { log('Failed to clone ember-2-ui.\n'); return { ok: false } }
   } else {
     log('Pulling ember-2-ui...\n')
-    const uiPullOk = await new Promise((resolve) => {
-      const proc = spawn('git', ['pull', 'origin', 'main'], { cwd: uiDir, shell: true })
-      proc.stdout.on('data', (d) => log(d.toString()))
-      proc.stderr.on('data', (d) => log(d.toString()))
-      proc.on('close', (code) => resolve(code === 0))
-      proc.on('error', () => resolve(false))
-    })
+    const uiPullOk = (await run('git', ['pull', 'origin', 'main'], { cwd: uiDir, onData: log })).ok
     if (!uiPullOk) { log('Failed to pull ember-2-ui.\n'); return { ok: false } }
   }
 
   log('Installing UI dependencies...\n')
-  const npmOk = await new Promise((resolve) => {
-    const proc = spawn('npm', ['ci'], { cwd: uiDir, shell: true })
-    proc.stdout.on('data', (d) => log(d.toString()))
-    proc.stderr.on('data', (d) => log(d.toString()))
-    proc.on('close', (code) => resolve(code === 0))
-    proc.on('error', () => resolve(false))
-  })
+  const npmOk = (await run('npm', ['ci'], { cwd: uiDir, onData: log })).ok
   if (!npmOk) { log('npm ci failed.\n'); return { ok: false } }
 
   log('Building Ember UI...\n')
-  const buildOk = await new Promise((resolve) => {
-    const proc = spawn('npm', ['run', 'build'], { cwd: uiDir, shell: true })
-    proc.stdout.on('data', (d) => log(d.toString()))
-    proc.stderr.on('data', (d) => log(d.toString()))
-    proc.on('close', (code) => resolve(code === 0))
-    proc.on('error', () => resolve(false))
-  })
+  const buildOk = (await run('npm', ['run', 'build'], { cwd: uiDir, onData: log })).ok
   if (!buildOk) { log('UI build failed.\n'); return { ok: false } }
 
   try {
