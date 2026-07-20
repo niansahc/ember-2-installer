@@ -31,6 +31,47 @@ function showScreen(id) {
   }
 }
 
+// guardClick — run an async click-handler body so that a rejection (an IPC call
+// throwing, a dropped IPC channel, or any other error) can never leave the
+// button frozen on its "working" label with nothing surfaced to the user
+// (issue #12). On throw it:
+//   1. re-enables `btn` and restores the label it had when the handler fired,
+//   2. surfaces `errorMsg` via the inline error idiom — writing it into
+//      `errorEl` and revealing `errorEl`'s nearest `.hidden` ancestor (or
+//      `errorEl` itself) so a wrapped container like #ember-update-info shows,
+//   3. runs the optional `onError(err)` hook for site-specific cleanup
+//      (removing a progress listener, resetting an icon, hiding a sub-button).
+// Pass `btn: null` for handlers that never disable a button (e.g. folder
+// pickers); pass no `errorEl` for sites with no inline surface (console only).
+// The wrapper only fires on a *thrown* rejection — a handler's own graceful
+// `result.ok === false` branch is untouched.
+async function guardClick(btn, fn, { errorEl = null, errorMsg = 'Something went wrong — please try again.', onError = null } = {}) {
+  const originalLabel = btn ? btn.textContent : null
+  try {
+    await fn()
+  } catch (err) {
+    console.error('[guardClick] handler failed:', err)
+    if (btn) {
+      btn.disabled = false
+      if (originalLabel !== null) btn.textContent = originalLabel
+    }
+    if (errorEl) {
+      const container = errorEl.classList.contains('hidden')
+        ? errorEl
+        : errorEl.closest('.hidden') || errorEl
+      container.classList.remove('hidden')
+      errorEl.textContent = errorMsg
+    }
+    if (onError) {
+      try {
+        onError(err)
+      } catch (hookErr) {
+        console.error('[guardClick] onError hook failed:', hookErr)
+      }
+    }
+  }
+}
+
 document.querySelectorAll('[data-next]').forEach((btn) => {
   btn.addEventListener('click', () => {
     if (!btn.disabled) showScreen(btn.dataset.next)
@@ -314,22 +355,26 @@ async function initInstallDir() {
     text.textContent = `I found an existing Ember installation at ${scan.path} (v${scan.version}).`
     notice.classList.remove('hidden')
 
-    document.getElementById('btn-use-detected').addEventListener('click', async () => {
-      state.emberPath = scan.path
-      await window.ember.saveEmberPath(scan.path)
-      showScreen('screen-vault')
+    document.getElementById('btn-use-detected').addEventListener('click', () => {
+      guardClick(null, async () => {
+        state.emberPath = scan.path
+        await window.ember.saveEmberPath(scan.path)
+        showScreen('screen-vault')
+      })
     })
   }
 }
 
-document.getElementById('btn-pick-ember').addEventListener('click', async () => {
-  const chosen = await window.ember.pickEmberFolder()
-  if (chosen) {
-    document.getElementById('ember-path-input').value = chosen
-  }
+document.getElementById('btn-pick-ember').addEventListener('click', () => {
+  guardClick(null, async () => {
+    const chosen = await window.ember.pickEmberFolder()
+    if (chosen) {
+      document.getElementById('ember-path-input').value = chosen
+    }
+  })
 })
 
-document.getElementById('btn-install-ember').addEventListener('click', async () => {
+document.getElementById('btn-install-ember').addEventListener('click', () => {
   const parentDir = document.getElementById('ember-path-input').value.trim()
   if (!parentDir) return
 
@@ -337,16 +382,22 @@ document.getElementById('btn-install-ember').addEventListener('click', async () 
   const existingNotice = document.getElementById('existing-install-notice')
   const existingText = document.getElementById('existing-install-text')
 
-  const check = await window.ember.checkTargetPath(parentDir)
-  if (check.exists && check.isEmber) {
-    existingText.textContent = `Ember-2 found at this location (${check.version}). What would you like to do?`
-    existingNotice.classList.remove('hidden')
-    btn.disabled = true
-    return
-  }
+  guardClick(btn, async () => {
+    const check = await window.ember.checkTargetPath(parentDir)
+    if (check.exists && check.isEmber) {
+      existingText.textContent = `Ember-2 found at this location (${check.version}). What would you like to do?`
+      existingNotice.classList.remove('hidden')
+      btn.disabled = true
+      return
+    }
 
-  // No existing install — proceed with fresh clone
-  await runClone(parentDir, btn)
+    // No existing install — proceed with fresh clone
+    await runClone(parentDir, btn)
+  }, {
+    errorEl: document.getElementById('clone-log'),
+    errorMsg: 'Install failed — check your connection and try again.',
+    onError: () => window.ember.removeAllListeners('clone-progress'),
+  })
 })
 
 async function runClone(parentDir, btn) {
@@ -384,76 +435,90 @@ async function runClone(parentDir, btn) {
   }
 }
 
-document.getElementById('btn-existing-update').addEventListener('click', async () => {
+document.getElementById('btn-existing-update').addEventListener('click', () => {
   const parentDir = document.getElementById('ember-path-input').value.trim()
   const btn = document.getElementById('btn-install-ember')
-  btn.disabled = true
-  btn.textContent = 'Updating...'
-  document.getElementById('existing-install-notice').classList.add('hidden')
-
-  const cloneStatus = document.getElementById('clone-status')
   const cloneLog = document.getElementById('clone-log')
-  const cloneVoice = document.getElementById('clone-voice')
-  cloneVoice.textContent = '"Updating your existing Ember-2 installation..."'
-  cloneStatus.classList.remove('hidden')
-  cloneLog.textContent = ''
 
-  const emberPath = parentDir + (parentDir.endsWith('ember-2') ? '' : '/ember-2')
+  guardClick(btn, async () => {
+    btn.disabled = true
+    btn.textContent = 'Updating...'
+    document.getElementById('existing-install-notice').classList.add('hidden')
 
-  window.ember.onCloneProgress((text) => {
-    cloneLog.textContent += text
-    cloneLog.scrollTop = cloneLog.scrollHeight
+    const cloneStatus = document.getElementById('clone-status')
+    const cloneVoice = document.getElementById('clone-voice')
+    cloneVoice.textContent = '"Updating your existing Ember-2 installation..."'
+    cloneStatus.classList.remove('hidden')
+    cloneLog.textContent = ''
+
+    const emberPath = parentDir + (parentDir.endsWith('ember-2') ? '' : '/ember-2')
+
+    window.ember.onCloneProgress((text) => {
+      cloneLog.textContent += text
+      cloneLog.scrollTop = cloneLog.scrollHeight
+    })
+
+    const result = await window.ember.updateExistingEmber(emberPath)
+    window.ember.removeAllListeners('clone-progress')
+
+    if (result.ok) {
+      state.emberPath = result.path
+      await window.ember.saveEmberPath(result.path)
+      cloneLog.textContent += '\nUpdated ✓\n'
+      btn.textContent = 'Updated ✓'
+      setTimeout(() => showScreen('screen-vault'), 800)
+    } else {
+      cloneLog.textContent += '\nUpdate failed. Check your internet connection and try again.\n'
+      btn.disabled = false
+      btn.textContent = 'Try Again'
+    }
+  }, {
+    errorEl: cloneLog,
+    errorMsg: 'Update failed — check your connection and try again.',
+    onError: () => window.ember.removeAllListeners('clone-progress'),
   })
-
-  const result = await window.ember.updateExistingEmber(emberPath)
-  window.ember.removeAllListeners('clone-progress')
-
-  if (result.ok) {
-    state.emberPath = result.path
-    await window.ember.saveEmberPath(result.path)
-    cloneLog.textContent += '\nUpdated ✓\n'
-    btn.textContent = 'Updated ✓'
-    setTimeout(() => showScreen('screen-vault'), 800)
-  } else {
-    cloneLog.textContent += '\nUpdate failed. Check your internet connection and try again.\n'
-    btn.disabled = false
-    btn.textContent = 'Try Again'
-  }
 })
 
-document.getElementById('btn-existing-fresh').addEventListener('click', async () => {
+document.getElementById('btn-existing-fresh').addEventListener('click', () => {
   const parentDir = document.getElementById('ember-path-input').value.trim()
   const btn = document.getElementById('btn-install-ember')
-  btn.disabled = true
-  btn.textContent = 'Installing...'
-  document.getElementById('existing-install-notice').classList.add('hidden')
-
-  const cloneStatus = document.getElementById('clone-status')
   const cloneLog = document.getElementById('clone-log')
-  const cloneVoice = document.getElementById('clone-voice')
-  cloneVoice.textContent = '"Starting fresh — removing old installation and downloading Ember-2..."'
-  cloneStatus.classList.remove('hidden')
-  cloneLog.textContent = 'Removing existing installation...\n'
 
-  window.ember.onCloneProgress((text) => {
-    cloneLog.textContent += text
-    cloneLog.scrollTop = cloneLog.scrollHeight
+  guardClick(btn, async () => {
+    btn.disabled = true
+    btn.textContent = 'Installing...'
+    document.getElementById('existing-install-notice').classList.add('hidden')
+
+    const cloneStatus = document.getElementById('clone-status')
+    const cloneVoice = document.getElementById('clone-voice')
+    cloneVoice.textContent = '"Starting fresh — removing old installation and downloading Ember-2..."'
+    cloneStatus.classList.remove('hidden')
+    cloneLog.textContent = 'Removing existing installation...\n'
+
+    window.ember.onCloneProgress((text) => {
+      cloneLog.textContent += text
+      cloneLog.scrollTop = cloneLog.scrollHeight
+    })
+
+    const result = await window.ember.freshInstallEmber(parentDir)
+    window.ember.removeAllListeners('clone-progress')
+
+    if (result.ok) {
+      state.emberPath = result.path
+      await window.ember.saveEmberPath(result.path)
+      cloneLog.textContent += '\nDone!\n'
+      btn.textContent = 'Installed ✓'
+      setTimeout(() => showScreen('screen-vault'), 800)
+    } else {
+      cloneLog.textContent += '\nFailed. Check your internet connection and try again.\n'
+      btn.disabled = false
+      btn.textContent = 'Try Again'
+    }
+  }, {
+    errorEl: cloneLog,
+    errorMsg: 'Install failed — check your connection and try again.',
+    onError: () => window.ember.removeAllListeners('clone-progress'),
   })
-
-  const result = await window.ember.freshInstallEmber(parentDir)
-  window.ember.removeAllListeners('clone-progress')
-
-  if (result.ok) {
-    state.emberPath = result.path
-    await window.ember.saveEmberPath(result.path)
-    cloneLog.textContent += '\nDone!\n'
-    btn.textContent = 'Installed ✓'
-    setTimeout(() => showScreen('screen-vault'), 800)
-  } else {
-    cloneLog.textContent += '\nFailed. Check your internet connection and try again.\n'
-    btn.disabled = false
-    btn.textContent = 'Try Again'
-  }
 })
 
 document.getElementById('btn-existing-cancel').addEventListener('click', () => {
@@ -477,13 +542,15 @@ function checkCloudPath(vaultPath) {
   warning.classList.toggle('hidden', !isCloud)
 }
 
-document.getElementById('btn-pick-vault').addEventListener('click', async () => {
-  const chosen = await window.ember.pickVaultFolder()
-  if (chosen) {
-    document.getElementById('vault-path-input').value = chosen
-    state.vaultPath = chosen
-    checkCloudPath(chosen)
-  }
+document.getElementById('btn-pick-vault').addEventListener('click', () => {
+  guardClick(null, async () => {
+    const chosen = await window.ember.pickVaultFolder()
+    if (chosen) {
+      document.getElementById('vault-path-input').value = chosen
+      state.vaultPath = chosen
+      checkCloudPath(chosen)
+    }
+  })
 })
 
 document.getElementById('vault-path-input').addEventListener('input', (e) => {
@@ -781,40 +848,46 @@ async function tsCheckConnected() {
   }
 }
 
-document.getElementById('btn-ts-serve').addEventListener('click', async () => {
+document.getElementById('btn-ts-serve').addEventListener('click', () => {
   const btn = document.getElementById('btn-ts-serve')
   const resultEl = document.getElementById('ts-serve-result')
   const icon = document.getElementById('ts-serve-icon')
 
-  btn.disabled = true
-  btn.textContent = 'Setting up...'
-  icon.textContent = '⏳'
+  guardClick(btn, async () => {
+    btn.disabled = true
+    btn.textContent = 'Setting up...'
+    icon.textContent = '⏳'
 
-  const [serveResult, dnsName] = await Promise.all([
-    window.ember.runTailscaleServe(),
-    window.ember.getTailscaleDns(),
-  ])
+    const [serveResult, dnsName] = await Promise.all([
+      window.ember.runTailscaleServe(),
+      window.ember.getTailscaleDns(),
+    ])
 
-  if (serveResult.ok) {
-    icon.textContent = '✅'
-    if (dnsName) state.tailscaleDns = dnsName
-    const url = dnsName ? `https://${dnsName}` : `http://${state.tailscaleIp || '127.0.0.1'}:8000`
-    btn.classList.add('hidden')
-    resultEl.classList.remove('hidden')
-    resultEl.textContent = 'Your Ember URL: '
-    const urlSpan = document.createElement('span')
-    urlSpan.className = 'ts-url-display'
-    urlSpan.textContent = url
-    resultEl.appendChild(urlSpan)
+    if (serveResult.ok) {
+      icon.textContent = '✅'
+      if (dnsName) state.tailscaleDns = dnsName
+      const url = dnsName ? `https://${dnsName}` : `http://${state.tailscaleIp || '127.0.0.1'}:8000`
+      btn.classList.add('hidden')
+      resultEl.classList.remove('hidden')
+      resultEl.textContent = 'Your Ember URL: '
+      const urlSpan = document.createElement('span')
+      urlSpan.className = 'ts-url-display'
+      urlSpan.textContent = url
+      resultEl.appendChild(urlSpan)
 
-    document.getElementById('ts-step-phone').classList.remove('hidden')
-  } else {
-    icon.textContent = '❌'
-    btn.disabled = false
-    btn.textContent = 'Retry'
-    resultEl.classList.remove('hidden')
-    resultEl.textContent = 'Failed — you can set this up later. Using IP address instead.'
-  }
+      document.getElementById('ts-step-phone').classList.remove('hidden')
+    } else {
+      icon.textContent = '❌'
+      btn.disabled = false
+      btn.textContent = 'Retry'
+      resultEl.classList.remove('hidden')
+      resultEl.textContent = 'Failed — you can set this up later. Using IP address instead.'
+    }
+  }, {
+    errorEl: resultEl,
+    errorMsg: 'Setup failed — you can set this up later. Using IP address instead.',
+    onError: () => { icon.textContent = '❌'; btn.textContent = 'Retry' },
+  })
 })
 
 document.getElementById('ts-phone-ios').addEventListener('click', (e) => {
@@ -833,12 +906,14 @@ async function initOllamaModelsPath() {
   state.ollamaModelsPath = defaultPath
 }
 
-document.getElementById('btn-pick-ollama-models').addEventListener('click', async () => {
-  const chosen = await window.ember.pickEmberFolder()
-  if (chosen) {
-    document.getElementById('ollama-models-path').value = chosen
-    state.ollamaModelsPath = chosen
-  }
+document.getElementById('btn-pick-ollama-models').addEventListener('click', () => {
+  guardClick(null, async () => {
+    const chosen = await window.ember.pickEmberFolder()
+    if (chosen) {
+      document.getElementById('ollama-models-path').value = chosen
+      state.ollamaModelsPath = chosen
+    }
+  })
 })
 
 document.getElementById('ollama-models-path').addEventListener('input', (e) => {
@@ -879,14 +954,21 @@ document.getElementById('btn-host-next').addEventListener('click', () => {
   document.getElementById('summary-total-size').textContent = `~${totalGB.toFixed(1)} GB`
 })
 
-document.getElementById('btn-start-install').addEventListener('click', async () => {
-  const defaultOllamaPath = await window.ember.getDefaultOllamaModels()
-  if (state.ollamaModelsPath && state.ollamaModelsPath !== defaultOllamaPath) {
-    await window.ember.setOllamaModelsPath(state.ollamaModelsPath)
-  }
+document.getElementById('btn-start-install').addEventListener('click', () => {
+  const btn = document.getElementById('btn-start-install')
 
-  showScreen('screen-install')
-  await runInstall()
+  guardClick(btn, async () => {
+    const defaultOllamaPath = await window.ember.getDefaultOllamaModels()
+    if (state.ollamaModelsPath && state.ollamaModelsPath !== defaultOllamaPath) {
+      await window.ember.setOllamaModelsPath(state.ollamaModelsPath)
+    }
+
+    showScreen('screen-install')
+    await runInstall()
+  }, {
+    errorEl: document.getElementById('summary-error'),
+    errorMsg: 'Could not start the install — please try again.',
+  })
 })
 
 const FUN_FACTS = [
@@ -1362,29 +1444,35 @@ document.getElementById('btn-agpl-acknowledge').addEventListener('click', () => 
 })
 
 // Launch Services — runs the full launcher script (Docker, SearXNG, API, browser)
-document.getElementById('btn-launch-ember').addEventListener('click', async () => {
+document.getElementById('btn-launch-ember').addEventListener('click', () => {
   const btn = document.getElementById('btn-launch-ember')
   const launchStatus = document.getElementById('launch-status')
-  btn.disabled = true
-  btn.textContent = 'Launching...'
-  launchStatus.style.display = ''
-  launchStatus.textContent = 'Starting Docker, SearXNG, and the API — this may take a moment...'
 
-  const result = await window.ember.launchEmber(state.emberPath)
+  guardClick(btn, async () => {
+    btn.disabled = true
+    btn.textContent = 'Launching...'
+    launchStatus.style.display = ''
+    launchStatus.textContent = 'Starting Docker, SearXNG, and the API — this may take a moment...'
 
-  if (result.ok) {
-    btn.textContent = 'Launched'
-    launchStatus.textContent = 'Ember is starting up. A browser window will open when ready.'
-    setTimeout(() => {
+    const result = await window.ember.launchEmber(state.emberPath)
+
+    if (result.ok) {
+      btn.textContent = 'Launched'
+      launchStatus.textContent = 'Ember is starting up. A browser window will open when ready.'
+      setTimeout(() => {
+        btn.textContent = 'Launch Services'
+        btn.disabled = false
+        launchStatus.style.display = 'none'
+      }, 10000)
+    } else {
       btn.textContent = 'Launch Services'
       btn.disabled = false
-      launchStatus.style.display = 'none'
-    }, 10000)
-  } else {
-    btn.textContent = 'Launch Services'
-    btn.disabled = false
-    launchStatus.textContent = result.error || 'Launch failed. Try the Open Ember button instead.'
-  }
+      launchStatus.textContent = result.error || 'Launch failed. Try the Open Ember button instead.'
+    }
+  }, {
+    errorEl: launchStatus,
+    errorMsg: 'Launch failed. Try the Open Ember button instead.',
+  })
 })
 
 // Open Ember — use Tailscale DNS if available, otherwise localhost
@@ -1398,37 +1486,43 @@ document.getElementById('btn-open-ember').addEventListener('click', () => {
   }
 })
 
-document.getElementById('btn-retry-api').addEventListener('click', async () => {
+document.getElementById('btn-retry-api').addEventListener('click', () => {
   const retryBtn = document.getElementById('btn-retry-api')
   const status = document.getElementById('done-status')
-  retryBtn.disabled = true
-  retryBtn.textContent = 'Retrying...'
-  status.textContent = 'Restarting the API...'
-  document.getElementById('done-troubleshooting').classList.add('hidden')
 
-  await window.ember.startApi(state.emberPath)
+  guardClick(retryBtn, async () => {
+    retryBtn.disabled = true
+    retryBtn.textContent = 'Retrying...'
+    status.textContent = 'Restarting the API...'
+    document.getElementById('done-troubleshooting').classList.add('hidden')
 
-  const host = state.host || '127.0.0.1'
-  let healthy = false
-  for (let i = 0; i < 40; i++) {
-    await new Promise((r) => setTimeout(r, 3000))
-    const check = await window.ember.checkApiHealth(host)
-    if (check.ok) { healthy = true; break }
-    status.textContent = `Waiting for Ember to start... (${(i + 1) * 3}s)`
-  }
+    await window.ember.startApi(state.emberPath)
 
-  retryBtn.disabled = false
-  retryBtn.textContent = 'Try Again'
+    const host = state.host || '127.0.0.1'
+    let healthy = false
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 3000))
+      const check = await window.ember.checkApiHealth(host)
+      if (check.ok) { healthy = true; break }
+      status.textContent = `Waiting for Ember to start... (${(i + 1) * 3}s)`
+    }
 
-  if (healthy) {
-    document.getElementById('done-title').textContent = "You're all set."
-    document.getElementById('done-voice').textContent = '"I\'m ready. Let\'s begin."'
-    status.textContent = 'Ember is running.'
-    retryBtn.style.display = 'none'
-  } else {
-    status.textContent = "Still not responding. Check the hints below and try again."
-    document.getElementById('done-troubleshooting').classList.remove('hidden')
-  }
+    retryBtn.disabled = false
+    retryBtn.textContent = 'Try Again'
+
+    if (healthy) {
+      document.getElementById('done-title').textContent = "You're all set."
+      document.getElementById('done-voice').textContent = '"I\'m ready. Let\'s begin."'
+      status.textContent = 'Ember is running.'
+      retryBtn.style.display = 'none'
+    } else {
+      status.textContent = "Still not responding. Check the hints below and try again."
+      document.getElementById('done-troubleshooting').classList.remove('hidden')
+    }
+  }, {
+    errorEl: status,
+    errorMsg: 'Could not restart the API — please try again.',
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -1562,71 +1656,85 @@ function markUpdateRowDone(name) {
   if (icon) icon.textContent = '✨'
 }
 
-document.getElementById('btn-check-ember-update').addEventListener('click', async () => {
+document.getElementById('btn-check-ember-update').addEventListener('click', () => {
   const btn = document.getElementById('btn-check-ember-update')
   const info = document.getElementById('ember-update-info')
   const msg = document.getElementById('ember-update-msg')
 
-  btn.disabled = true
-  btn.textContent = 'Checking...'
+  guardClick(btn, async () => {
+    btn.disabled = true
+    btn.textContent = 'Checking...'
 
-  const updates = await window.ember.checkAllUpdates(state.host)
+    const updates = await window.ember.checkAllUpdates(state.host)
 
-  btn.disabled = false
-  btn.textContent = 'Check for updates'
+    btn.disabled = false
+    btn.textContent = 'Check for updates'
 
-  if (!updates.reachable) {
-    info.classList.remove('hidden')
-    msg.textContent = 'Update check unavailable — could not reach GitHub.'
-    document.getElementById('btn-run-ember-update').classList.add('hidden')
-    return
-  }
-
-  const anyUpdate = updates.installer.hasUpdate || updates.backend.hasUpdate || updates.ui.hasUpdate
-
-  if (anyUpdate) {
-    prepareUpdateScreen(updates)
-    pendingUpdates = {
-      backend: updates.backend.hasUpdate,
-      ui: updates.ui.hasUpdate,
-      installer: updates.installer.hasUpdate,
+    if (!updates.reachable) {
+      info.classList.remove('hidden')
+      msg.textContent = 'Update check unavailable — could not reach GitHub.'
+      document.getElementById('btn-run-ember-update').classList.add('hidden')
+      return
     }
-    showScreen('screen-update')
-  } else {
-    info.classList.remove('hidden')
-    msg.textContent = 'Everything is up to date.'
-    document.getElementById('btn-run-ember-update').classList.add('hidden')
-  }
+
+    const anyUpdate = updates.installer.hasUpdate || updates.backend.hasUpdate || updates.ui.hasUpdate
+
+    if (anyUpdate) {
+      prepareUpdateScreen(updates)
+      pendingUpdates = {
+        backend: updates.backend.hasUpdate,
+        ui: updates.ui.hasUpdate,
+        installer: updates.installer.hasUpdate,
+      }
+      showScreen('screen-update')
+    } else {
+      info.classList.remove('hidden')
+      msg.textContent = 'Everything is up to date.'
+      document.getElementById('btn-run-ember-update').classList.add('hidden')
+    }
+  }, {
+    errorEl: msg,
+    errorMsg: 'Update check failed — please try again.',
+    // Revealing #ember-update-info (msg's container) would also show the
+    // "Update & Restart" button — hide it, there's nothing to update.
+    onError: () => document.getElementById('btn-run-ember-update').classList.add('hidden'),
+  })
 })
 
-document.getElementById('btn-run-ember-update').addEventListener('click', async () => {
+document.getElementById('btn-run-ember-update').addEventListener('click', () => {
   const btn = document.getElementById('btn-run-ember-update')
   const logBox = document.getElementById('ember-update-log')
 
-  btn.disabled = true
-  btn.textContent = 'Updating...'
-  logBox.classList.remove('hidden')
-  logBox.textContent = ''
+  guardClick(btn, async () => {
+    btn.disabled = true
+    btn.textContent = 'Updating...'
+    logBox.classList.remove('hidden')
+    logBox.textContent = ''
 
-  window.ember.onEmberUpdateLog((text) => {
-    logBox.textContent += text
-    logBox.scrollTop = logBox.scrollHeight
+    window.ember.onEmberUpdateLog((text) => {
+      logBox.textContent += text
+      logBox.scrollTop = logBox.scrollHeight
+    })
+
+    const result = await window.ember.runEmberUpdate()
+    window.ember.removeAllListeners('ember-update-log')
+
+    if (result.ok) {
+      btn.textContent = 'Done'
+      logBox.textContent += `\nUpdate complete — now on ${result.tag || 'latest'}\n`
+      document.getElementById('ember-version-label').textContent = result.tag || 'latest'
+      // Re-run the start API + health check flow so the user doesn't have to figure it out
+      loadEmberVersion()
+    } else {
+      btn.textContent = 'Failed'
+      logBox.textContent += '\nUpdate failed. Try running git pull manually.\n'
+      btn.disabled = false
+    }
+  }, {
+    errorEl: logBox,
+    errorMsg: 'Update failed. Try running git pull manually.',
+    onError: () => window.ember.removeAllListeners('ember-update-log'),
   })
-
-  const result = await window.ember.runEmberUpdate()
-  window.ember.removeAllListeners('ember-update-log')
-
-  if (result.ok) {
-    btn.textContent = 'Done'
-    logBox.textContent += `\nUpdate complete — now on ${result.tag || 'latest'}\n`
-    document.getElementById('ember-version-label').textContent = result.tag || 'latest'
-    // Re-run the start API + health check flow so the user doesn't have to figure it out
-    loadEmberVersion()
-  } else {
-    btn.textContent = 'Failed'
-    logBox.textContent += '\nUpdate failed. Try running git pull manually.\n'
-    btn.disabled = false
-  }
 })
 
 async function loadEmberVersion() {
@@ -1972,7 +2080,7 @@ document.querySelectorAll('.dev-mode-trigger, #dev-mode-toggle').forEach((toggle
 
 // Apply developer mode — works from both Done and Update screen panels.
 document.querySelectorAll('.dev-mode-apply-btn, #btn-apply-dev-mode').forEach((btn) => {
-  btn.addEventListener('click', async () => {
+  btn.addEventListener('click', () => {
     const section = btn.closest('.dev-mode-panel') || btn.closest('.dev-mode-section')
     // Resolve field IDs — data attributes for the update screen, hardcoded for Done
     const demoId = btn.dataset.demo || 'dev-vault-demo'
@@ -1988,20 +2096,25 @@ document.querySelectorAll('.dev-mode-apply-btn, #btn-apply-dev-mode').forEach((b
       return
     }
 
-    btn.disabled = true
-    btn.textContent = 'Applying...'
-    statusEl.textContent = ''
+    guardClick(btn, async () => {
+      btn.disabled = true
+      btn.textContent = 'Applying...'
+      statusEl.textContent = ''
 
-    const result = await window.ember.setupDevMode(state.emberPath, demoVault, testVault)
+      const result = await window.ember.setupDevMode(state.emberPath, demoVault, testVault)
 
-    if (result.ok) {
-      btn.textContent = 'Applied'
-      statusEl.textContent = 'Developer mode enabled. Vault directories created.'
-    } else {
-      btn.textContent = 'Apply'
-      btn.disabled = false
-      statusEl.textContent = result.error || 'Failed to set up developer mode.'
-    }
+      if (result.ok) {
+        btn.textContent = 'Applied'
+        statusEl.textContent = 'Developer mode enabled. Vault directories created.'
+      } else {
+        btn.textContent = 'Apply'
+        btn.disabled = false
+        statusEl.textContent = result.error || 'Failed to set up developer mode.'
+      }
+    }, {
+      errorEl: statusEl,
+      errorMsg: 'Failed to set up developer mode.',
+    })
   })
 })
 
@@ -2011,26 +2124,35 @@ window.ember.onInstallerUpdateAvailable((data) => {
   state.installerUpdateVersion = data.version
 })
 
-document.getElementById('btn-installer-update').addEventListener('click', async () => {
+document.getElementById('btn-installer-update').addEventListener('click', () => {
   const btn = document.getElementById('btn-installer-update')
   const text = document.getElementById('installer-update-text')
 
-  btn.disabled = true
-  btn.textContent = 'Downloading...'
+  guardClick(btn, async () => {
+    btn.disabled = true
+    btn.textContent = 'Downloading...'
 
-  window.ember.onInstallerDownloadProgress((data) => {
-    btn.textContent = `Downloading ${data.percent}%`
+    window.ember.onInstallerDownloadProgress((data) => {
+      btn.textContent = `Downloading ${data.percent}%`
+    })
+
+    window.ember.onInstallerUpdateDownloaded(() => {
+      text.textContent = 'Update downloaded. Restarting...'
+      btn.textContent = 'Restarting...'
+      setTimeout(() => {
+        window.ember.installInstallerUpdate()
+      }, 1000)
+    })
+
+    await window.ember.downloadInstallerUpdate()
+  }, {
+    errorEl: text,
+    errorMsg: 'Download failed — please try again.',
+    onError: () => {
+      window.ember.removeAllListeners('installer-download-progress')
+      window.ember.removeAllListeners('installer-update-downloaded')
+    },
   })
-
-  window.ember.onInstallerUpdateDownloaded(() => {
-    text.textContent = 'Update downloaded. Restarting...'
-    btn.textContent = 'Restarting...'
-    setTimeout(() => {
-      window.ember.installInstallerUpdate()
-    }, 1000)
-  })
-
-  await window.ember.downloadInstallerUpdate()
 })
 
 document.getElementById('btn-skip-update').addEventListener('click', () => {
@@ -2053,80 +2175,87 @@ document.getElementById('btn-view-updates').addEventListener('click', () => {
 let pendingUpdates = null
 let cachedBootUpdates = null
 
-document.getElementById('btn-run-update-all').addEventListener('click', async () => {
+document.getElementById('btn-run-update-all').addEventListener('click', () => {
   if (!pendingUpdates) return
   const btn = document.getElementById('btn-run-update-all')
-  btn.disabled = true
-  btn.textContent = 'Updating...'
-
   const logBox = document.getElementById('update-all-log')
-  logBox.classList.remove('hidden')
-  logBox.textContent = ''
 
-  // Animate the row icons in response to stage markers in the log stream.
-  let currentStage = null
-  const advanceTo = (stage) => {
-    if (currentStage === stage) return
-    if (currentStage) markUpdateRowDone(currentStage)
-    currentStage = stage
-    markUpdateRowInProgress(stage)
-  }
+  guardClick(btn, async () => {
+    btn.disabled = true
+    btn.textContent = 'Updating...'
 
-  window.ember.onUpdateAllLog((text) => {
-    logBox.textContent += text
-    logBox.scrollTop = logBox.scrollHeight
-    if (/Updating Ember backend/i.test(text)) advanceTo('backend')
-    else if (/Updating Ember UI|Updating UI|Building UI/i.test(text)) advanceTo('ui')
-    else if (/Downloading installer update|Installing installer/i.test(text)) advanceTo('installer')
-  })
+    logBox.classList.remove('hidden')
+    logBox.textContent = ''
 
-  const result = await window.ember.runAllUpdates(pendingUpdates, state.host)
-  window.ember.removeAllListeners('update-all-log')
-
-  if (result.ok) {
-    // Finish the currently in-progress row, and mark any visible rows the
-    // log markers never touched as done too (defensive — some stages don't
-    // emit a distinctive marker).
-    if (currentStage) markUpdateRowDone(currentStage)
-    for (const r of ['backend', 'ui', 'installer']) {
-      const row = document.getElementById(`update-row-${r}`)
-      if (row && !row.classList.contains('hidden') && !row.classList.contains('done')) {
-        markUpdateRowDone(r)
-      }
+    // Animate the row icons in response to stage markers in the log stream.
+    let currentStage = null
+    const advanceTo = (stage) => {
+      if (currentStage === stage) return
+      if (currentStage) markUpdateRowDone(currentStage)
+      currentStage = stage
+      markUpdateRowInProgress(stage)
     }
 
-    const summary = celebrationSummary()
-    await showCelebration({ version: summary.version, bullet: summary.bullet, durationMs: 8000 })
+    window.ember.onUpdateAllLog((text) => {
+      logBox.textContent += text
+      logBox.scrollTop = logBox.scrollHeight
+      if (/Updating Ember backend/i.test(text)) advanceTo('backend')
+      else if (/Updating Ember UI|Updating UI|Building UI/i.test(text)) advanceTo('ui')
+      else if (/Downloading installer update|Installing installer/i.test(text)) advanceTo('installer')
+    })
 
-    if (result.needsInstallerUpdate) {
-      logBox.textContent += '\nBackend and UI updated. Downloading installer update...\n'
-      btn.textContent = 'Restarting...'
-      const downloadTimeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('timeout')), 30000)
-      )
-      try {
-        await Promise.race([
-          window.ember.downloadInstallerUpdate(),
-          downloadTimeout,
-        ])
-        // electron-updater will quit-and-install when download completes
-      } catch {
-        logBox.textContent += '\nInstaller download timed out. Backend and UI are updated — skipping installer update.\n'
+    const result = await window.ember.runAllUpdates(pendingUpdates, state.host)
+    window.ember.removeAllListeners('update-all-log')
+
+    if (result.ok) {
+      // Finish the currently in-progress row, and mark any visible rows the
+      // log markers never touched as done too (defensive — some stages don't
+      // emit a distinctive marker).
+      if (currentStage) markUpdateRowDone(currentStage)
+      for (const r of ['backend', 'ui', 'installer']) {
+        const row = document.getElementById(`update-row-${r}`)
+        if (row && !row.classList.contains('hidden') && !row.classList.contains('done')) {
+          markUpdateRowDone(r)
+        }
+      }
+
+      const summary = celebrationSummary()
+      await showCelebration({ version: summary.version, bullet: summary.bullet, durationMs: 8000 })
+
+      if (result.needsInstallerUpdate) {
+        logBox.textContent += '\nBackend and UI updated. Downloading installer update...\n'
+        btn.textContent = 'Restarting...'
+        const downloadTimeout = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), 30000)
+        )
+        try {
+          await Promise.race([
+            window.ember.downloadInstallerUpdate(),
+            downloadTimeout,
+          ])
+          // electron-updater will quit-and-install when download completes
+        } catch {
+          logBox.textContent += '\nInstaller download timed out. Backend and UI are updated — skipping installer update.\n'
+          btn.textContent = 'Done'
+          showScreen('screen-done')
+          loadEmberVersion()
+        }
+      } else {
+        logBox.textContent += '\nAll updates applied. Starting Ember...\n'
         btn.textContent = 'Done'
         showScreen('screen-done')
         loadEmberVersion()
       }
     } else {
-      logBox.textContent += '\nAll updates applied. Starting Ember...\n'
-      btn.textContent = 'Done'
-      showScreen('screen-done')
-      loadEmberVersion()
+      logBox.textContent += `\nUpdate failed at stage: ${result.stage || 'unknown'}\n`
+      btn.textContent = 'Failed'
+      btn.disabled = false
     }
-  } else {
-    logBox.textContent += `\nUpdate failed at stage: ${result.stage || 'unknown'}\n`
-    btn.textContent = 'Failed'
-    btn.disabled = false
-  }
+  }, {
+    errorEl: logBox,
+    errorMsg: 'Update failed — please try again.',
+    onError: () => window.ember.removeAllListeners('update-all-log'),
+  })
 })
 
 document.getElementById('btn-check-installer-update').addEventListener('click', async () => {
@@ -2170,17 +2299,23 @@ async function init() {
   if (emberPath) state.emberPath = emberPath
 
   if (emberPath) {
-    const updates = await window.ember.checkAllUpdates(state.host)
+    // Boot-time update check is best-effort: a rejection here must never keep
+    // the installer from rendering the Welcome screen (see issue #12).
+    try {
+      const updates = await window.ember.checkAllUpdates(state.host)
 
-    if (updates.reachable) {
-      const anyUpdate = updates.installer.hasUpdate || updates.backend.hasUpdate || updates.ui.hasUpdate
+      if (updates.reachable) {
+        const anyUpdate = updates.installer.hasUpdate || updates.backend.hasUpdate || updates.ui.hasUpdate
 
-      if (anyUpdate) {
-        // Stash update info — don't auto-navigate to the update screen.
-        // Instead show a subtle banner on Welcome and let the user decide.
-        cachedBootUpdates = updates
-        document.getElementById('update-available-banner').classList.remove('hidden')
+        if (anyUpdate) {
+          // Stash update info — don't auto-navigate to the update screen.
+          // Instead show a subtle banner on Welcome and let the user decide.
+          cachedBootUpdates = updates
+          document.getElementById('update-available-banner').classList.remove('hidden')
+        }
       }
+    } catch {
+      // Leave the banner hidden and fall through to the normal Welcome flow.
     }
   }
 
