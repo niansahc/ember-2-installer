@@ -20,9 +20,12 @@ starting, because the right answer differs by category:
 - Main-process orchestration (the `run()` helper, the unified update path, the `shell:true` audit
   -- issues #7, #8, #11, #13) is the actual gap. This is the logic that warrants real coverage, so
   it gets a layered approach: unit-test the infrastructure helpers directly (run a real harmless
-  command, assert the result and timeout; pass metacharacter-bearing args as an array and assert
-  they arrive literally), extract pure decision-logic into `src/lib/`, and add targeted `--real`
-  integration tests for the hermetic paths.
+  command, assert the result and timeout), extract pure decision-logic into `src/lib/`, and add
+  targeted `--real` integration tests for the hermetic paths. Note: `run()` keeps `shell:true` for
+  parity when it lands (#7), so its args are shell-interpreted, not literal. The "pass
+  metacharacter-bearing args as an array and assert they arrive literally" assertion therefore
+  belongs with the `shell:true` audit (#11) — which flips specific sites to `shell:false` — and is
+  not a #7 deliverable.
 
 - pip, docker, ollama, and similar external-dependency handlers are deliberately left demo-only.
   A `--real` test of these is slow, network-dependent, and requires toolchain or daemon state

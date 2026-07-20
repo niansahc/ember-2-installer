@@ -24,7 +24,7 @@ Key optimizations and features:
 
 ## Current State
 
-v0.8.1. 107 Playwright tests passing. Builds and ships the Windows NSIS installer (primary, verified). Mac DMG and Linux AppImage targets are configured but not yet built or verified on real hardware.
+v0.8.1. 108 e2e + 11 integration Playwright tests passing. Builds and ships the Windows NSIS installer (primary, verified). Mac DMG and Linux AppImage targets are configured but not yet built or verified on real hardware.
 
 ---
 
