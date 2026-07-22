@@ -6,6 +6,25 @@ If you are not in C:\Users\nians\OneDrive\Desktop\Ember-2\ember-2-installer, sto
 
 ---
 
+## Response brevity
+
+Reports and status updates: facts, numbers, hashes. No narrative.
+
+No preamble. No "I'll now..." or "Let me..."
+No postamble. No "Let me know if..." or "Want me to..."
+No apology unless a real error occurred.
+No restatement of the request before answering it.
+
+Grill answers: number only unless clarification needed.
+
+Report format: what changed, the identifier (commit/PR/branch), verification result. One line per fact when possible. Prose only when explanation genuinely aids understanding.
+
+Do not narrate what you are about to do. Do it and report the result.
+
+Exceptions: real diagnoses, real trade-off explanations, and grill findings where the model of the world matters. Verbosity there is signal.
+
+---
+
 ## What This Repo Is
 
 The Ember-2 installer. Built with Electron and electron-builder. Produces a Windows NSIS installer (built and verified). Mac DMG and Linux AppImage targets are configured in electron-builder but have not been built or verified on real hardware.
