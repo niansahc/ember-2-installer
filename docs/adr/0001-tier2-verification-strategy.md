@@ -60,3 +60,15 @@ behind the injectable-clone-URL seam.
     flaky, and hostile to Windows runners.
   - demo-only everything: cheapest, but the shipped orchestration keeps ~0% real coverage and
     orchestration bugs ship unverified -- the exact gap the review flagged.
+
+## Update (2026-07-22)
+
+Progress since acceptance (Context above is preserved as written at decision time):
+
+- The `test:integration` script and hermetic CI job (`.github/workflows/integration.yml`) exist and
+  run on PR and push, gated behind the injectable-clone-URL seam (`src/exec/clone.js`).
+- #7 (the spawn `run()` consolidation) shipped on main via PR #26 (commit `999392b`): all 59
+  hand-rolled spawn wrappers now route through `src/exec/run.js`, covered by `run.spec.cjs` and
+  `git-ops.spec.cjs` in the integration lane. The "metacharacter args arrive literally" assertion
+  remains a #11 deliverable, since `run()` keeps `shell:true`.
+- Still open: #8, #11, #13.
