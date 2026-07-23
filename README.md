@@ -23,15 +23,16 @@ The Electron-based installer and setup wizard for [Ember-2](https://github.com/n
 |----------|--------|--------|
 | Windows | NSIS installer | Fully tested |
 | Mac | DMG | Best-effort (not tested on real hardware) |
-| Linux | AppImage | Best-effort (not tested on real hardware) |
+| Linux | AppImage | CI-built (AppImage + demo e2e on Linux); not verified on real hardware |
 
 ## Development
 
 ```bash
-npm start          # Dev mode (demo — no real infrastructure)
-npm run start:real # Dev mode with real infrastructure
-npm run test:e2e   # Run Playwright e2e tests (73 tests)
-npm run build      # Build installer
+npm start                # Dev mode (demo — no real infrastructure)
+npm run start:real       # Dev mode with real infrastructure
+npm run test:e2e         # Run Playwright e2e tests (108 tests)
+npm run test:integration # Hermetic integration tests (11 tests)
+npm run build            # Build installer
 ```
 
 ## The full project
