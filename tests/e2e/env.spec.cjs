@@ -11,7 +11,7 @@ const base = {
   vault: 'C:\\EmberVault',
   host: '127.0.0.1',
   model: 'qwen3:8b',
-  vision: 'llama3.2-vision:11b',
+  vision: 'qwen3-vl:8b',
   platform: 'win32',
 }
 
@@ -30,8 +30,8 @@ test.describe('buildEnvFile', () => {
   })
 
   test('writes the vision model line when vision is set', () => {
-    const env = buildEnvFile({ ...base, vision: 'llama3.2-vision:11b' })
-    expect(env).toContain('EMBER_VISION_MODEL=llama3.2-vision:11b\n')
+    const env = buildEnvFile({ ...base, vision: 'qwen3-vl:8b' })
+    expect(env).toContain('EMBER_VISION_MODEL=qwen3-vl:8b\n')
   })
 
   test('comments out the vision line when vision is disabled', () => {

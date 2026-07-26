@@ -926,7 +926,7 @@ document.getElementById('btn-host-next').addEventListener('click', () => {
   }
 
   const modelSizes = { 'qwen3:4b': 2.5, 'qwen3:8b': 4.9, 'qwen3:14b': 9, 'qwen3:30b-a3b': 18 }
-  const visionSizes = { 'llama3.2-vision:11b': 6.4 }
+  const visionSizes = { 'qwen3-vl:8b': 6, 'qwen3-vl:2b': 2 }
 
   document.getElementById('summary-ember-path').textContent = state.emberPath || 'Not set'
   document.getElementById('summary-vault-path').textContent = state.vaultPath || 'Not set'
