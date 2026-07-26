@@ -1,20 +1,36 @@
-<!-- Release notes for v0.8.1 — rendered in the update screen panel. -->
+<!-- Release notes for v0.18.0 - rendered in the update screen panel. -->
 
-<p class="rn-p"><span class="rn-strong">TLDR:</span> v0.8.1 is about daily usability. Ember is more honest with you, smarter about when to reach for the web, and the things that were broken — the stop button, the mobile header, the installer updates, the reminder that vanished — are fixed.</p>
+<p class="rn-p"><span class="rn-strong">TLDR:</span> v0.18.0 puts Ember, the interface, and the installer on one version number. Ember stopped inventing links, stopped misreading how old her own records are, and holds up better in long conversations. The interface passed an accessibility audit. The installer runs on Linux.</p>
+
+<h2 class="rn-h2">One Version Number</h2>
+<div class="rn-li"><span class="rn-strong">Three pieces, one number:</span> Ember was at 0.17.1, the interface and installer at 0.8.1. All three are now 0.18.0 and move together from here. Nothing was skipped. The interface and installer numbers jumped to catch up.</div>
 
 <h2 class="rn-h2">Character and Behavior</h2>
-<div class="rn-li"><span class="rn-strong">Anti-sycophancy:</span> Ember doesn't cave now. She held positions before, but had a pattern of softening when pushed. That's been addressed in both the behavior rules and her character document. She'll update her view when you give her a good reason. Not because you pushed back.</div>
-<div class="rn-li"><span class="rn-strong">Register:</span> Ember was slipping into a therapeutic register on emotional topics — reframing, reflecting, gently redirecting. The coaching filter's been extended to catch more of those patterns before they reach you.</div>
+<div class="rn-li"><span class="rn-strong">No more invented links:</span> Asked about something she had thin records for, Ember would sometimes produce a plausible-looking URL that led nowhere. Any link not backed by a real source is now stripped and shown as "[unverified link]".</div>
+<div class="rn-li"><span class="rn-strong">Less coaching register:</span> The filter catching "let's work through this" and endless follow-up questions got broader, and now checks intent before firing so it stops rewriting answers that were already fine.</div>
+
+<h2 class="rn-h2">Memory and Retrieval</h2>
+<div class="rn-li"><span class="rn-strong">Recent conversations are findable again:</span> Ember was reading from an index that had not refreshed since April, so recent conversations could be invisible to search. That index is retired; everything reads from the live store.</div>
+<div class="rn-li"><span class="rn-strong">Correct record ages:</span> She no longer reports something written minutes ago as being from hundreds of days back.</div>
+<div class="rn-li"><span class="rn-strong">Long conversations hold up:</span> Conversations that outgrow the model's context window trim the oldest material in stages instead of failing the turn. Resolved items stop resurfacing, and starting a new conversation clears the previous one's working memory.</div>
 
 <h2 class="rn-h2">Web Search</h2>
-<div class="rn-li"><span class="rn-strong">Ask-first classifier:</span> Ember now routes queries through a three-stage intent classifier before deciding whether to search. She asks when there's real uncertainty, searches autonomously when the intent is clear.</div>
+<div class="rn-li"><span class="rn-strong">Freshness ranking:</span> Results carry a publication date signal, so recent sources rank above stale ones.</div>
+<div class="rn-li"><span class="rn-strong">Fewer wrong triggers:</span> Thinking-out-loud phrases like "that's what I'm trying to figure out" no longer read as a search request, and image turns no longer trigger a search.</div>
 
-<h2 class="rn-h2">Tasks and Reminders</h2>
-<div class="rn-li"><span class="rn-strong">Time-qualified reminders work:</span> "Remind me at 5pm to stop working" now creates the task. The previous bug broke silently on any phrase between "remind me" and "to." Fixed.</div>
+<h2 class="rn-h2">Interface</h2>
+<div class="rn-li"><span class="rn-strong">Accessibility:</span> WCAG 2.1 AA pass, 12 fixes across contrast, focus, labelling, and keyboard navigation, with an automated check that runs on every change.</div>
+<div class="rn-li"><span class="rn-strong">Review is visible:</span> A breathing dot appears while Ember reviews a draft, so a pause reads as work rather than a hang.</div>
+<div class="rn-li"><span class="rn-strong">Correct source badges:</span> Vault answers no longer get labelled as though they came from the web.</div>
+<div class="rn-li"><span class="rn-strong">Smaller fixes:</span> Assigning a conversation to a project retries once instead of silently dropping, and the service status panel closes when you click away.</div>
 
-<h2 class="rn-h2">Mobile</h2>
-<div class="rn-li"><span class="rn-strong">Header collapse:</span> The header fits on a single row at 360px. Vault badge, model name, and feature icons hide at mobile width. Bare mode, vault toggle, and export move into a ⋯ overflow menu. Desktop is unchanged.</div>
+<h2 class="rn-h2">Installer</h2>
+<div class="rn-li"><span class="rn-strong">Linux support:</span> Build configuration, CI, and platform-gated install paths, with startup task, Docker, reboot, and self-update handling hardened for Linux.</div>
+<div class="rn-li"><span class="rn-strong">Update checks compare numbers:</span> Version comparison was string-based, which breaks once numbers reach two digits. Exactly the jump this release makes.</div>
+<div class="rn-li"><span class="rn-strong">These notes render again:</span> The release notes file was not being bundled into the build, so this panel came up empty.</div>
+<div class="rn-li"><span class="rn-strong">Current model lineup:</span> A fresh install now offers the qwen3 family rather than the older curated set.</div>
+<div class="rn-li"><span class="rn-strong">Security and logs:</span> Values rendered into the installer window are inserted as text, not markup. Duplicate install log lines are fixed, and a button whose background work fails no longer leaves an unhandled error.</div>
 
-<h2 class="rn-h2">Controls and Updates</h2>
-<div class="rn-li"><span class="rn-strong">Shut Down Ember works:</span> The button now calls a real endpoint and cleanly stops the API. Previous behavior: 404, swallowed silently, nothing happened.</div>
-<div class="rn-li"><span class="rn-strong">Installer updates everything:</span> The update flow now pulls all three repos. Previously only the backend updated and the UI stayed behind. Also fixed: dirty package-lock.json was silently aborting UI pulls.</div>
+<h2 class="rn-h2">Known Issues</h2>
+<div class="rn-li"><span class="rn-strong">Tone on emotional topics:</span> At qwen3:8b scale, register still drifts below target on emotional queries. The coaching filter reduces it but does not eliminate it. A larger model handles it better.</div>
+<div class="rn-li"><span class="rn-strong">No confidence signal on recall:</span> Vault-retrieved content is presented with uniform confidence regardless of how well it matched or how old it is.</div>
