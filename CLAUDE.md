@@ -155,8 +155,7 @@ Release-please PRs (title format: "chore(main): release X.Y.Z") must NEVER have 
 
 - Mac and Linux install flows are not tested on real hardware — Windows is the only fully validated platform.
 - Clean install testing on a fresh machine is a known gap due to hardware constraints.
-- **Linux Build fails on every push to `main`** — `build:linux` has no `--publish` flag, so electron-builder's CI implicit publish fires and aborts on a missing `GH_TOKEN`. The AppImage itself builds fine. PR runs pass because electron-builder skips publish on `pull_request` events. Fix: add `--publish never` to `build:linux`. Details in `docs/RELEASE_WORKFLOW.md`.
-- **Flaky Linux e2e** — `edge-cases.spec.cjs` "rapid double-click on Next does not skip screens" intermittently fails on Linux CI (stays on `screen-welcome`); the synchronous `evaluate()` clicks can land before the renderer binds handlers. Must be fixed or skip-with-condition before 0.18.0 ships. Details in `docs/RELEASE_WORKFLOW.md`.
+- `build`, `build:win`, and `build:mac` carry no `--publish` flag. Harmless today (developer-local only, CI never calls them), but wiring any into a CI job without `--dir` or `--publish never` will fail on a missing `GH_TOKEN` — see the Linux CI section of `docs/RELEASE_WORKFLOW.md`.
 
 ---
 
