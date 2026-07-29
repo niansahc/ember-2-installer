@@ -59,6 +59,58 @@ not notarized (Gatekeeper-blocked; right-click-open to run). Code signing is tra
 Both run the demo-mode suite only; real system integrations (docker, systemctl, package managers)
 remain best-effort and untested on hardware.
 
+### Known CI failures (open as of 2026-07-29)
+
+Two separate defects, both in `linux-build.yml`. Windows and Integration are green.
+
+**1. Linux Build fails on every push to `main` — implicit publish, no token.**
+
+`npm run build:linux` runs `electron-builder --linux` with no `--publish` flag. electron-builder
+detects CI and triggers implicit publishing, then aborts:
+
+```
+⨯ GitHub Personal Access Token is not set, neither programmatically, nor using env "GH_TOKEN"
+```
+
+The AppImage builds successfully first — packaging is fine, only the publish attempt fails. The job
+exits 1 at the build step, so the e2e suite never runs on those pushes.
+
+electron-builder skips implicit publish on `pull_request` events, which is why the same commit
+passes on a PR and fails once merged. Every `push`-event Linux run has failed this way; the last
+green `push` run predates the workflow.
+
+Windows is unaffected because `windows-build.yml` builds with `--dir` (no packaging, so no publish
+step).
+
+Fix: add `--publish never` to the `build:linux` script in `package.json`. Verification builds should
+never publish — `release.yml` is the only workflow that legitimately publishes, and it passes
+`--publish always` with `GH_TOKEN` set.
+
+**2. `edge-cases.spec.cjs` "rapid double-click on Next does not skip screens" is flaky on Linux.**
+
+Failed on the PR run for #28 (107 passed, 1 failed); passed on the next PR run with no relevant code
+change. Not reproduced on Windows.
+
+```
+Expected: "screen-prereqs"
+Received: "screen-welcome"
+```
+
+The app never left the welcome screen. The test calls `window.evaluate()` to fire two synchronous
+`btn.click()` calls immediately after `launchApp()`, without first waiting for the button to be
+actionable. On a slower Linux runner the clicks land before the renderer binds its click handlers,
+so both are no-ops and the assertion polls a screen that will never change. `toHaveAttribute` retries
+for 5s, which cannot help once the clicks are already lost.
+
+Note that the handlers in question are the `guardClick` wrappers added in `c0aaecc`; whether that
+commit widened the binding window is unconfirmed.
+
+Fix: await an actionability check on `button[data-next="screen-prereqs"]` before the `evaluate()`,
+so the double-click races handler binding no more than the real UI does.
+
+Per the testing discipline in CLAUDE.md, this must be fixed or marked skip-with-condition before
+0.18.0 ships.
+
 ## Manual Release (fallback)
 
 If you must release by hand:
