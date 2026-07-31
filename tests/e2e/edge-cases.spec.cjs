@@ -34,6 +34,15 @@ test.describe('Edge Cases', () => {
   })
 
   test('rapid double-click on Next does not skip screens', async () => {
+    // launchApp only waits for domcontentloaded, which can resolve while app.js
+    // (a classic script at the end of <body>) has not run yet. The button is
+    // parsed and clickable at that point but has no click handler bound, so both
+    // synchronous clicks below would be swallowed and the app would sit on
+    // welcome. Waiting for load — and for a symbol app.js defines — guarantees
+    // the [data-next] handlers exist before we race them.
+    await window.waitForLoadState('load')
+    await window.waitForFunction(() => typeof window.showScreen === 'function')
+
     // Use evaluate to click twice synchronously before any screen transition
     await window.evaluate(() => {
       const btn = document.querySelector('button[data-next="screen-prereqs"]')

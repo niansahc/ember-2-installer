@@ -59,6 +59,74 @@ not notarized (Gatekeeper-blocked; right-click-open to run). Code signing is tra
 Both run the demo-mode suite only; real system integrations (docker, systemctl, package managers)
 remain best-effort and untested on hardware.
 
+### Linux CI defects (fixed 2026-07-29 — kept for context)
+
+Two separate defects, both surfacing through `linux-build.yml`. Both are fixed; the reasoning is
+recorded here because the first will recur if a packaging build is ever added to a verification
+workflow.
+
+**1. Linux Build failed on every push to `main` — implicit publish, no token.**
+
+`npm run build:linux` ran `electron-builder --linux` with no `--publish` flag. electron-builder
+detects CI and triggers implicit publishing, then aborts:
+
+```
+⨯ GitHub Personal Access Token is not set, neither programmatically, nor using env "GH_TOKEN"
+```
+
+The AppImage builds successfully first — packaging is fine, only the publish attempt fails. The job
+exits 1 at the build step, so the e2e suite never runs on those pushes.
+
+electron-builder skips implicit publish on `pull_request` events, which is why the same commit
+passes on a PR and fails once merged. Every `push`-event Linux run has failed this way; the last
+green `push` run predates the workflow.
+
+Windows was unaffected because `windows-build.yml` builds with `--dir` (no packaging, so no publish
+step).
+
+**Fixed** by adding `--publish never` to `build:linux`. Verification builds must never publish.
+`release.yml` is the only workflow that legitimately publishes, and it invokes `npx electron-builder
+--<platform> --publish always` directly with `GH_TOKEN` set — it does not go through the npm
+scripts, so the change does not affect releases.
+
+`build`, `build:win`, and `build:mac` still carry no `--publish` flag. They are developer-local
+scripts today and CI never calls them, so they are not currently a problem — but wiring any of them
+into a CI job without `--dir` or `--publish never` reproduces this failure exactly.
+
+**2. `edge-cases.spec.cjs` "rapid double-click on Next does not skip screens" was flaky on Linux.**
+
+Failed on the PR run for #28 (107 passed, 1 failed); passed on the next PR run with no relevant code
+change. Not reproduced on Windows.
+
+```
+Expected: "screen-prereqs"
+Received: "screen-welcome"
+```
+
+The app never left the welcome screen — both clicks were swallowed. The test fires two synchronous
+`btn.click()` calls via `window.evaluate()` immediately after `launchApp()`, and `launchApp` waits
+only for `domcontentloaded`. The `[data-next]` handlers are bound by a plain `addEventListener` loop
+in `src/renderer/app.js` (~line 75), inside a classic `<script>` at the end of `<body>`. If the
+clicks land before that script executes, the button is parsed and clickable but inert, and the
+assertion then polls a screen that will never change. `toHaveAttribute` retries for 5s, which cannot
+recover an already-lost click.
+
+The precise reason `domcontentloaded` was insufficient is unconfirmed — the likely mechanism is
+`firstWindow()` resolving against the initial blank document, so the load-state wait returns before
+the real page navigation. The applied fix does not depend on which mechanism it is.
+
+**Fixed** in `tests/e2e/edge-cases.spec.cjs`: wait for `load`, then `waitForFunction` on a symbol
+`app.js` defines (`window.showScreen`), before the `evaluate()`. That polls the live document, so it
+holds regardless of which document the initial load-state wait saw. Verified with `--repeat-each=5`
+(70 passed) plus the full suite (108 passed) and integration (11 passed) on Windows.
+
+Correction to an earlier note in this file's history: the handlers involved are *not* the `guardClick`
+wrappers from `c0aaecc`. `[data-next]` navigation uses an unwrapped listener; `guardClick` was not a
+factor.
+
+Per the testing discipline in CLAUDE.md, this must be fixed or marked skip-with-condition before
+0.18.0 ships.
+
 ## Manual Release (fallback)
 
 If you must release by hand:

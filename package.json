@@ -14,7 +14,7 @@
     "test:e2e:ui": "playwright test --ui",
     "test:integration": "playwright test --config playwright.integration.config.cjs",
     "build:mac": "electron-builder --mac",
-    "build:linux": "electron-builder --linux -c.directories.output=dist-linux"
+    "build:linux": "electron-builder --linux --publish never -c.directories.output=dist-linux"
   },
   "dependencies": {
     "electron-updater": "^6.1.0"

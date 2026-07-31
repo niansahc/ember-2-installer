@@ -43,7 +43,9 @@ Key optimizations and features:
 
 ## Current State
 
-v0.8.1. 108 e2e + 11 integration Playwright tests passing. Builds and ships the Windows NSIS installer (primary, verified). Mac DMG and Linux AppImage targets are configured but not yet built or verified on real hardware.
+Shipped release: v0.8.1. **0.18.0 is staged but not cut** — release-please PR #5 ("chore(main): release ember-2-installer 0.18.0") is open and holds the generated changelog and version bump; `package.json` is still 0.8.1. The version jump is deliberate: it aligns the installer with the ember-2 backend so all three repos share one number. Update-panel copy for 0.18.0 is already written (`release_notes.html`, commit `c1e9683`).
+
+108 e2e + 11 integration Playwright tests. Builds and ships the Windows NSIS installer (primary, verified). The Linux AppImage now builds in CI; Mac DMG is configured but not built or verified. Neither Mac nor Linux is verified on real hardware.
 
 ---
 
@@ -153,6 +155,7 @@ Release-please PRs (title format: "chore(main): release X.Y.Z") must NEVER have 
 
 - Mac and Linux install flows are not tested on real hardware — Windows is the only fully validated platform.
 - Clean install testing on a fresh machine is a known gap due to hardware constraints.
+- `build`, `build:win`, and `build:mac` carry no `--publish` flag. Harmless today (developer-local only, CI never calls them), but wiring any into a CI job without `--dir` or `--publish never` will fail on a missing `GH_TOKEN` — see the Linux CI section of `docs/RELEASE_WORKFLOW.md`.
 
 ---
 
