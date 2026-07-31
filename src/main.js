@@ -481,8 +481,16 @@ ipcMain.handle('get-recommended-models', async () => {
     { id: 'qwen3:30b-a3b', name: 'Qwen 3 30B MoE', desc: 'Needs 24 GB RAM. Faster per-token inference than qwen3:14b at comparable quality because only 3B parameters activate per token. Largest disk footprint. Not yet evaluated on Ember-specific prompts.', size: '~18 GB' },
   ]
 
+  // ember-2 issue #130: llama3.2-vision:11b uses the mllama architecture,
+  // which Ollama's engine dropped at v0.30.0 (llama.cpp never supported it
+  // upstream). It pulls and appears in `ollama list` but fails at load with
+  // "unknown model architecture: 'mllama'", so a wizard that offered it
+  // downloaded 6.4 GB for a vision feature that could never work. qwen3-vl
+  // is the current-engine equivalent and matches DEFAULT_VISION_MODEL in
+  // ember-2 src/llm/vision_service.py.
   const visionModels = [
-    { id: 'llama3.2-vision:11b', name: 'Llama 3.2 Vision 11B', desc: 'Can analyze images you share', size: '~6.4 GB', recommended: true },
+    { id: 'qwen3-vl:8b', name: 'Qwen3 VL 8B', desc: 'Can analyze images you share', size: '~6 GB', recommended: true },
+    { id: 'qwen3-vl:2b', name: 'Qwen3 VL 2B', desc: 'Smaller and faster. Lower accuracy on dense text and charts.', size: '~2 GB' },
   ]
 
   return {
@@ -1618,7 +1626,7 @@ if (DEMO_MODE) {
   ipcMain.handle('get-ollama-models', async () => [
     'qwen2.5:14b',
     'llama3.2:3b',
-    'llama3.2-vision:11b',
+    'qwen3-vl:8b',
     'mistral:7b',
     'nomic-embed-text:latest',
   ])
@@ -1948,9 +1956,10 @@ if (DEMO_MODE) {
       { id: 'qwen3:30b-a3b', name: 'Qwen 3 30B MoE', desc: 'Needs 24 GB RAM. Faster per-token inference than qwen3:14b at comparable quality because only 3B parameters activate per token. Largest disk footprint. Not yet evaluated on Ember-specific prompts.', size: '~18 GB', installed: false },
     ],
     vision: [
-      { id: 'llama3.2-vision:11b', name: 'Llama 3.2 Vision 11B', desc: 'Can analyze images you share', size: '~6.4 GB', recommended: true, installed: true },
+      { id: 'qwen3-vl:8b', name: 'Qwen3 VL 8B', desc: 'Can analyze images you share', size: '~6 GB', recommended: true, installed: true },
+      { id: 'qwen3-vl:2b', name: 'Qwen3 VL 2B', desc: 'Smaller and faster. Lower accuracy on dense text and charts.', size: '~2 GB', installed: false },
     ],
-    installed: ['qwen3:8b', 'qwen3:14b', 'llama3.2-vision:11b'],
+    installed: ['qwen3:8b', 'qwen3:14b', 'qwen3-vl:8b'],
   }))
 
   // Test seam (issue #12): make selected channels reject on purpose. Registered
