@@ -58,7 +58,9 @@ Evaluated 2026-05-15 against Ember's 18-question battery, with `claude-sonnet-4-
 
 ## Vision
 
-`llama3.2-vision:11b` remains the recommended vision model. `llava:13b` was removed from the curated list on the same curate-don't-menu logic — users who actively use it can pull it manually.
+`qwen3-vl:8b` is the recommended vision model, with `qwen3-vl:2b` offered as a smaller opt-in. `llava:13b` was removed from the curated list on the same curate-don't-menu logic — users who actively use it can pull it manually.
+
+**`qwen3-vl:8b` replaces `llama3.2-vision:11b` (ember-2 issue #130):** Llama 3.2 Vision uses the `mllama` architecture, which Ollama's engine dropped at v0.30.0; llama.cpp never supported it upstream and there is no sign that will change. The model still pulls and still appears in `ollama list`, because both only read the manifest, but loading it fails with `unknown model architecture: 'mllama'`. The wizard was therefore downloading 6.4 GB for a vision feature that could not work on any Ollama a new user would install. Verified on ollama 0.32.1: `llama3.2-vision:11b` fails to load, `qwen3-vl` (architecture `qwen3vl`) loads and responds. This is an availability fix, not a quality comparison; the two have not been evaluated head to head on Ember prompts.
 
 ## Re-evaluation cadence
 
