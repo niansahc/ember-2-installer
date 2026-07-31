@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.18.0](https://github.com/niansahc/ember-2-installer/compare/v0.8.1...v0.18.0) (2026-07-31)
+
+
+### Features
+
+* **exec:** add run() spawn engine with hermetic tests ([#7](https://github.com/niansahc/ember-2-installer/issues/7)) ([f340b44](https://github.com/niansahc/ember-2-installer/commit/f340b4409f6902dc45c179410fcb3522a6ed209f))
+* **linux:** build config, CI, and platform-gated install paths for Linux ([1f1b0bc](https://github.com/niansahc/ember-2-installer/commit/1f1b0bcbf4af2f54c4c414e7d37a286a6c7b1ca1))
+* **linux:** harden startup task, Docker, reboot, and self-update paths ([900f71e](https://github.com/niansahc/ember-2-installer/commit/900f71e78aa5e9694091aee0aae05ca233153985))
+* **model-selection:** refresh curated chat lineup to qwen3 family ([c0b8ff4](https://github.com/niansahc/ember-2-installer/commit/c0b8ff4bee839fcdd73e6b615e5075c8f093e15e))
+* qwen3 model lineup, v0.17 release notes, version reconciliation ([8e73ded](https://github.com/niansahc/ember-2-installer/commit/8e73dedfd62631d0413f41f51667cf5099b020c8))
+
+
+### Bug Fixes
+
+* **build:** bundle release_notes.html so the update panel renders ([9bdebb6](https://github.com/niansahc/ember-2-installer/commit/9bdebb6079f7d705712a3e62cbd4643583747d9c))
+* **ci:** stop implicit publish on Linux build and de-flake edge-case test ([fdf42fc](https://github.com/niansahc/ember-2-installer/commit/fdf42fc627b251f7b0c57d4dbb50fa4e6dc12cb6))
+* **ci:** stop implicit publish on Linux build and de-flake edge-case test ([daab67b](https://github.com/niansahc/ember-2-installer/commit/daab67be6dfcd8c2e25a8eb650b1c9949bb23224))
+* **installer:** bind install-log listener idempotently to stop duplicate logs ([9275c63](https://github.com/niansahc/ember-2-installer/commit/9275c63a92a14faa4c9b95ae100c5bfb6e093c2a))
+* **models:** replace llama3.2-vision:11b with qwen3-vl in curated vision lineup ([5a97554](https://github.com/niansahc/ember-2-installer/commit/5a97554cae71ecb84870cc3a8ff57e1bda039fee))
+* **models:** replace llama3.2-vision:11b with qwen3-vl in curated vision lineup ([0695903](https://github.com/niansahc/ember-2-installer/commit/0695903d3539f35ac659bed1ce10d2be81f0cda1))
+* **renderer:** guard async click handlers against IPC rejections ([c0aaecc](https://github.com/niansahc/ember-2-installer/commit/c0aaecc4ae7c9a4be15c0e3ed86d8ac70e27ac33)), closes [#12](https://github.com/niansahc/ember-2-installer/issues/12)
+* **renderer:** guard async click handlers against IPC rejections (closes [#12](https://github.com/niansahc/ember-2-installer/issues/12)) ([98a76af](https://github.com/niansahc/ember-2-installer/commit/98a76af7f5687b82c2268f5c28e48c4fd0fa74e0))
+* **security:** render dynamic renderer values as text, not markup ([07eca48](https://github.com/niansahc/ember-2-installer/commit/07eca4878145f635bad396fcd53a8e91c04febb9))
+* **update:** compare versions numerically instead of by string inequality ([a18f55e](https://github.com/niansahc/ember-2-installer/commit/a18f55e6206486d3b414ae813690ba082077b707))
+* **version:** parse component-prefixed release tags ([5aadefb](https://github.com/niansahc/ember-2-installer/commit/5aadefb9472de7d6df1882468524d38becc94045))
+* **version:** parse component-prefixed release tags, cut bare tags going forward ([2045148](https://github.com/niansahc/ember-2-installer/commit/2045148b70f58d9c02847908b78a07f294553d36))
+
+
+### Miscellaneous Chores
+
+* release 0.18.0 ([df7cbd0](https://github.com/niansahc/ember-2-installer/commit/df7cbd0227be0437a95934b84f408d21ba873189))
+
 ## [0.8.1](https://github.com/niansahc/ember-2-installer/compare/ember-2-installer-v0.8.0...ember-2-installer-v0.8.1) (2026-04-30)
 
 
