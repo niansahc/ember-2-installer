@@ -13,15 +13,21 @@
 // optional "<component>-" prefix and an optional leading "v". Anything that
 // doesn't parse is treated as incomparable.
 
-// Parse a version string into [major, minor, patch], or null if it doesn't match.
+// One regex serves both readers below, so the display path and the comparison
+// path can't drift apart — a tag that compares correctly also renders correctly.
+// Group 1 is the version with any tag prefix removed; groups 2-4 are the
+// numeric components.
 //
 // The component prefix has to be matched explicitly rather than skipped past:
 // the repo names contain digits ("ember-2-ui"), so any rule that hunts for the
 // first digit lands on the wrong one and yields "2-ui-v0.8.1".
+const TAG = /^(?:[A-Za-z][\w.-]*-)?v?((\d+)\.(\d+)\.(\d+).*)$/
+
+// Parse a version string into [major, minor, patch], or null if it doesn't match.
 function parse(v) {
   if (typeof v !== 'string') return null
-  const m = v.trim().match(/^(?:[A-Za-z][\w.-]*-)?v?(\d+)\.(\d+)\.(\d+)/)
-  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null
+  const m = v.trim().match(TAG)
+  return m ? [Number(m[2]), Number(m[3]), Number(m[4])] : null
 }
 
 // Returns -1 if a < b, 0 if equal, 1 if a > b, or null if either is unparseable.
@@ -43,4 +49,15 @@ function isNewer(latest, installed) {
   return compareVersions(latest, installed) === 1
 }
 
-module.exports = { compareVersions, isNewer }
+// Strip the tag decoration for display: "ember-2-installer-v0.18.0" and
+// "v0.18.0" both render as "0.18.0". Any trailing detail is kept, so a
+// prerelease tag still shows its marker. Anything that doesn't match comes back
+// untouched — an unexpected tag should still show something rather than blank
+// the row it was headed for.
+function displayVersion(v) {
+  if (typeof v !== 'string') return v
+  const m = v.trim().match(TAG)
+  return m ? m[1] : v
+}
+
+module.exports = { compareVersions, isNewer, displayVersion }

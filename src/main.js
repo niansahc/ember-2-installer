@@ -5,7 +5,7 @@ const { spawn, execSync } = require('child_process')
 const https = require('https')
 const http = require('http')
 const os = require('os')
-const { isNewer } = require('./lib/version')
+const { isNewer, displayVersion } = require('./lib/version')
 const { releaseSummary } = require('./lib/notes')
 const { buildEnvFile } = require('./lib/env')
 const { uiSourceDir, uiTargetDir, uiIndexFile } = require('./lib/paths')
@@ -191,7 +191,7 @@ ipcMain.handle('check-ember-update', async () => {
   return {
     hasUpdate,
     installed: installed || 'unknown',
-    latest: latest.tag_name,
+    latest: displayVersion(latest.tag_name),
     changelog: latest.body || '',
     publishedAt: latest.published_at,
   }
@@ -800,7 +800,7 @@ ipcMain.handle('check-for-update', async () => {
   return {
     hasUpdate,
     installedTag: installed,
-    latestTag: latest.tag_name,
+    latestTag: displayVersion(latest.tag_name),
     changelog: latest.body || '',
     publishedAt: latest.published_at,
   }
@@ -865,7 +865,7 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
   ])
 
   const installerInstalled = app.getVersion()
-  const installerLatest = installerRelease?.tag_name?.replace(/^v/, '') || null
+  const installerLatest = displayVersion(installerRelease?.tag_name) || null
 
   // Backend version: prefer running API, fall back to version.json on disk.
   // If neither is available, we can't verify — flag as needing update.
@@ -890,7 +890,7 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
       uiInstalled = pkg.version || null
     } catch {}
   }
-  const uiLatest = uiRelease?.tag_name?.replace(/^v/, '') || null
+  const uiLatest = displayVersion(uiRelease?.tag_name) || null
 
   // Linux has no in-app installer self-update (AppImage self-replacement is
   // untested on hardware), so don't raise the auto-update banner there — its
