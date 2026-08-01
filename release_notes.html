@@ -1,36 +1,44 @@
 <!-- Release notes for v0.18.0 - rendered in the update screen panel. -->
+<!-- Approved text. Source of truth: ember-2/docs/releases/v0.18.0.md -->
 
-<p class="rn-p"><span class="rn-strong">TLDR:</span> v0.18.0 puts Ember, the interface, and the installer on one version number. Ember stopped inventing links, stopped misreading how old her own records are, and holds up better in long conversations. The interface passed an accessibility audit. The installer runs on Linux.</p>
+<p class="rn-p"><span class="rn-strong">TLDR:</span> Ember, the interface, and the installer now share one version number. Ember stopped inventing links, stopped misreading how old her records are, and holds up better in long conversations. The interface passed an accessibility audit. The installer runs on Linux.</p>
 
-<h2 class="rn-h2">One Version Number</h2>
-<div class="rn-li"><span class="rn-strong">Three pieces, one number:</span> Ember was at 0.17.1, the interface and installer at 0.8.1. All three are now 0.18.0 and move together from here. Nothing was skipped. The interface and installer numbers jumped to catch up.</div>
+<h2 class="rn-h2">One version number</h2>
+<div class="rn-li">Ember-2 is three pieces: the engine, the interface, and the installer. Each had its own version number, so "what version am I on" had three answers. Now they share one. The engine was at 0.17.1, the interface and installer at 0.8.1, and all three are now 0.18.0. Nothing was skipped, and from here they move together.</div>
 
-<h2 class="rn-h2">Character and Behavior</h2>
-<div class="rn-li"><span class="rn-strong">No more invented links:</span> Asked about something she had thin records for, Ember would sometimes produce a plausible-looking URL that led nowhere. Any link not backed by a real source is now stripped and shown as "[unverified link]".</div>
-<div class="rn-li"><span class="rn-strong">Less coaching register:</span> The filter catching "let's work through this" and endless follow-up questions got broader, and now checks intent before firing so it stops rewriting answers that were already fine.</div>
+<h2 class="rn-h2">Character and behavior</h2>
+<div class="rn-li">Ember stopped inventing links. Asked about something she had no solid records for, she would sometimes produce a plausible URL that went nowhere, usually a fake GitHub path. Links that aren't backed by a real source now come through as "[unverified link]".</div>
+<div class="rn-li">Coaching phrases like "let's work through this" and "give yourself permission" get caught more often now, along with endless follow-up questions. Short replies are left alone, so answers that were already fine stop getting rewritten.</div>
 
-<h2 class="rn-h2">Memory and Retrieval</h2>
-<div class="rn-li"><span class="rn-strong">Recent conversations are findable again:</span> Ember was reading from an index that had not refreshed since April, so recent conversations could be invisible to search. That index is retired; everything reads from the live store.</div>
-<div class="rn-li"><span class="rn-strong">Correct record ages:</span> She no longer reports something written minutes ago as being from hundreds of days back.</div>
-<div class="rn-li"><span class="rn-strong">Long conversations hold up:</span> Conversations that outgrow the model's context window trim the oldest material in stages instead of failing the turn. Resolved items stop resurfacing, and starting a new conversation clears the previous one's working memory.</div>
+<h2 class="rn-h2">Memory and retrieval</h2>
+<div class="rn-li">Recent conversations are findable again. Ember was reading a stale index that hadn't refreshed since April, so recent conversations could be invisible to search. That index is gone.</div>
+<div class="rn-li">Record ages are correct. She stopped reporting something written minutes ago as being from hundreds of days back.</div>
+<div class="rn-li">Long conversations hold up. Something you resolved in one turn stops resurfacing later. A conversation that outgrows the model's context window trims the oldest material instead of failing, and starting a new conversation clears the old one's working memory.</div>
 
-<h2 class="rn-h2">Web Search</h2>
-<div class="rn-li"><span class="rn-strong">Freshness ranking:</span> Results carry a publication date signal, so recent sources rank above stale ones.</div>
-<div class="rn-li"><span class="rn-strong">Fewer wrong triggers:</span> Thinking-out-loud phrases like "that's what I'm trying to figure out" no longer read as a search request, and image turns no longer trigger a search.</div>
+<h2 class="rn-h2">Web search</h2>
+<div class="rn-li">Recent sources rank above stale ones.</div>
+<div class="rn-li">Thinking out loud ("that's what I'm trying to figure out") no longer reads as a search request, and images don't trigger one at all.</div>
+<div class="rn-li">A one-word message gets a clarifying question instead of a guess.</div>
+
+<h2 class="rn-h2">Streaming and privacy</h2>
+<div class="rn-li">Streaming is steadier. Empty messages, blocked requests, and the onboarding flow don't come back blank anymore. "Searching" and "reviewing" signals reach the interface, and it displays them.</div>
+<div class="rn-li">Ordinary use writes less to disk. Verbose diagnostics sit behind a debug flag.</div>
 
 <h2 class="rn-h2">Interface</h2>
-<div class="rn-li"><span class="rn-strong">Accessibility:</span> WCAG 2.1 AA pass, 12 fixes across contrast, focus, labelling, and keyboard navigation, with an automated check that runs on every change.</div>
-<div class="rn-li"><span class="rn-strong">Review is visible:</span> A breathing dot appears while Ember reviews a draft, so a pause reads as work rather than a hang.</div>
-<div class="rn-li"><span class="rn-strong">Correct source badges:</span> Vault answers no longer get labelled as though they came from the web.</div>
-<div class="rn-li"><span class="rn-strong">Smaller fixes:</span> Assigning a conversation to a project retries once instead of silently dropping, and the service status panel closes when you click away.</div>
+<div class="rn-li">The interface meets WCAG 2.1 AA: 12 fixes across contrast, focus, labelling, and keyboard navigation, with an automated check on every change.</div>
+<div class="rn-li">A breathing dot appears while Ember is reviewing a draft, so a pause reads as work rather than a hang.</div>
+<div class="rn-li">Source badges are correct again. A vault answer no longer gets tagged as though it came from the web.</div>
+<div class="rn-li">Assigning a conversation to a project retries once before giving up, and the service status panel closes when you click away from it.</div>
 
 <h2 class="rn-h2">Installer</h2>
-<div class="rn-li"><span class="rn-strong">Linux support:</span> Build configuration, CI, and platform-gated install paths, with startup task, Docker, reboot, and self-update handling hardened for Linux.</div>
-<div class="rn-li"><span class="rn-strong">Update checks compare numbers:</span> Version comparison was string-based, which breaks once numbers reach two digits. Exactly the jump this release makes.</div>
-<div class="rn-li"><span class="rn-strong">These notes render again:</span> The release notes file was not being bundled into the build, so this panel came up empty.</div>
-<div class="rn-li"><span class="rn-strong">Current model lineup:</span> A fresh install now offers the qwen3 family rather than the older curated set.</div>
-<div class="rn-li"><span class="rn-strong">Security and logs:</span> Values rendered into the installer window are inserted as text, not markup. Duplicate install log lines are fixed, and a button whose background work fails no longer leaves an unhandled error.</div>
+<div class="rn-li">Linux support: build config, CI, and install paths, with startup, Docker, reboot, and self-update handling hardened.</div>
+<div class="rn-li">Update checks work again. Two faults in one feature. The comparison was string-based, which breaks once a version number reaches two digits, and 0.8.1 to 0.18.0 is exactly that jump. Underneath that, it couldn't read the release tags at all after they picked up a repo-name prefix at the end of April, which had left the update banner dead since then. Tags go back to the plain v0.18.0 form and the comparison is numeric.</div>
+<div class="rn-li">These notes render again. The file wasn't bundled into the build, so this panel came up empty.</div>
+<div class="rn-li">A fresh install offers the qwen3 family rather than the older curated set.</div>
+<div class="rn-li">Values rendered into the installer window are inserted as text, not markup. Duplicate install log lines are fixed, and a button whose background work fails no longer leaves an unhandled error.</div>
 
-<h2 class="rn-h2">Known Issues</h2>
-<div class="rn-li"><span class="rn-strong">Tone on emotional topics:</span> At qwen3:8b scale, register still drifts below target on emotional queries. The coaching filter reduces it but does not eliminate it. A larger model handles it better.</div>
-<div class="rn-li"><span class="rn-strong">No confidence signal on recall:</span> Vault-retrieved content is presented with uniform confidence regardless of how well it matched or how old it is.</div>
+<h2 class="rn-h2">Known issues</h2>
+<div class="rn-li">Tone on emotional queries still runs below target at this model size. The coaching filter reduces it without eliminating it.</div>
+<div class="rn-li">Vault-retrieved content is presented with the same confidence regardless of how well it matches or how old it is.</div>
+<div class="rn-li">The detectors for self-narrative, engagement-closing, and circular dodging match surface patterns, so novel phrasings can slip past. A corpus-driven replacement is targeted for v0.19.0.</div>
+<div class="rn-li">The fast-streaming path can flash a few unfiltered tokens before review runs, on a deliberately crafted identity-override input.</div>
