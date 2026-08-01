@@ -5,6 +5,13 @@ publish:
   provider: github
   owner: niansahc
   repo: ember-2-installer
+  # release-please publishes the GitHub Release immediately (draft: false in
+  # release-please-config.json), so by the time release.yml runs, the release
+  # already exists as a published one. electron-builder defaults to
+  # releaseType: draft, finds existingType=release, and skips every upload
+  # while still exiting 0 — which is how v0.18.0 shipped with zero assets and
+  # no latest.yml. Pin the type so it uploads to the published release.
+  releaseType: release
 
 directories:
   output: C:/temp/ember-dist
