@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.2](https://github.com/niansahc/ember-2-installer/compare/v0.18.1...v0.18.2) (2026-08-31)
+
+
+### Bug Fixes
+
+* fail-open business-hours hook and bare version rendering ([86f17db](https://github.com/niansahc/ember-2-installer/commit/86f17db61aa94a84c545765934980bfea9401cf5))
+* **release:** pin publish type so assets attach to the published release ([829a90f](https://github.com/niansahc/ember-2-installer/commit/829a90f6f37603cca35938b0649029cefe0d9186))
+
 ## [0.18.1](https://github.com/niansahc/ember-2-installer/compare/v0.18.0...v0.18.1) (2026-08-31)
 
 
