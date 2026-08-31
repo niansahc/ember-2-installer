@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.1](https://github.com/niansahc/ember-2-installer/compare/v0.18.0...v0.18.1) (2026-08-31)
+
+
+### Bug Fixes
+
+* **ci:** use PAT for release-please to trigger downstream workflows ([e128a5b](https://github.com/niansahc/ember-2-installer/commit/e128a5b1b8f675d7238592851f5ac331d03097c2))
+* **ci:** use PAT for release-please to trigger downstream workflows ([e89c5fe](https://github.com/niansahc/ember-2-installer/commit/e89c5fefa33666b0d6a117a120efe2afd708685a))
+
 ## [0.18.0](https://github.com/niansahc/ember-2-installer/compare/v0.8.1...v0.18.0) (2026-07-31)
 
 
