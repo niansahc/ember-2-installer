@@ -145,3 +145,19 @@ If you must release by hand:
 - Missing `app-update.yml`: affected installed versions can never auto-update; requires manual
   reinstall
 - Version not bumped: electron-updater compares versions and concludes no update available
+- Publish type mismatch: electron-builder defaults to `releaseType: draft`. release-please publishes
+  the release immediately (`draft: false`), so electron-builder finds `existingType=release`,
+  logs `skipped publishing ... reason=existing type not compatible with publishing type`, attaches
+  nothing, and **still exits 0** — the job goes green with an empty release. This is what happened
+  to v0.18.0. `releaseType: release` is now pinned in `electron-builder.yml`. A green Release run is
+  not sufficient evidence that assets attached; check the asset count on the release itself.
+
+## Repairing a release whose assets did not attach
+
+`release.yml` also accepts `workflow_dispatch`. A `release`-event re-run checks out the release tag
+and therefore cannot pick up a fix landed on main afterwards, so dispatch from main instead: it
+builds the version in `package.json` and uploads to the existing release for that version, with no
+need to move a published tag.
+
+Verify with `gh release view vX.Y.Z --json assets` — expect the platform installer, its `.blockmap`,
+and `latest*.yml` per platform.

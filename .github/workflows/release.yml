@@ -22,6 +22,12 @@ name: Release
 on:
   release:
     types: [published]
+  # Manual re-run lane. A `release` re-run checks out the release tag, so it
+  # cannot pick up a fix landed on main after the tag was cut. Dispatching from
+  # main builds the version in package.json and uploads to the existing release
+  # for that version, which is how a release whose assets failed to attach gets
+  # repaired without moving a published tag.
+  workflow_dispatch:
 
 permissions:
   contents: write
