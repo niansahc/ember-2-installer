@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Pre-push hook — blocks pushes during US Eastern business hours.
 # Install: cp hooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+#
+# The window is resolved with zoneinfo, which needs a tz database. CPython on
+# Windows ships none, so run `pip install tzdata` there or the check skips
+# itself (allowing the push) rather than enforcing the window.
 
 python_bin=""
 for cand in python3 python py; do
@@ -17,10 +21,27 @@ fi
 
 "$python_bin" - <<'PY'
 from datetime import datetime
-from zoneinfo import ZoneInfo
 import sys
 
-now = datetime.now(ZoneInfo("America/New_York"))
+# Without a tz database the lookup raises, and a non-zero exit here reads as a
+# hook rejection — every push blocked, at any hour, with a traceback instead of
+# a message. Degrade the same way the missing-interpreter branch above does:
+# warn and allow. The import is inside the try because it can fail on its own
+# on older interpreters; zoneinfo also converts a missing tzdata package into
+# ZoneInfoNotFoundError at construction time.
+try:
+    from zoneinfo import ZoneInfo
+
+    now = datetime.now(ZoneInfo("America/New_York"))
+except Exception as exc:
+    sys.stderr.write(
+        f"\npre-push: could not resolve US Eastern time "
+        f"({exc.__class__.__name__}: {exc}).\n"
+        "Business-hours check skipped, allowing push.\n"
+        "CPython on Windows ships no tz database: pip install tzdata to re-enable it.\n\n"
+    )
+    sys.exit(0)
+
 # Monday=0 ... Sunday=6
 if now.weekday() < 5 and 9 <= now.hour < 17:
     sys.stderr.write(

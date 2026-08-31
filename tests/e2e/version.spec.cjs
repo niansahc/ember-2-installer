@@ -7,7 +7,7 @@
 // vs 0.9.
 
 const { test, expect } = require('@playwright/test')
-const { compareVersions, isNewer } = require('../../src/lib/version')
+const { compareVersions, isNewer, displayVersion } = require('../../src/lib/version')
 
 test.describe('compareVersions', () => {
   test('orders by major.minor.patch numerically', () => {
@@ -78,5 +78,48 @@ test.describe('isNewer', () => {
     expect(isNewer('v0.8.1', null)).toBe(false)
     expect(isNewer(null, 'v0.8.1')).toBe(false)
     expect(isNewer('garbage', 'v0.8.1')).toBe(false)
+  })
+})
+
+test.describe('displayVersion', () => {
+  test('strips a component prefix', () => {
+    // The update screen used to render tag_name with only /^v/ removed, so a
+    // prefixed tag reached the panel whole: "ember-2-installer-v0.8.1" where
+    // "0.8.1" belonged.
+    expect(displayVersion('ember-2-installer-v0.18.0')).toBe('0.18.0')
+    expect(displayVersion('ember-2-ui-v0.8.1')).toBe('0.8.1')
+    expect(displayVersion('ember-2-v0.14.0')).toBe('0.14.0')
+  })
+
+  test('strips a leading v', () => {
+    expect(displayVersion('v0.18.0')).toBe('0.18.0')
+    expect(displayVersion('v1.0.0')).toBe('1.0.0')
+  })
+
+  test('leaves a bare version alone', () => {
+    expect(displayVersion('0.18.0')).toBe('0.18.0')
+    expect(displayVersion('0.10.2')).toBe('0.10.2')
+  })
+
+  test('keeps trailing detail so a prerelease marker survives', () => {
+    expect(displayVersion('v0.18.0-rc.1')).toBe('0.18.0-rc.1')
+    expect(displayVersion('ember-2-ui-v0.18.0-rc.1')).toBe('0.18.0-rc.1')
+  })
+
+  test('returns anything unparseable untouched', () => {
+    // A row showing a strange tag beats a row showing nothing.
+    expect(displayVersion('garbage')).toBe('garbage')
+    expect(displayVersion('ember-2-ui-vNEXT')).toBe('ember-2-ui-vNEXT')
+    expect(displayVersion('unknown')).toBe('unknown')
+  })
+
+  test('passes non-strings through, so the || null fallbacks still fire', () => {
+    expect(displayVersion(null)).toBeNull()
+    expect(displayVersion(undefined)).toBeUndefined()
+  })
+
+  test('output still compares — display and comparison share one regex', () => {
+    expect(isNewer(displayVersion('ember-2-installer-v0.18.0'), '0.8.1')).toBe(true)
+    expect(compareVersions(displayVersion('ember-2-ui-v0.8.1'), 'v0.8.1')).toBe(0)
   })
 })
