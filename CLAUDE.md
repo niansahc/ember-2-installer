@@ -122,6 +122,8 @@ npm run start:real
 
 When a flaky or condition-dependent test is identified during a release cycle, it must be fixed or marked skip-with-condition before that release ships. Flaky tests do not carry forward to the next release.
 
+Any test asserting an absence ships with a positive control in the same commit. An assertion that nothing was recorded, nothing was written, no mismatch occurred, a value stayed inside a bound, or a count is zero, is satisfied by a fixture where the thing could never have happened. The control is a second test that makes the condition occur and asserts the first test's assertion fails. Without it, the absence test is vacuous and will stay green through the defect it exists to catch.
+
 ---
 
 ## Working Conventions
