@@ -11,6 +11,7 @@ const { buildEnvFile } = require('./lib/env')
 const { uiSourceDir, uiTargetDir, uiIndexFile } = require('./lib/paths')
 const { cloneRepo } = require('./exec/clone')
 const { run } = require('./exec/run')
+const { API_PKILL_PATTERN, apiSpawnSpec } = require('./lib/api-launch')
 
 const IS_PACKAGED = app.isPackaged
 const HAS_REAL_FLAG = process.argv.includes('--real')
@@ -963,7 +964,7 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
       await run('taskkill', ['/F', '/FI', 'WINDOWTITLE eq start_api*'])
       await run('cmd', ['/c', 'for /f "tokens=5" %a in (\'netstat -aon ^| findstr :8000 ^| findstr LISTENING\') do taskkill /F /PID %a'])
     } else {
-      await run('pkill', ['-f', 'uvicorn.*src.api.main'])
+      await run('pkill', ['-f', API_PKILL_PATTERN])
     }
     await new Promise((r) => setTimeout(r, 2000))
 
@@ -975,18 +976,11 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     log('Starting updated API...\n')
     const restartLogFd = openApiStartupLogFd()
     const restartStdio = restartLogFd === 'ignore' ? 'ignore' : ['ignore', restartLogFd, restartLogFd]
-    if (isWin) {
-      const apiProc = spawn('cmd', ['/c', 'start_api.bat'], {
-        cwd: emberPath, shell: true, detached: true, stdio: restartStdio,
-      })
-      apiProc.unref()
-    } else {
-      const pyBinPath = path.join(emberPath, '.venv', 'bin', 'python')
-      const apiProc = spawn(pyBinPath, ['-m', 'uvicorn', 'src.api.main:app', '--host', '127.0.0.1', '--port', '8000'], {
-        cwd: emberPath, detached: true, stdio: restartStdio,
-      })
-      apiProc.unref()
-    }
+    const restartSpec = apiSpawnSpec(emberPath, process.platform)
+    const apiProc = spawn(restartSpec.command, restartSpec.args, {
+      cwd: emberPath, shell: restartSpec.shell, detached: true, stdio: restartStdio,
+    })
+    apiProc.unref()
     if (typeof restartLogFd === 'number') { try { fs.closeSync(restartLogFd) } catch {} }
 
     log('Waiting for API to start...\n')
@@ -1175,28 +1169,17 @@ ipcMain.handle('check-docker-containers', async (_e, { emberPath }) => {
 })
 
 ipcMain.handle('start-api', (_e, { emberPath }) => {
-  const isWin = process.platform === 'win32'
   // Capture child stdio to api-startup.log so failures (missing venv, import errors,
   // port collisions) aren't swallowed. Tail is surfaced via get-api-startup-log-tail.
   const logFd = openApiStartupLogFd()
   const stdio = logFd === 'ignore' ? 'ignore' : ['ignore', logFd, logFd]
-  let proc
-
-  if (isWin) {
-    proc = spawn('cmd', ['/c', 'start_api.bat'], {
-      cwd: emberPath,
-      shell: true,
-      detached: true,
-      stdio,
-    })
-  } else {
-    const pyBin = path.join(emberPath, '.venv', 'bin', 'python')
-    proc = spawn(pyBin, ['-m', 'uvicorn', 'src.api.main:app', '--host', '127.0.0.1', '--port', '8000'], {
-      cwd: emberPath,
-      detached: true,
-      stdio,
-    })
-  }
+  const spec = apiSpawnSpec(emberPath, process.platform)
+  const proc = spawn(spec.command, spec.args, {
+    cwd: emberPath,
+    shell: spec.shell,
+    detached: true,
+    stdio,
+  })
 
   if (typeof logFd === 'number') { try { fs.closeSync(logFd) } catch {} }
   proc.unref()
