@@ -42,14 +42,12 @@ function makeFixture({ env, dirs = [] } = {}) {
 
 /** The environment a hook process gets: the fixture, never the real config. */
 function hookEnv(fixture, extra = {}) {
+  if (!fixture) throw new Error('hookEnv needs a fixture: without one the hook reads the real checkout')
   const env = { ...process.env }
   delete env.PRIVATE_VAULT_PATH
-  delete env.CLAUDE_PROJECT_DIR
-  if (fixture) {
-    env.CLAUDE_PROJECT_DIR = fixture.project
-    env.HOME = fixture.home
-    env.USERPROFILE = fixture.home
-  }
+  env.CLAUDE_PROJECT_DIR = fixture.project
+  env.HOME = fixture.home
+  env.USERPROFILE = fixture.home
   return { ...env, ...extra }
 }
 
@@ -59,15 +57,16 @@ function hookEnv(fixture, extra = {}) {
  * string. Returns { status, stdout, stderr, decision, reason }.
  */
 function runGuard(guard, payload, fixture, extraEnv = {}) {
+  // Without a fixture CLAUDE_PROJECT_DIR would fall back to this checkout,
+  // and vault-guard would read the real sibling ember-2 .env.
+  if (!fixture) throw new Error('runGuard needs a fixture')
   let input = payload
-  if (typeof payload !== 'string') {
-    input = JSON.stringify({ cwd: fixture ? fixture.project : process.cwd(), ...payload })
-  }
+  if (typeof payload !== 'string') input = JSON.stringify({ cwd: fixture.project, ...payload })
   const result = spawnSync(process.execPath, [path.join(HOOKS, `${guard}.cjs`)], {
     input,
     env: hookEnv(fixture, extraEnv),
     encoding: 'utf8',
-    cwd: fixture ? fixture.project : undefined,
+    cwd: fixture.project,
   })
   let decision = null
   let reason = null

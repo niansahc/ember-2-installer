@@ -145,8 +145,10 @@ function globCanNameEnv(pattern) {
 function baseNamesEnv(base) {
   const lower = base.toLowerCase()
   const wild = WILDCARD.test(base)
-  // The example file itself, or a glob that can only reach it.
-  if (lower === EXAMPLE || (wild && lower.startsWith(EXAMPLE))) return false
+  // The example file itself, by its exact name only. A glob that starts with
+  // it (`.env.example*`) also reaches `.env.example.local`, so it goes
+  // through the glob rule below like any other.
+  if (lower === EXAMPLE) return false
   if (ENV_NAME.test(base)) return true
 
   // Globs. Only a pattern that starts with a literal dot can match a dotfile
@@ -205,9 +207,12 @@ const PATH_FIELDS = new Map([
 
 // The quoted value of a message flag on a git or gh command is prose, not a
 // path. Scoped to git/gh segments so `cmd -m ".env"` elsewhere is still
-// scanned, and only the quoted value right after the flag is dropped.
+// scanned, and only the quoted value right after the flag is dropped. Only
+// a single-quoted value, or a double-quoted one with no command
+// substitution: bash runs `$(cat .env)` inside double quotes, and its
+// output would land in the commit or PR text.
 const PROSE_FLAG_VALUE =
-  /(?:^|\s)(?:-a?m|--message|--body|--title|--notes)(?:\s+|=)(?:"(?:[^"\\]|\\.)*"|'[^']*')/g
+  /(?:^|\s)(?:-a?m|--message|--body|--title|--notes)(?:\s+|=)(?:"(?:[^"\\$`]|\\.|\$(?!\())*"|'[^']*')/g
 const SEGMENT_SPLIT = /([;&|]+)/
 const GIT_OR_GH = /^\s*(?:git|gh)\s/
 // Quotes, separators, redirections and `=` (for --path=.env) all delimit.

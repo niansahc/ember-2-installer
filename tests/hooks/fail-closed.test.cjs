@@ -3,9 +3,10 @@
 // non-zero, which the harness treats as a non-blocking error and runs the
 // call, so a crash would be an allow.
 //
-// And the other side: a payload with no usable input is not an error; it is
-// allowed with exit 0. Each allow below has a deny control on the same
-// channel, so the absence assertions cannot pass vacuously.
+// And the other side: a payload with no usable input, or one that is not
+// JSON, is not an error; it is allowed with exit 0. Each allow below has a
+// deny control on the same channel, so the absence assertions cannot pass
+// vacuously.
 
 'use strict'
 
@@ -33,6 +34,29 @@ test('control: the same call with a readable .env is allowed', (t) => {
   const fx = liveVaultFixture()
   t.after(fx.cleanup)
   allow(runGuard('vault-guard', call('Read', { file_path: path.join(fx.project, 'src', 'main.js') }), fx))
+})
+
+// A `${` left after interpolation means the guard cannot know which
+// directory the app will use, so every call is denied until it is fixed.
+for (const [name, value] of [
+  ['unclosed', 'PRIVATE_VAULT_PATH=${ROOT/vaults/live\n'],
+  ['unsupported form', 'PRIVATE_VAULT_PATH=${ROOT:x}/vaults/live\n'],
+]) {
+  test(`vault-guard denies an unresolved interpolation (${name})`, (t) => {
+    const fx = makeFixture({ env: `ROOT=vaults\n${value}`, dirs: ['ember-2/vaults/live'] })
+    t.after(fx.cleanup)
+    const r = deny(runGuard('vault-guard', call('Read', { file_path: path.join(fx.project, 'src', 'main.js') }), fx))
+    assert.match(r.reason, FAIL_REASON)
+    assert.ok(r.reason.includes('(UnresolvedInterpolation)'), r.reason)
+    assert.ok(!r.reason.includes('ROOT') && !r.reason.includes(fx.root), 'reason carries the value')
+  })
+}
+
+test('control: the same value with the interpolation closed allows the call', (t) => {
+  const fx = makeFixture({ env: 'ROOT=vaults\nPRIVATE_VAULT_PATH=${ROOT}/live\n', dirs: ['ember-2/vaults/live'] })
+  t.after(fx.cleanup)
+  allow(runGuard('vault-guard', call('Read', { file_path: path.join(fx.project, 'src', 'main.js') }), fx))
+  deny(runGuard('vault-guard', call('Read', { file_path: path.join(fx.ember2, 'vaults', 'live', 'a.json') }), fx))
 })
 
 for (const guard of [envGuard, vaultGuard]) {
@@ -98,10 +122,16 @@ for (const guard of ['env-guard', 'vault-guard']) {
   })
 }
 
-test('an unparseable payload notes the error type on stderr, not the payload', () => {
-  const r = runGuard('env-guard', 'C:/synthetic/.env {', null)
-  assert.equal(r.status, 0)
-  assert.equal(r.stdout, '')
+test('an unparseable payload notes the error type on stderr, not the payload', (t) => {
+  const fx = makeFixture()
+  t.after(fx.cleanup)
+  const r = allow(runGuard('env-guard', 'C:/synthetic/.env {', fx))
   assert.match(r.stderr, /unparseable hook payload, allowing \(SyntaxError\)/)
   assert.ok(!r.stderr.includes('synthetic'))
+  // Control: the same text as a parsed payload is denied.
+  deny(runGuard('env-guard', call('Read', { file_path: 'C:/synthetic/.env' }), fx))
+})
+
+test('runGuard refuses to run without a fixture', () => {
+  assert.throws(() => runGuard('vault-guard', call('Read', { file_path: 'x' }), null), /needs a fixture/)
 })

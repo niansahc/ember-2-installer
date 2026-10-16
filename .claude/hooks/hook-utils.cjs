@@ -49,8 +49,9 @@ function absolutePath(p, base) {
     const m = s.match(/^\/(?:mnt\/)?([a-zA-Z])(?=\/|$)/)
     if (m) s = `${m[1]}:/${s.slice(m[0].length)}`
   }
-  // path.win32.resolve resolves drive-relative C:x against `base` when it is
-  // on the same drive (the only drive whose cwd the hook knows).
+  // On Windows, path.resolve resolves drive-relative C:x against `base` when
+  // it is on the same drive (the only drive whose cwd the hook knows).
+  // Elsewhere C:x is an ordinary relative name.
   return path.resolve(base, s)
 }
 

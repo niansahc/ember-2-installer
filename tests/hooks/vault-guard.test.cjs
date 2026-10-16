@@ -1,11 +1,14 @@
 // vault-guard.cjs: the name rule, the configured vault (relative, absolute,
-// ~, through a junction or symlink, process environment), reach from an
-// ancestor, and shell readers and listers. Run as a hook process against tmp
-// fixtures; vault files hold synthetic text only.
+// ~, interpolated, through a junction or symlink, process environment),
+// reach from an ancestor, and shell readers and listers. Run as a hook
+// process against tmp fixtures; vault files hold synthetic text only.
+// Wrappers, substitution, flag values and the shell name rule are in
+// vault-shell.test.cjs.
 //
-// Every allow case (an absence) is paired with a deny control: the same
-// tool against the vault in the same fixture, or the same call with the
-// vault configured. The coverage tests fail if a tool loses either side.
+// Every allow row carries its own deny control (the same tool, pointed at
+// the vault, in the same fixture), and every other allow assertion sits in a
+// test that also makes the deny happen. A table row without a control fails
+// the coverage test.
 
 'use strict'
 
@@ -34,21 +37,28 @@ test('name rule', async (t) => {
     ['deny', 'Bash', { command: 'cat private_vault/a.json' }],
     ['deny', 'Bash', { command: 'grep --file=private_vault/a.json x' }],
     ['deny', 'PowerShell', { command: 'Get-ChildItem .\\private_vault' }],
-    ['allow', 'Read', { file_path: path.join(fx.project, 'src', 'main.js') }],
-    ['allow', 'Glob', { pattern: '**/*.js' }],
-    ['allow', 'Bash', { command: 'echo private_vault' }],
-    ['allow', 'Bash', { command: 'git commit -m "x' }], // unbalanced quote: no tokens
-    ['allow', 'PowerShell', { command: 'Test-Path private_vault' }],
+    ['allow', 'Read', { file_path: path.join(fx.project, 'src', 'main.js') }, { file_path: pv }],
+    ['allow', 'Glob', { pattern: '**/*.js' }, { pattern: 'priv*/**' }],
+    ['allow', 'Bash', { command: 'echo private_vault' }, { command: 'cat private_vault/a.json' }],
+    ['allow', 'Bash', { command: 'echo hi > out.txt' }, { command: 'echo hi > private_vault/a.json' }],
+    // Unbalanced quote: the shell will not run it, so there is nothing to check.
+    ['allow', 'Bash', { command: 'git commit -m "x' }, { command: 'git commit -m "x" && cat private_vault/a.json' }],
+    ['allow', 'Bash', { command: 'git commit -m "guard private_vault reads"' }, { command: 'git show HEAD:private_vault/a.json' }],
+    ['allow', 'PowerShell', { command: 'Test-Path private_vault' }, { command: 'Get-Content private_vault/a.json' }],
   ]
-  for (const [want, tool, input] of cases) {
+  for (const [want, tool, input, control] of cases) {
     await t.test(`${want} ${tool} ${JSON.stringify(input)}`, () => {
       const r = runGuard('vault-guard', call(tool, input), fx)
       if (want === 'deny') {
         deny(r)
         assert.match(r.reason, /Vault Privacy Rule/)
-      } else allow(r)
+      } else {
+        allow(r)
+        deny(runGuard('vault-guard', call(tool, control), fx))
+      }
     })
   }
+  assert.ok(cases.every(([w, , , c]) => w === 'deny' || c), 'an allow row has no deny control')
 })
 
 // ---------------------------------------------------------------------------
@@ -91,33 +101,37 @@ const CONFIGURED = [
   ['deny', 'PowerShell', { command: `Get-ChildItem "${V}"` }],
   ['deny', 'PowerShell', { command: `Get-Content -Path:"${VA}"` }],
   ['deny', 'PowerShell', { command: `Get-ChildItem -Rec "${REL.root}"` }],
-  ['allow', 'Read', { file_path: path.join(REL.ember2, 'README.md') }],
-  ['allow', 'Edit', { file_path: path.join(REL.project, 'src', 'main.js'), old_string: 'a', new_string: 'b' }],
-  ['allow', 'Write', { file_path: path.join(REL.ember2, 'vaults', 'new.json'), content: 'x' }],
-  ['allow', 'Grep', { pattern: 'x' }], // rooted at the project, not an ancestor
-  ['allow', 'Grep', { pattern: 'x', path: REL.root, glob: 'ember-2-installer/**/*.js' }],
-  ['allow', 'Glob', { pattern: '**/*.js' }],
-  ['allow', 'Glob', { pattern: 'ember-2-installer/**', path: REL.root }],
-  ['allow', 'Bash', { command: `cat "${path.join(REL.ember2, 'README.md')}"` }],
-  ['allow', 'Bash', { command: `ls "${REL.root}"` }], // non-recursive ancestor listing
-  ['allow', 'Bash', { command: `test -d "${V}" && echo yes` }],
-  ['allow', 'Bash', { command: 'grep -r synthetic src' }],
-  ['allow', 'PowerShell', { command: `Test-Path "${V}"` }],
-  ['allow', 'PowerShell', { command: 'Get-Content src\\main.js' }],
+  // [allow, tool, allowed input, deny control]
+  ['allow', 'Read', { file_path: path.join(REL.ember2, 'README.md') }, { file_path: VA }],
+  ['allow', 'Edit', { file_path: path.join(REL.project, 'src', 'main.js'), old_string: 'a', new_string: 'b' }, { file_path: VA, old_string: 'a', new_string: 'b' }],
+  ['allow', 'Write', { file_path: path.join(REL.ember2, 'vaults', 'new.json'), content: 'x' }, { file_path: path.join(V, 'new.json'), content: 'x' }],
+  ['allow', 'Grep', { pattern: 'x' }, { pattern: 'x', path: REL.root }], // project root is not an ancestor
+  ['allow', 'Grep', { pattern: 'x', path: REL.root, glob: 'ember-2-installer/**/*.js' }, { pattern: 'x', path: REL.root, glob: 'ember-2/**/*.json' }],
+  ['allow', 'Glob', { pattern: '**/*.js' }, { pattern: '**/*.json', path: REL.root }],
+  ['allow', 'Glob', { pattern: 'ember-2-installer/**', path: REL.root }, { pattern: 'ember-2/**', path: REL.root }],
+  ['allow', 'Bash', { command: `cat "${path.join(REL.ember2, 'README.md')}"` }, { command: `cat "${VA}"` }],
+  ['allow', 'Bash', { command: `ls "${REL.root}"` }, { command: `ls -R "${REL.root}"` }], // non-recursive ancestor listing
+  ['allow', 'Bash', { command: `test -d "${V}" && echo yes` }, { command: `test -d "${V}" && cat "${VA}"` }],
+  ['allow', 'Bash', { command: 'grep -r synthetic src' }, { command: `grep -r synthetic "${REL.root}"` }],
+  ['allow', 'PowerShell', { command: `Test-Path "${V}"` }, { command: `Get-ChildItem "${V}"` }],
+  ['allow', 'PowerShell', { command: 'Get-Content src\\main.js' }, { command: `Get-Content "${VA}"` }],
 ]
 
-for (const [want, tool, input] of CONFIGURED) {
+for (const [want, tool, input, control] of CONFIGURED) {
   test(`configured relative: ${want} ${tool} ${JSON.stringify(input)}`, () => {
     const r = runGuard('vault-guard', call(tool, input), REL)
-    want === 'deny' ? deny(r) : allow(r)
+    if (want === 'deny') return void deny(r)
+    allow(r)
+    deny(runGuard('vault-guard', call(tool, control), REL))
   })
 }
 
-test('every guarded tool has configured deny and allow cases', () => {
+test('every guarded tool has configured deny and allow cases, each allow with a control', () => {
   for (const tool of ['Read', 'Edit', 'Write', 'Grep', 'Glob', 'Bash', 'PowerShell']) {
     assert.ok(CONFIGURED.some(([w, t]) => w === 'deny' && t === tool), `no deny case for ${tool}`)
     assert.ok(CONFIGURED.some(([w, t]) => w === 'allow' && t === tool), `no allow case for ${tool}`)
   }
+  assert.ok(CONFIGURED.every(([w, , , c]) => w === 'deny' || c), 'an allow row has no deny control')
 })
 
 test('a relative path resolves against the payload cwd, not the hook process cwd', () => {
@@ -169,6 +183,29 @@ test('process environment wins over the .env file', (t) => {
   allow(runGuard('vault-guard', call('Read', { file_path: fromFile }), fx, extra))
   deny(runGuard('vault-guard', call('Read', { file_path: fromFile }), fx))
 })
+
+// python-dotenv interpolation: ${VAR} and ${VAR:-default}, earlier keys
+// first, then the process environment. Each case denies the vault file the
+// interpolated value names and allows a file beside it.
+const INTERPOLATED = [
+  ['earlier key', (fx) => `ROOT=${fwd(fx.ember2)}\nPRIVATE_VAULT_PATH=\${ROOT}/vaults/live\n`, {}],
+  ['default for an unset name', (fx) => `PRIVATE_VAULT_PATH=\${GUARD_TEST_UNSET:-${fwd(fx.ember2)}}/vaults/live\n`, {}],
+  ['process environment', () => 'PRIVATE_VAULT_PATH="${GUARD_TEST_ROOT}/vaults/live"\n', (fx) => ({ GUARD_TEST_ROOT: fx.ember2 })],
+  ['earlier key over the process environment', (fx) => `GUARD_TEST_ROOT=${fwd(fx.ember2)}\nPRIVATE_VAULT_PATH=\${GUARD_TEST_ROOT}/vaults/live\n`, (fx) => ({ GUARD_TEST_ROOT: fx.home })],
+  ['single-quoted value (python-dotenv interpolates it too)', (fx) => `ROOT=${fwd(fx.ember2)}\nPRIVATE_VAULT_PATH='\${ROOT}/vaults/live'\n`, {}],
+  ['relative after interpolation', () => 'SUB=vaults\nPRIVATE_VAULT_PATH=${SUB}/live\n', {}],
+]
+
+for (const [name, envText, extraEnv] of INTERPOLATED) {
+  test(`interpolated configured value: ${name}`, (t) => {
+    const fx = makeFixture({ dirs: ['ember-2/vaults/live'] })
+    t.after(fx.cleanup)
+    fs.writeFileSync(path.join(fx.ember2, '.env'), envText(fx))
+    const extra = typeof extraEnv === 'function' ? extraEnv(fx) : extraEnv
+    deny(runGuard('vault-guard', call('Read', { file_path: path.join(fx.ember2, 'vaults', 'live', 'a.json') }), fx, extra))
+    allow(runGuard('vault-guard', call('Read', { file_path: path.join(fx.ember2, 'README.md') }), fx, extra))
+  })
+}
 
 test('a vault reached through a junction or symlink', (t) => {
   const fx = liveVaultFixture()
