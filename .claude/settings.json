@@ -2,11 +2,16 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Edit|Write",
+        "matcher": "Read|Grep|Glob|Edit|Write|Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/reject-env-edit.sh\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/env-guard.cjs\"",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/vault-guard.cjs\"",
             "timeout": 5
           }
         ]

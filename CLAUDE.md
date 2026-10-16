@@ -175,4 +175,4 @@ Blocks pushes during US Eastern business hours (9am-5pm Mon-Fri). Local hook: `h
 
 ## Hooks
 
-Configured in `.claude/settings.json`, scripts in `.claude/hooks/`. Pre-edit hook rejects .env files. Post-edit hook runs `npm run test:e2e` on source file changes.
+Configured in `.claude/settings.json`, scripts in `.claude/hooks/`. PreToolUse guards on Read, Grep, Glob, Edit, Write, Bash and PowerShell: `env-guard.cjs` denies `.env` and `.env.*` in any repo (`.env.example` allowed); `vault-guard.cjs` denies any `private_vault` path and the configured vault (`PRIVATE_VAULT_PATH` from the sibling ember-2 `.env`). Both fail closed. Tests: `npm run test:hooks`. Post-edit hook runs `npm run test:e2e` on source file changes.
