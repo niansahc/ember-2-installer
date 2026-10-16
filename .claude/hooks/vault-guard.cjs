@@ -52,8 +52,11 @@
 // groups ( ... ) and { ... } are scanned as commands of their own. Leading
 // shell keywords (if, then, do, !, ...), VAR=value words and the wrappers
 // sudo, env, time, nice and nohup are skipped to find the command a stage
-// runs. Then:
-//   - name rule: a stage whose operands, flag values (--file=x, if=x,
+// runs. In Bash, the body of a quoted-delimiter heredoc (<<'EOF') is literal
+// text and is dropped first, unless the command also runs a shell, eval,
+// xargs, read or an interpreter (dropLiteralHeredocs in hook-utils.cjs); an
+// unquoted delimiter body is scanned as commands. Then:
+//   - name rule: a stage whose command word, operands, flag values (--file=x, if=x,
 //     -Path:x) or redirections name a private_vault directory is denied,
 //     whatever the command, except the pattern operand of a content search
 //     and the message of git/gh -m/--body/--title/--notes. Commands that
@@ -80,7 +83,8 @@
 const fs = require('fs')
 const path = require('path')
 const {
-  SHELL_TOOLS, WILDCARD, absolutePath, commandName, expandUser, fnmatch, main, projectDir, toolCall,
+  SHELL_TOOLS, WILDCARD, absolutePath, commandName, dropLiteralHeredocs, expandUser, fnmatch, main, projectDir,
+  toolCall,
 } = require('./hook-utils.cjs')
 
 const GUARD = 'vault-guard'
@@ -663,6 +667,9 @@ function pathCandidates(token) {
 function stageNamesVault(s) {
   if (s.redirs.some(operandNamesVault)) return true
   if (NON_READING.has(s.runner)) return false
+  // The command word itself: a vault file run as a program, or a heredoc
+  // line that a shell or xargs takes as a file name.
+  if (s.words.length && operandNamesVault(s.words[0])) return true
   const args = s.words.slice(1)
   const skip = new Set()
   if (s.runner === 'git' || s.runner === 'gh') {
@@ -809,7 +816,10 @@ function evaluate(payload) {
   if (SHELL_TOOLS.has(tool)) {
     if (typeof input.command !== 'string' || !input.command) return null
     const state = { base: cwd, pendingCd: [], vaults: null }
-    const utility = scanCommand(input.command, state, tool === 'Bash' ? 'bash' : 'ps')
+    // Literal heredoc bodies are dropped once, here, where the whole command
+    // shows whether anything in it runs the text.
+    const bash = tool === 'Bash'
+    const utility = scanCommand(bash ? dropLiteralHeredocs(input.command) : input.command, state, bash ? 'bash' : 'ps')
     return utility ? { kind: 'shell', target: utility } : null
   }
   const fields = PATH_FIELDS.get(tool)

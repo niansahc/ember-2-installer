@@ -30,6 +30,13 @@
 // PowerShell expands wildcards in quoted cmdlet arguments, so quoting
 // changes nothing there.
 //
+// Heredocs (Bash only). The body of a quoted-delimiter heredoc (<<'EOF',
+// <<"EOF") is literal text and is dropped before the scan, so
+// git commit -m "$(cat <<'EOF' ... EOF)" may mention .env. An unquoted
+// delimiter body is scanned. The body is kept when the command also runs a
+// shell, eval, xargs, read or an interpreter, which could run the text
+// (dropLiteralHeredocs in hook-utils.cjs).
+//
 // Limits: a pattern check on the call, not a sandbox. A name built at
 // runtime (`.e""nv`, PowerShell backtick escapes, base64, a script that
 // opens the file, an 8.3 short name) is not caught, nor is a recursive read
@@ -41,7 +48,9 @@
 
 'use strict'
 
-const { SHELL_TOOLS, WILDCARD, bracketEnd, commandName, fnmatch, main, toolCall } = require('./hook-utils.cjs')
+const {
+  SHELL_TOOLS, WILDCARD, bracketEnd, commandName, dropLiteralHeredocs, fnmatch, main, toolCall,
+} = require('./hook-utils.cjs')
 
 const GUARD = 'env-guard'
 
@@ -272,7 +281,11 @@ function evaluate(payload) {
   const call = toolCall(payload)
   if (!call) return null
   const { tool, input } = call
-  if (SHELL_TOOLS.has(tool)) return commandNamesEnvFile(input.command, tool === 'Bash')
+  if (SHELL_TOOLS.has(tool)) {
+    const bash = tool === 'Bash'
+    const command = bash && typeof input.command === 'string' ? dropLiteralHeredocs(input.command) : input.command
+    return commandNamesEnvFile(command, bash)
+  }
   for (const [field, namesEnv] of Object.entries(PATH_FIELDS.get(tool) || {})) {
     if (namesEnv(input[field])) return input[field]
   }

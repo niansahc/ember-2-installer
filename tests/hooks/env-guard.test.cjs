@@ -94,6 +94,51 @@ for (const [tool, input, control] of ALLOW) {
   })
 }
 
+// ---------------------------------------------------------------------------
+// Heredocs (Bash). A quoted-delimiter body is literal text and is not
+// scanned; an unquoted one is. Each row: [command, expected result, control
+// with the opposite result], the control differing only where it matters.
+// ---------------------------------------------------------------------------
+
+const HEREDOC = [
+  // Quoted delimiter: allowed. Control: the same body, delimiter unquoted.
+  ["git commit -m \"$(cat <<'EOF'\nfeat: block .env reads\nEOF\n)\"", 'allow', 'git commit -m "$(cat <<EOF\nfeat: block .env reads\nEOF\n)"'],
+  ['git commit -m "$(cat <<"EOF"\nfeat: block .env.local reads\nEOF\n)"', 'allow', 'git commit -m "$(cat <<EOF\nfeat: block .env.local reads\nEOF\n)"'],
+  ["gh pr create --title t --body \"$(cat <<'EOF'\nDenies .env and .env.* reads.\nEOF\n)\"", 'allow', 'gh pr create --title t --body "$(cat <<EOF\nDenies .env and .env.* reads.\nEOF\n)"'],
+  ['cat <<\\EOF\nsee .env.local\nEOF', 'allow', 'cat <<EOF\nsee .env.local\nEOF'],
+  ["cat <<-'EOF'\n\tsee .env\n\tEOF", 'allow', 'cat <<-EOF\n\tsee .env\n\tEOF'],
+  // The rest of the command is still scanned. Control: a read after the body.
+  ["cat <<'EOF' > notes.txt\n.env\nEOF", 'allow', "cat <<'EOF' > notes.txt\n.env\nEOF\ncat .env"],
+  // Unquoted delimiter: scanned, denied. Control: a body with no .env name.
+  ['cat <<EOF\nmentions .env\nEOF', 'deny', 'cat <<EOF\nmentions nothing\nEOF'],
+  ['git commit -m "$(cat <<EOF\n$(cat .env)\nEOF\n)"', 'deny', 'git commit -m "$(cat <<EOF\n$(cat README.md)\nEOF\n)"'],
+  // A body the command runs stays scanned. Control: the body fed to cat.
+  ["bash <<'EOF'\ncat .env\nEOF", 'deny', "cat <<'EOF'\ncat .env\nEOF"],
+  ["cat <<'EOF' | xargs cat\n.env\nEOF", 'deny', "cat <<'EOF' | sort\n.env\nEOF"],
+  ["eval \"$(cat <<'EOF'\ncat .env\nEOF\n)\"", 'deny', "echo \"$(cat <<'EOF'\ncat .env\nEOF\n)\""],
+  ["while read f; do head \"$f\"; done <<'EOF'\n.env\nEOF", 'deny', "while true; do break; done <<'EOF'\n.env\nEOF"],
+  ["python3 <<'EOF'\nprint(open('.env').read())\nEOF", 'deny', "cat <<'EOF'\nprint(open('.env').read())\nEOF"],
+  // Not a heredoc body. Control: the same lines as a real quoted heredoc.
+  ["printf '%s' \"<<'EOF'\"\n.env\nEOF", 'deny', "printf '%s' <<'EOF'\n.env\nEOF"], // << inside quotes
+  ["cat <<'EOF'\n.env", 'deny', "cat <<'EOF'\n.env\nEOF"], // no terminator line
+  ["echo \"$(cat <<'EOF'\n.env\nEOF)\"", 'deny', "echo \"$(cat <<'EOF'\n.env\nEOF\n)\""], // terminator not alone on its line
+]
+
+for (const [command, expected, control] of HEREDOC) {
+  test(`heredoc ${expected} ${JSON.stringify(command)} (control ${JSON.stringify(control)})`, () => {
+    const [first, second] = expected === 'allow' ? [allow, deny] : [deny, allow]
+    first(runGuard('env-guard', call('Bash', { command }), fx))
+    second(runGuard('env-guard', call('Bash', { command: control }), fx))
+  })
+}
+
+// PowerShell has no heredocs: the same text is scanned there.
+test('heredoc text in a PowerShell command is scanned (control: Bash allows it)', () => {
+  const command = "cat <<'EOF'\n.env\nEOF"
+  deny(runGuard('env-guard', call('PowerShell', { command }), fx))
+  allow(runGuard('env-guard', call('Bash', { command }), fx))
+})
+
 test('every guarded tool has deny and allow cases', () => {
   const tools = ['Read', 'Edit', 'Write', 'Grep', 'Glob', 'Bash', 'PowerShell']
   for (const tool of tools) {

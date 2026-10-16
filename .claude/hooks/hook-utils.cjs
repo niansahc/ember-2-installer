@@ -9,6 +9,8 @@
 //   - commandName(): one "bare command name" rule.
 //   - fnmatch(), bracketEnd(), WILDCARD: one glob grammar (*, ?, [...],
 //     [!...]) with Python fnmatchcase semantics.
+//   - dropLiteralHeredocs(): one rule for quoted-delimiter heredoc bodies
+//     in a Bash command (literal text, not scanned).
 //   - toolCall(), SHELL_TOOLS: the usable part of a payload.
 //   - runHook(): stdin -> evaluate -> a deny on stdout, always exit 0, and
 //     fail closed: an exception inside the check is a deny that names only
@@ -182,6 +184,133 @@ function main(guard, evaluate, reason) {
   })
 }
 
+// ---------------------------------------------------------------------------
+// Heredocs (Bash)
+// ---------------------------------------------------------------------------
+
+// Commands that run text handed to them (on stdin, or as arguments read from
+// it) as code or as file names. When one appears outside the heredoc bodies,
+// a quoted-delimiter body may be run after all (`bash <<'EOF'`, `cat <<'EOF'
+// | xargs cat`, `eval "$(cat <<'EOF' ...)"`), so it stays scanned.
+const RUNS_TEXT = new Set([
+  'bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh', 'pwsh', 'powershell', 'cmd', 'wsl',
+  'eval', 'source', 'exec', 'xargs', 'parallel', 'read', 'mapfile', 'readarray',
+  'python', 'python3', 'py', 'node', 'deno', 'bun', 'perl', 'ruby', 'php',
+  'awk', 'gawk', 'mawk', 'nawk', 'sed', 'osascript',
+])
+// `.` as a command (`. ./script`), not as an argument (`git add .`).
+const DOT_COMMAND = /(?:^|[;&|({\n`]|\$\()\s*\.\s/
+
+/**
+ * The heredoc operator at s[i] (`<<`, `<<-`), as { delimiter, quoted, strip,
+ * end }, or null when no delimiter word follows. Any quoting in the word
+ * (`'EOF'`, `"EOF"`, `\EOF`, `E"O"F`) makes the body literal.
+ */
+function heredocOperator(s, i) {
+  let j = i + 2
+  const strip = s[j] === '-'
+  if (strip) j++
+  while (s[j] === ' ' || s[j] === '\t') j++
+  let delimiter = ''
+  let quoted = false
+  while (j < s.length && !/[\s;&|<>()]/.test(s[j])) {
+    const c = s[j]
+    if (c === "'" || c === '"') {
+      const end = s.indexOf(c, j + 1)
+      if (end < 0) return null
+      delimiter += s.slice(j + 1, end)
+      quoted = true
+      j = end + 1
+    } else if (c === '\\') {
+      delimiter += s[j + 1] || ''
+      quoted = true
+      j += 2
+    } else {
+      delimiter += c
+      j++
+    }
+  }
+  return delimiter ? { delimiter, quoted, strip, end: j } : null
+}
+
+/** The index just past the terminator line of a body starting at `pos`, or -1. */
+function heredocEnd(s, pos, op) {
+  for (let start = pos; ; ) {
+    const nl = s.indexOf('\n', start)
+    let line = s.slice(start, nl < 0 ? s.length : nl).replace(/\r$/, '')
+    if (op.strip) line = line.replace(/^\t+/, '')
+    if (line === op.delimiter) return nl < 0 ? s.length : nl + 1
+    if (nl < 0) return -1
+    start = nl + 1
+  }
+}
+
+/**
+ * A Bash command with the bodies of quoted-delimiter heredocs (<<'EOF',
+ * <<"EOF", <<\EOF) and their terminator lines removed: Bash expands nothing
+ * in them, so they are text, not commands or file names. An unquoted
+ * delimiter body is kept (Bash expands $(...) and backticks in it). The
+ * command comes back unchanged when a body has no terminator line, or when
+ * the rest of the command runs text it is handed (RUNS_TEXT).
+ */
+function dropLiteralHeredocs(command) {
+  const s = command
+  let out = ''
+  let copied = 0
+  // One frame per $( ... ) level: its quote state and open ( count.
+  const frames = [{ quote: null, depth: 0 }]
+  let pending = []
+  for (let i = 0; i < s.length; i++) {
+    const f = frames[frames.length - 1]
+    const c = s[i]
+    if (f.quote === "'") {
+      if (c === "'") f.quote = null
+    } else if (c === '\\') {
+      i++
+    } else if (c === '$' && s[i + 1] === '(') {
+      frames.push({ quote: null, depth: 0 })
+      i++
+    } else if (f.quote === '"') {
+      if (c === '"') f.quote = null
+    } else if (c === "'" || c === '"') {
+      f.quote = c
+    } else if (c === '(') {
+      f.depth++
+    } else if (c === ')') {
+      if (f.depth) f.depth--
+      else if (frames.length > 1) frames.pop()
+    } else if (c === '#' && (i === 0 || /[\s;&|()]/.test(s[i - 1]))) {
+      const nl = s.indexOf('\n', i)
+      if (nl < 0) break
+      i = nl - 1
+    } else if (c === '<' && s[i + 1] === '<' && s[i + 2] !== '<' && s[i - 1] !== '<') {
+      const op = heredocOperator(s, i)
+      if (op) {
+        pending.push(op)
+        i = op.end - 1
+      }
+    } else if (c === '\n' && pending.length) {
+      // The bodies start on the next line, one after another.
+      let pos = i + 1
+      for (const op of pending) {
+        const next = heredocEnd(s, pos, op)
+        if (next < 0) return command
+        if (op.quoted) {
+          out += s.slice(copied, pos)
+          copied = next
+        }
+        pos = next
+      }
+      pending = []
+      i = pos - 1
+    }
+  }
+  if (!copied) return command
+  out += s.slice(copied)
+  const words = out.split(/[\s"'`;|&<>(){}=,$]+/).filter(Boolean)
+  return words.some((w) => RUNS_TEXT.has(commandName(w))) || DOT_COMMAND.test(out) ? command : out
+}
+
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell'])
 
 /**
@@ -204,6 +333,7 @@ module.exports = {
   expandUser,
   absolutePath,
   commandName,
+  dropLiteralHeredocs,
   bracketEnd,
   fnmatch,
   toolCall,

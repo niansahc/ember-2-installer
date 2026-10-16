@@ -139,7 +139,67 @@ test('shell name rule: patterns and broad globs allowed, vault names denied', as
   }
 })
 
+// ---------------------------------------------------------------------------
+// Heredocs (Bash). A quoted-delimiter body is literal text and is not
+// scanned; an unquoted one is scanned as commands. Each row: [command,
+// expected result, control with the opposite result].
+// ---------------------------------------------------------------------------
+
+const HEREDOC = [
+  // Quoted delimiter: allowed. Control: the same body, delimiter unquoted.
+  ["git commit -m \"$(cat <<'EOF'\nfix: keep private_vault/a.json out of transcripts\nEOF\n)\"", 'allow', 'git commit -m "$(cat <<EOF\nfix: keep private_vault/a.json out of transcripts\nEOF\n)"'],
+  ["cat <<'EOF'\n$(cat private_vault/a.json)\nEOF", 'allow', 'cat <<EOF\n$(cat private_vault/a.json)\nEOF'],
+  ['cat <<"EOF" > notes.txt\nrg KEY private_vault\nEOF', 'allow', 'cat <<EOF > notes.txt\nrg KEY private_vault\nEOF'],
+  // The rest of the command is still scanned. Control: a read after the body.
+  ["cat <<'EOF'\ncat private_vault/a.json\nEOF", 'allow', "cat <<'EOF'\ncat private_vault/a.json\nEOF\ncat private_vault/a.json"],
+  // Unquoted delimiter: scanned, denied. Control: a body with no vault name.
+  ['cat <<EOF\n$(cat private_vault/a.json)\nEOF', 'deny', 'cat <<EOF\n$(cat src/main.js)\nEOF'],
+  ['cat <<EOF\ncat private_vault/a.json\nEOF', 'deny', 'cat <<EOF\ncat src/main.js\nEOF'],
+  // A body the command runs stays scanned. Control: the body fed to cat.
+  ["bash <<'EOF'\ncat private_vault/a.json\nEOF", 'deny', "cat <<'EOF'\ncat private_vault/a.json\nEOF"],
+  ["cat <<'EOF' | xargs cat\nprivate_vault/a.json\nEOF", 'deny', "cat <<'EOF' | sort\nprivate_vault/a.json\nEOF"],
+  ["eval \"$(cat <<'EOF'\ncat private_vault/a.json\nEOF\n)\"", 'deny', "echo \"$(cat <<'EOF'\ncat private_vault/a.json\nEOF\n)\""],
+  // Not a heredoc body. Control: the same lines as a real quoted heredoc.
+  ["cat <<'EOF'\ncat private_vault/a.json", 'deny', "cat <<'EOF'\ncat private_vault/a.json\nEOF"], // no terminator line
+]
+
+test('heredocs: quoted-delimiter bodies are text, unquoted bodies are scanned', async (t) => {
+  const fx = makeFixture()
+  t.after(fx.cleanup)
+  for (const [command, expected, control] of HEREDOC) {
+    await t.test(`${expected}: ${JSON.stringify(command)}`, () => {
+      const [first, second] = expected === 'allow' ? [allow, deny] : [deny, allow]
+      first(runGuard('vault-guard', call('Bash', { command }), fx))
+      second(runGuard('vault-guard', call('Bash', { command: control }), fx))
+    })
+  }
+})
+
+// The configured vault, by location: a quoted body names the file, an
+// unquoted one reads it.
+test('heredoc naming the configured vault by location', () => {
+  allow(runGuard('vault-guard', call('Bash', { command: `cat <<'EOF'\n$(cat ${VAULT_FILE})\nEOF` }, ROOT), FX))
+  deny(runGuard('vault-guard', call('Bash', { command: `cat <<EOF\n$(cat ${VAULT_FILE})\nEOF` }, ROOT), FX))
+})
+
+// PowerShell has no heredocs: the same text is scanned there.
+test('heredoc text in a PowerShell command is scanned (control: Bash allows it)', (t) => {
+  const fx = makeFixture()
+  t.after(fx.cleanup)
+  const command = "cat <<'EOF'\ncat private_vault/a.json\nEOF"
+  deny(runGuard('vault-guard', call('PowerShell', { command }), fx))
+  allow(runGuard('vault-guard', call('Bash', { command }), fx))
+})
+
+test('the command word is checked by the name rule', (t) => {
+  const fx = makeFixture()
+  t.after(fx.cleanup)
+  deny(runGuard('vault-guard', call('Bash', { command: './private_vault/run.sh' }), fx))
+  allow(runGuard('vault-guard', call('Bash', { command: './scripts/run.sh' }), fx))
+})
+
 test('every row in the pair tables has both sides', () => {
   assert.ok(NAME_RULE.every((row) => row.length === 3 && row[1] && row[2]))
+  assert.ok(HEREDOC.every((row) => row.length === 3 && row[0] && row[2] && ['allow', 'deny'].includes(row[1])))
   assert.ok(WRAPPED.every(([, form]) => form.includes('%')))
 })
