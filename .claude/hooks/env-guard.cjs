@@ -41,14 +41,13 @@
 
 'use strict'
 
-const { commandName, fnmatch, main } = require('./hook-utils.cjs')
+const { SHELL_TOOLS, WILDCARD, bracketEnd, commandName, fnmatch, main, toolCall } = require('./hook-utils.cjs')
 
 const GUARD = 'env-guard'
 
 // `.env`, `.env.local`, `.env.production`, ... (case-insensitive: Windows).
 const ENV_NAME = /^\.env(\..+)?$/i
 const EXAMPLE = '.env.example'
-const WILDCARD = /[*?[]/
 const BRACE = /^(.*)\{([^}]*)\}(.*)$/
 
 function basename(p) {
@@ -85,13 +84,9 @@ function expandBraces(pattern) {
 function globUnits(pattern) {
   const units = []
   let i = 0
-  const n = pattern.length
-  while (i < n) {
+  while (i < pattern.length) {
     if (pattern[i] === '[') {
-      let j = i + 1
-      if (j < n && pattern[j] === '!') j++
-      if (j < n && pattern[j] === ']') j++
-      const end = pattern.indexOf(']', j)
+      const end = bracketEnd(pattern, i)
       if (end >= 0) {
         units.push(pattern.slice(i, end + 1))
         i = end + 1
@@ -196,14 +191,13 @@ function grepGlobReachesEnv(glob) {
 
 // Which input fields of each non-shell tool can name a file, and the check
 // for each. Grep's `pattern` is a content regex, not a path.
-const PATH_FIELDS = {
-  Read: { file_path: namesEnvFile },
-  Edit: { file_path: namesEnvFile },
-  Write: { file_path: namesEnvFile },
-  Grep: { path: namesEnvFile, glob: grepGlobReachesEnv },
-  Glob: { path: namesEnvFile, pattern: namesEnvFile },
-}
-const SHELL_TOOLS = new Set(['Bash', 'PowerShell'])
+const PATH_FIELDS = new Map([
+  ['Read', { file_path: namesEnvFile }],
+  ['Edit', { file_path: namesEnvFile }],
+  ['Write', { file_path: namesEnvFile }],
+  ['Grep', { path: namesEnvFile, glob: grepGlobReachesEnv }],
+  ['Glob', { path: namesEnvFile, pattern: namesEnvFile }],
+])
 
 // ---------------------------------------------------------------------------
 // Shell commands
@@ -270,13 +264,11 @@ function commandNamesEnvFile(command, bash = false) {
 
 /** The matched target when the tool call names a .env file, else null. */
 function evaluate(payload) {
-  if (!payload || typeof payload !== 'object') return null
-  const tool = payload.tool_name
-  const input = payload.tool_input
-  if (!input || typeof input !== 'object') return null
+  const call = toolCall(payload)
+  if (!call) return null
+  const { tool, input } = call
   if (SHELL_TOOLS.has(tool)) return commandNamesEnvFile(input.command, tool === 'Bash')
-  const fields = Object.prototype.hasOwnProperty.call(PATH_FIELDS, tool) ? PATH_FIELDS[tool] : {}
-  for (const [field, namesEnv] of Object.entries(fields)) {
+  for (const [field, namesEnv] of Object.entries(PATH_FIELDS.get(tool) || {})) {
     if (namesEnv(input[field])) return input[field]
   }
   return null
@@ -293,4 +285,4 @@ function reason(target) {
 
 if (require.main === module) main(GUARD, evaluate, reason)
 
-module.exports = { GUARD, evaluate, reason, namesEnvFile, grepGlobReachesEnv, commandNamesEnvFile }
+module.exports = { GUARD, reason }

@@ -12,7 +12,7 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const path = require('path')
-const { makeFixture, runGuard, call } = require('./helpers.cjs')
+const { makeFixture, liveVaultFixture, runGuard, call, deny, allow } = require('./helpers.cjs')
 const { runHook } = require('../../.claude/hooks/hook-utils.cjs')
 const envGuard = require('../../.claude/hooks/env-guard.cjs')
 const vaultGuard = require('../../.claude/hooks/vault-guard.cjs')
@@ -22,9 +22,7 @@ const FAIL_REASON = /^(env-guard|vault-guard) could not complete its check \((\w
 test('vault-guard denies when the ember-2 .env exists but cannot be read', (t) => {
   const fx = makeFixture({ env: { dir: true } }) // a directory named .env: EISDIR
   t.after(fx.cleanup)
-  const r = runGuard('vault-guard', call('Read', { file_path: path.join(fx.project, 'src', 'main.js') }), fx)
-  assert.equal(r.status, 0, r.stderr)
-  assert.equal(r.decision, 'deny')
+  const r = deny(runGuard('vault-guard', call('Read', { file_path: path.join(fx.project, 'src', 'main.js') }), fx))
   const m = r.reason.match(FAIL_REASON)
   assert.ok(m, r.reason)
   assert.equal(m[1], 'vault-guard')
@@ -32,11 +30,9 @@ test('vault-guard denies when the ember-2 .env exists but cannot be read', (t) =
 })
 
 test('control: the same call with a readable .env is allowed', (t) => {
-  const fx = makeFixture({ env: 'PRIVATE_VAULT_PATH=vaults/live\n', dirs: ['ember-2/vaults/live'] })
+  const fx = liveVaultFixture()
   t.after(fx.cleanup)
-  const r = runGuard('vault-guard', call('Read', { file_path: path.join(fx.project, 'src', 'main.js') }), fx)
-  assert.equal(r.status, 0, r.stderr)
-  assert.equal(r.stdout, '')
+  allow(runGuard('vault-guard', call('Read', { file_path: path.join(fx.project, 'src', 'main.js') }), fx))
 })
 
 for (const guard of [envGuard, vaultGuard]) {
@@ -89,7 +85,7 @@ const NO_INPUT = [
 
 for (const guard of ['env-guard', 'vault-guard']) {
   test(`${guard}: payloads with no usable input are allowed with exit 0`, (t) => {
-    const fx = makeFixture({ env: 'PRIVATE_VAULT_PATH=vaults/live\n', dirs: ['ember-2/vaults/live'] })
+    const fx = liveVaultFixture()
     t.after(fx.cleanup)
     for (const raw of NO_INPUT) {
       const r = runGuard(guard, raw, fx)
@@ -98,8 +94,7 @@ for (const guard of ['env-guard', 'vault-guard']) {
     }
     // Control: a usable payload on the same channel is denied.
     const target = guard === 'env-guard' ? '.env' : path.join(fx.ember2, 'vaults', 'live', 'a.json')
-    const r = runGuard(guard, JSON.stringify(call('Read', { file_path: target })), fx)
-    assert.equal(r.decision, 'deny')
+    deny(runGuard(guard, JSON.stringify(call('Read', { file_path: target })), fx))
   })
 }
 

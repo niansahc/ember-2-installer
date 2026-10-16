@@ -58,12 +58,13 @@
 
 const fs = require('fs')
 const path = require('path')
-const { absolutePath, commandName, expandUser, fnmatch, main, projectDir } = require('./hook-utils.cjs')
+const {
+  SHELL_TOOLS, WILDCARD, absolutePath, commandName, expandUser, fnmatch, main, projectDir, toolCall,
+} = require('./hook-utils.cjs')
 
 const GUARD = 'vault-guard'
 const VAULT_DIR = 'private_vault'
 const VAULT_KEY = 'PRIVATE_VAULT_PATH'
-const WILDCARDS = /[*?[]/
 
 /** The sibling ember-2 checkout, whose .env configures the vault. */
 function ember2Root() {
@@ -87,7 +88,7 @@ function components(p) {
 
 /** fnmatchcase for a glob component, equality for a literal one. */
 function matches(name, pattern) {
-  return WILDCARDS.test(pattern) ? fnmatch(name, pattern) : name === pattern
+  return WILDCARD.test(pattern) ? fnmatch(name, pattern) : name === pattern
 }
 
 function namesVaultDir(component) {
@@ -124,7 +125,7 @@ function realpathLoose(p) {
 function resolutions(p, base) {
   const lexical = absolutePath(p, base)
   const forms = [lexical]
-  if (!WILDCARDS.test(lexical)) {
+  if (!WILDCARD.test(lexical)) {
     const real = realpathLoose(lexical)
     if (real !== lexical) forms.push(real)
   }
@@ -201,23 +202,25 @@ function vaultDirs() {
   const configured = configuredVault()
   if (configured) candidates.push([configured, root])
   const vaults = []
+  const seen = new Set()
   for (const [raw, base] of candidates) {
-    // vault_path.py: strip, ~, relative against the root, realpath.
+    // vault_path.py: strip, ~, relative against the root, realpath. stat
+    // follows junctions and symlinks, so a missing vault (the usual case
+    // for the private_vault candidates) costs one syscall and no realpath.
     const lexicalPath = path.resolve(base, expandUser(raw.trim()))
-    const real = realpathLoose(lexicalPath)
     let stat
     try {
-      stat = fs.statSync(real)
+      stat = fs.statSync(lexicalPath, { throwIfNoEntry: false })
     } catch {
-      continue
+      stat = undefined
     }
-    if (!stat.isDirectory()) continue
-    const forms = [components(real)]
-    const lexical = components(absolutePath(raw.trim(), base))
-    if (!forms.some((f) => f.join('/') === lexical.join('/'))) forms.push(lexical)
-    const known = new Set(vaults.flatMap((v) => v.forms.map((f) => f.join('/'))))
-    if (forms.some((f) => known.has(f.join('/')))) continue
-    vaults.push({ path: real, forms })
+    if (!stat || !stat.isDirectory()) continue
+    const real = realpathLoose(lexicalPath)
+    const forms = [components(real), components(absolutePath(raw.trim(), base))]
+    const keys = [...new Set(forms.map((f) => f.join('/')))]
+    if (keys.some((k) => seen.has(k))) continue
+    keys.forEach((k) => seen.add(k))
+    vaults.push({ path: real, forms: keys.length === 1 ? [forms[0]] : forms })
   }
   return vaults
 }
@@ -237,21 +240,14 @@ function aboveVault(forms, vault) {
 // Reach (Grep / Glob)
 // ---------------------------------------------------------------------------
 
-/** A glob, joined to its search root, can match something below `vault`. */
-function globReaches(pattern, roots, vault) {
-  return roots.some((root) =>
-    vault.forms.some((v) => covers(components(absolutePath(pattern, root)), v, true)),
-  )
+/** A glob joined to each search root, as components. */
+function globForms(pattern, roots) {
+  return roots.map((root) => components(absolutePath(pattern, root)))
 }
 
-/** A Grep rooted above `vault` would search its content. */
-function grepReaches(glob, roots, vault) {
-  // ripgrep globs are relative to the search root, a leading `/` included.
-  const parts = (glob || '').replace(/\\/g, '/').split('/').filter(Boolean)
-  // No glob, a negated glob, or an unanchored glob: ripgrep descends every
-  // subdirectory. Only an anchored whitelisting glob can keep it out.
-  if (glob == null || glob.startsWith('!') || parts.length === 1) return true
-  return globReaches(parts.join('/'), roots, vault)
+/** A glob (as globForms) can match something below `vault`. */
+function globReaches(forms, vault) {
+  return forms.some((f) => vault.forms.some((v) => covers(f, v, true)))
 }
 
 function reachesVault(tool, input, cwd, vaults) {
@@ -260,11 +256,22 @@ function reachesVault(tool, input, cwd, vaults) {
   const rootForms = roots.map(components)
   const raw = input[tool === 'Glob' ? 'pattern' : 'glob']
   const pattern = typeof raw === 'string' && raw ? raw : null
+  // Glob: the pattern against the root. Grep: ripgrep globs are relative to
+  // the search root, a leading `/` included. No glob, a negated glob, or an
+  // unanchored glob lets ripgrep descend every subdirectory (forms = null);
+  // only an anchored whitelisting glob can keep it out.
+  let forms = null
+  if (tool === 'Glob') {
+    forms = pattern ? globForms(pattern, roots) : []
+  } else if (pattern && !pattern.startsWith('!')) {
+    const parts = pattern.replace(/\\/g, '/').split('/').filter(Boolean)
+    if (parts.length !== 1) forms = globForms(parts.join('/'), roots)
+  }
   for (const vault of vaults) {
     if (rootForms.some((f) => vault.forms.some((v) => covers(f, v)))) return root
     if (tool === 'Glob') {
-      if (pattern && globReaches(pattern, roots, vault)) return pattern
-    } else if (aboveVault(rootForms, vault) && grepReaches(pattern, roots, vault)) {
+      if (globReaches(forms, vault)) return pattern
+    } else if (aboveVault(rootForms, vault) && (forms === null || globReaches(forms, vault))) {
       return pattern || root
     }
   }
@@ -272,14 +279,13 @@ function reachesVault(tool, input, cwd, vaults) {
 }
 
 // Which input fields of each path tool can name a path.
-const PATH_FIELDS = {
-  Read: ['file_path'],
-  Edit: ['file_path'],
-  Write: ['file_path'],
-  Grep: ['path', 'glob'],
-  Glob: ['path', 'pattern'],
-}
-const SHELL_TOOLS = new Set(['Bash', 'PowerShell'])
+const PATH_FIELDS = new Map([
+  ['Read', ['file_path']],
+  ['Edit', ['file_path']],
+  ['Write', ['file_path']],
+  ['Grep', ['path', 'glob']],
+  ['Glob', ['path', 'pattern']],
+])
 
 // ---------------------------------------------------------------------------
 // Shell commands
@@ -425,7 +431,7 @@ function recursiveRoots(tokens, utility) {
       flags.some((f) => PS_RECURSE.has(f.toLowerCase()) || (!f.startsWith('--') && f.includes('R'))) ||
       switches.includes('/s')
     if (!recurses) return null
-    return plain.length ? plain.map((a) => (WILDCARDS.test(a) ? dirOf(a) : a) || '.') : ['.']
+    return plain.length ? plain.map((a) => (WILDCARD.test(a) ? dirOf(a) : a) || '.') : ['.']
   }
   return null
 }
@@ -441,7 +447,10 @@ function stageReaches(direct, base, vaults) {
   for (const [tokens, utility] of direct) {
     const roots = recursiveRoots(tokens, utility)
     if (!roots) continue
-    if (roots.some((root) => vaults.some((v) => aboveVault(pathForms(root, base), v)))) return true
+    for (const root of roots) {
+      const forms = pathForms(root, base) // realpath once per root, not per vault
+      if (vaults.some((v) => aboveVault(forms, v))) return true
+    }
   }
   return false
 }
@@ -487,18 +496,17 @@ function commandReadsVault(command, cwd) {
 
 /** { kind, target } when the call would touch vault content, else null. */
 function evaluate(payload) {
-  if (!payload || typeof payload !== 'object') return null
-  const tool = payload.tool_name
-  const input = payload.tool_input
-  if (!input || typeof input !== 'object') return null
-  const cwd = typeof payload.cwd === 'string' && payload.cwd ? payload.cwd : process.cwd()
+  const call = toolCall(payload)
+  if (!call) return null
+  const { tool, input, cwd } = call
   if (SHELL_TOOLS.has(tool)) {
     if (typeof input.command !== 'string' || !input.command) return null
     const utility = commandReadsVault(input.command, cwd)
     return utility ? { kind: 'shell', target: utility } : null
   }
-  if (!Object.prototype.hasOwnProperty.call(PATH_FIELDS, tool)) return null
-  for (const field of PATH_FIELDS[tool]) {
+  const fields = PATH_FIELDS.get(tool)
+  if (!fields) return null
+  for (const field of fields) {
     if (namesVaultPath(input[field])) return { kind: 'path', target: input[field] }
   }
   const vaults = vaultDirs()
@@ -533,4 +541,4 @@ function reason({ kind, target }) {
 
 if (require.main === module) main(GUARD, evaluate, reason)
 
-module.exports = { GUARD, evaluate, reason, namesVaultPath, envFileValue, shellTokens, vaultDirs }
+module.exports = { GUARD, reason }

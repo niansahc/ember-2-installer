@@ -7,7 +7,9 @@
 //   - absolutePath(): one resolution of a path string an agent wrote in a
 //     tool call (Git Bash, WSL, device-prefix and drive-relative forms, ~).
 //   - commandName(): one "bare command name" rule.
-//   - fnmatch(): Python fnmatchcase for one glob (*, ?, [...], [!...]).
+//   - fnmatch(), bracketEnd(), WILDCARD: one glob grammar (*, ?, [...],
+//     [!...]) with Python fnmatchcase semantics.
+//   - toolCall(), SHELL_TOOLS: the usable part of a payload.
 //   - runHook(): stdin -> evaluate -> a deny on stdout, always exit 0, and
 //     fail closed: an exception inside the check is a deny that names only
 //     the guard and the exception type (its message can carry a vault path).
@@ -62,6 +64,21 @@ function commandName(word) {
   return name.endsWith('.exe') || name.endsWith('.com') ? name.slice(0, -4) : name
 }
 
+// A glob wildcard: `*`, `?`, or the start of a `[...]` set.
+const WILDCARD = /[*?[]/
+
+/**
+ * The index of the `]` closing the set that opens at `pattern[i]` (a `[`),
+ * or -1 when it is unclosed (then the `[` is a literal). A leading `!` and
+ * a `]` right after it (or after `[`) belong to the set, as in fnmatch.
+ */
+function bracketEnd(pattern, i) {
+  let j = i + 1
+  if (pattern[j] === '!') j++
+  if (pattern[j] === ']') j++
+  return pattern.indexOf(']', j)
+}
+
 const fnmatchCache = new Map()
 
 /** Python fnmatch.fnmatchcase: `*`, `?`, `[...]`, `[!...]`; an unclosed `[` is literal. */
@@ -70,16 +87,12 @@ function fnmatch(name, pattern) {
   if (!re) {
     let out = ''
     let i = 0
-    const n = pattern.length
-    while (i < n) {
+    while (i < pattern.length) {
       const c = pattern[i++]
       if (c === '*') out += '[\\s\\S]*'
       else if (c === '?') out += '[\\s\\S]'
       else if (c === '[') {
-        let j = i
-        if (j < n && pattern[j] === '!') j++
-        if (j < n && pattern[j] === ']') j++
-        const end = pattern.indexOf(']', j)
+        const end = bracketEnd(pattern, i - 1)
         if (end < 0) {
           out += '\\['
         } else {
@@ -157,34 +170,42 @@ function runHook(guard, raw, evaluate, reason) {
   }
 }
 
-/** Read stdin, run, write, exit 0. */
+/** Read stdin, run, write. runHook never throws, so the exit code stays 0. */
 function main(guard, evaluate, reason) {
   const chunks = []
   process.stdin.on('data', (c) => chunks.push(c))
   process.stdin.on('end', () => {
-    let result
-    try {
-      result = runHook(guard, Buffer.concat(chunks).toString('utf8'), evaluate, reason)
-    } catch (err) {
-      result = { stdout: errorDenial(guard, err), stderr: '' }
-    }
-    if (result.stderr) process.stderr.write(result.stderr)
-    if (result.stdout) process.stdout.write(result.stdout)
-    process.exitCode = 0
+    const result = runHook(guard, Buffer.concat(chunks).toString('utf8'), evaluate, reason)
+    process.stderr.write(result.stderr)
+    process.stdout.write(result.stdout)
   })
 }
 
+const SHELL_TOOLS = new Set(['Bash', 'PowerShell'])
+
+/**
+ * The usable part of a hook payload: { tool, input, cwd }, or null when
+ * there is no tool_input object to check. `cwd` falls back to the hook
+ * process cwd.
+ */
+function toolCall(payload) {
+  if (!payload || typeof payload !== 'object') return null
+  const input = payload.tool_input
+  if (!input || typeof input !== 'object') return null
+  const cwd = typeof payload.cwd === 'string' && payload.cwd ? payload.cwd : process.cwd()
+  return { tool: payload.tool_name, input, cwd }
+}
+
 module.exports = {
-  IS_WIN,
-  CHECKOUT_ROOT,
+  WILDCARD,
+  SHELL_TOOLS,
   projectDir,
   expandUser,
   absolutePath,
   commandName,
+  bracketEnd,
   fnmatch,
-  denial,
-  errorType,
-  errorDenial,
+  toolCall,
   runHook,
   main,
 }

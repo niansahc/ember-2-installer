@@ -13,18 +13,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
 const path = require('path')
-const { makeFixture, runGuard, call } = require('./helpers.cjs')
-
-const deny = (r) => {
-  assert.equal(r.status, 0, r.stderr)
-  assert.equal(r.decision, 'deny', `expected deny, got ${r.stdout || 'no decision'}`)
-  return r
-}
-const allow = (r) => {
-  assert.equal(r.status, 0, r.stderr)
-  assert.equal(r.stdout, '', `expected allow, got ${r.reason}`)
-  return r
-}
+const { makeFixture, liveVaultFixture, runGuard, call, deny, allow } = require('./helpers.cjs')
 
 // ---------------------------------------------------------------------------
 // Name rule: no vault directory and no configuration needed.
@@ -66,7 +55,7 @@ test('name rule', async (t) => {
 // Configured vault, relative value: resolved against the ember-2 root.
 // ---------------------------------------------------------------------------
 
-const REL = makeFixture({ env: 'PRIVATE_VAULT_PATH=vaults/live\n', dirs: ['ember-2/vaults/live'] })
+const REL = liveVaultFixture()
 test.after(() => REL.cleanup())
 const V = path.join(REL.ember2, 'vaults', 'live')
 const VA = path.join(V, 'a.json')
@@ -182,7 +171,7 @@ test('process environment wins over the .env file', (t) => {
 })
 
 test('a vault reached through a junction or symlink', (t) => {
-  const fx = makeFixture({ env: 'PRIVATE_VAULT_PATH=vaults/live\n', dirs: ['ember-2/vaults/live'] })
+  const fx = liveVaultFixture()
   t.after(fx.cleanup)
   const link = path.join(fx.root, 'link')
   try {

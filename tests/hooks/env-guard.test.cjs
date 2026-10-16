@@ -8,7 +8,7 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const path = require('path')
-const { makeFixture, runGuard, call } = require('./helpers.cjs')
+const { makeFixture, runGuard, call, deny, allow } = require('./helpers.cjs')
 
 const fx = makeFixture()
 test.after(() => fx.cleanup())
@@ -69,18 +69,14 @@ const ALLOW = [
 
 for (const [tool, input] of DENY) {
   test(`deny ${tool} ${JSON.stringify(input)}`, () => {
-    const r = runGuard('env-guard', call(tool, input), fx)
-    assert.equal(r.status, 0, r.stderr)
-    assert.equal(r.decision, 'deny')
+    const r = deny(runGuard('env-guard', call(tool, input), fx))
     assert.match(r.reason, /\.env files may not be read/)
   })
 }
 
 for (const [tool, input] of ALLOW) {
   test(`allow ${tool} ${JSON.stringify(input)}`, () => {
-    const r = runGuard('env-guard', call(tool, input), fx)
-    assert.equal(r.status, 0, r.stderr)
-    assert.equal(r.stdout, '')
+    allow(runGuard('env-guard', call(tool, input), fx))
   })
 }
 
@@ -94,7 +90,7 @@ test('every guarded tool has deny and allow cases', () => {
 
 test('.env.example is allowed where .env is denied (paired control)', () => {
   for (const tool of ['Read', 'Edit', 'Write']) {
-    assert.equal(runGuard('env-guard', call(tool, { file_path: at('.env.example') }), fx).stdout, '')
-    assert.equal(runGuard('env-guard', call(tool, { file_path: at('.env') }), fx).decision, 'deny')
+    allow(runGuard('env-guard', call(tool, { file_path: at('.env.example') }), fx))
+    deny(runGuard('env-guard', call(tool, { file_path: at('.env') }), fx))
   }
 })

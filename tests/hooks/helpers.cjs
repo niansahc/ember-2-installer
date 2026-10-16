@@ -10,6 +10,7 @@
 
 'use strict'
 
+const assert = require('node:assert/strict')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
@@ -83,4 +84,23 @@ function call(tool, input, extra = {}) {
   return { tool_name: tool, tool_input: input, ...extra }
 }
 
-module.exports = { HOOKS, makeFixture, hookEnv, runGuard, call }
+/** The usual configured vault: a relative value naming <ember-2>/vaults/live. */
+function liveVaultFixture() {
+  return makeFixture({ env: 'PRIVATE_VAULT_PATH=vaults/live\n', dirs: ['ember-2/vaults/live'] })
+}
+
+/** Assert a runGuard result is a deny with exit 0; returns it. */
+function deny(r) {
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(r.decision, 'deny', `expected deny, got ${r.stdout || 'no decision'}`)
+  return r
+}
+
+/** Assert a runGuard result is an allow (no decision) with exit 0; returns it. */
+function allow(r) {
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(r.stdout, '', `expected allow, got ${r.reason}`)
+  return r
+}
+
+module.exports = { HOOKS, makeFixture, liveVaultFixture, hookEnv, runGuard, call, deny, allow }
