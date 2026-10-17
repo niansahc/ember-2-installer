@@ -175,4 +175,8 @@ Blocks pushes during US Eastern business hours (9am-5pm Mon-Fri). Local hook: `h
 
 ## Hooks
 
-Configured in `.claude/settings.json`, scripts in `.claude/hooks/`. Pre-edit hook rejects .env files. Post-edit hook runs `npm run test:e2e` on source file changes.
+Configured in `.claude/settings.json`, scripts in `.claude/hooks/`. PreToolUse guards on Read, Grep, Glob, Edit, Write, Bash and PowerShell: `env-guard.cjs` denies `.env` and `.env.*` in any repo (`.env.example` allowed); `vault-guard.cjs` denies any `private_vault` path and the configured vault (`PRIVATE_VAULT_PATH` from the sibling ember-2 `.env`). Both deny on an internal error (fail closed); an unparseable payload is allowed. In Bash, a heredoc body is skipped only when it is literal text (quoted delimiter, `<<'EOF'`) for an inert consumer: tee to a file, `git commit -F -`, `gh --body-file -`, or `cat` inside a git/gh message value (`git commit -m "$(cat <<'EOF' ... EOF)"`); every other body is scanned. vault-guard denies a command nested past 8 levels and says it hit the nesting limit.
+
+Threat model: the guards prevent accidental exposure of `.env` and vault content by an agent. They are pattern checks on the tool call, not a sandbox, and do not defend against deliberate evasion.
+
+Tests: `npm run test:hooks` (CI: `.github/workflows/hooks.yml`, Windows, Node 22). Post-edit hook runs `npm run test:e2e` on source file changes.
