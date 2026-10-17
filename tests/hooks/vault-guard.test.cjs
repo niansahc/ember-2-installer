@@ -41,8 +41,9 @@ test('name rule', async (t) => {
     ['allow', 'Glob', { pattern: '**/*.js' }, { pattern: 'priv*/**' }],
     ['allow', 'Bash', { command: 'echo private_vault' }, { command: 'cat private_vault/a.json' }],
     ['allow', 'Bash', { command: 'echo hi > out.txt' }, { command: 'echo hi > private_vault/a.json' }],
-    // Unbalanced quote: the shell will not run it, so there is nothing to check.
+    // Unbalanced quote: the rest of the line is one quoted word, still checked.
     ['allow', 'Bash', { command: 'git commit -m "x' }, { command: 'git commit -m "x" && cat private_vault/a.json' }],
+    ['deny', 'Bash', { command: 'cat "private_vault/a.json' }],
     ['allow', 'Bash', { command: 'git commit -m "guard private_vault reads"' }, { command: 'git show HEAD:private_vault/a.json' }],
     ['allow', 'PowerShell', { command: 'Test-Path private_vault' }, { command: 'Get-Content private_vault/a.json' }],
   ]
@@ -184,14 +185,14 @@ test('process environment wins over the .env file', (t) => {
   deny(runGuard('vault-guard', call('Read', { file_path: fromFile }), fx))
 })
 
-// python-dotenv interpolation: ${VAR} and ${VAR:-default}, earlier keys
-// first, then the process environment. Each case denies the vault file the
+// python-dotenv interpolation as ember-2's load_dotenv(env_file) does it
+// (override=False): ${VAR} and ${VAR:-default}, the process environment
+// first, then earlier keys. Each case denies the vault file the
 // interpolated value names and allows a file beside it.
 const INTERPOLATED = [
   ['earlier key', (fx) => `ROOT=${fwd(fx.ember2)}\nPRIVATE_VAULT_PATH=\${ROOT}/vaults/live\n`, {}],
   ['default for an unset name', (fx) => `PRIVATE_VAULT_PATH=\${GUARD_TEST_UNSET:-${fwd(fx.ember2)}}/vaults/live\n`, {}],
   ['process environment', () => 'PRIVATE_VAULT_PATH="${GUARD_TEST_ROOT}/vaults/live"\n', (fx) => ({ GUARD_TEST_ROOT: fx.ember2 })],
-  ['earlier key over the process environment', (fx) => `GUARD_TEST_ROOT=${fwd(fx.ember2)}\nPRIVATE_VAULT_PATH=\${GUARD_TEST_ROOT}/vaults/live\n`, (fx) => ({ GUARD_TEST_ROOT: fx.home })],
   ['single-quoted value (python-dotenv interpolates it too)', (fx) => `ROOT=${fwd(fx.ember2)}\nPRIVATE_VAULT_PATH='\${ROOT}/vaults/live'\n`, {}],
   ['relative after interpolation', () => 'SUB=vaults\nPRIVATE_VAULT_PATH=${SUB}/live\n', {}],
 ]
@@ -206,6 +207,47 @@ for (const [name, envText, extraEnv] of INTERPOLATED) {
     allow(runGuard('vault-guard', call('Read', { file_path: path.join(fx.ember2, 'README.md') }), fx, extra))
   })
 }
+
+// The two values differ: the .env says <ember-2>, the process says <home>.
+// ember-2 resolves to <home>/vaults/live, so that is the vault.
+test('interpolation: the process environment wins over an earlier key', (t) => {
+  const fx = makeFixture({ dirs: ['ember-2/vaults/live', 'home/vaults/live'] })
+  t.after(fx.cleanup)
+  fs.writeFileSync(path.join(fx.ember2, '.env'), `GUARD_TEST_ROOT=${fwd(fx.ember2)}\nPRIVATE_VAULT_PATH=\${GUARD_TEST_ROOT}/vaults/live\n`)
+  const fromEnv = path.join(fx.home, 'vaults', 'live', 'a.json')
+  const fromFile = path.join(fx.ember2, 'vaults', 'live', 'a.json')
+  const extra = { GUARD_TEST_ROOT: fx.home }
+  deny(runGuard('vault-guard', call('Read', { file_path: fromEnv }), fx, extra))
+  allow(runGuard('vault-guard', call('Read', { file_path: fromFile }), fx, extra))
+  // Control: without the process value, the earlier key names the vault.
+  deny(runGuard('vault-guard', call('Read', { file_path: fromFile }), fx))
+  allow(runGuard('vault-guard', call('Read', { file_path: fromEnv }), fx))
+})
+
+test('a junction alias configured beside the vault it points to keeps its own spelling', (t) => {
+  const fx = makeFixture({ env: 'PRIVATE_VAULT_PATH=alias\n', dirs: ['ember-2/private_vault'] })
+  t.after(fx.cleanup)
+  try {
+    fs.symlinkSync(path.join(fx.ember2, 'private_vault'), path.join(fx.ember2, 'alias'), 'junction')
+  } catch (err) {
+    t.skip(`cannot create a junction or symlink here (${err.code})`)
+    return
+  }
+  // A wildcard path gets no realpath, so only the alias spelling matches it.
+  deny(runGuard('vault-guard', call('Bash', { command: 'cat ../ember-2/alias/*.json' }), fx))
+  deny(runGuard('vault-guard', call('Bash', { command: 'cat ../ember-2/al*/a.json' }), fx))
+  deny(runGuard('vault-guard', call('Glob', { pattern: '../ember-2/alias/*' }), fx))
+  deny(runGuard('vault-guard', call('Glob', { pattern: '../ember-2/al*/*' }), fx))
+  allow(runGuard('vault-guard', call('Bash', { command: 'cat ../ember-2/*.md' }), fx))
+  allow(runGuard('vault-guard', call('Glob', { pattern: '../ember-2/*.md' }), fx))
+})
+
+test('search advice appears only in Grep and Glob deny reasons', () => {
+  const read = deny(runGuard('vault-guard', call('Read', { file_path: VA }), REL))
+  const grep = deny(runGuard('vault-guard', call('Grep', { pattern: 'x', path: V }), REL))
+  assert.doesNotMatch(read.reason, /If this is a search/)
+  assert.match(grep.reason, /If this is a search/)
+})
 
 test('a vault reached through a junction or symlink', (t) => {
   const fx = liveVaultFixture()

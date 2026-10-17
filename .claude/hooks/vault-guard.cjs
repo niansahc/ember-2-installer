@@ -6,6 +6,12 @@
 // Why: vault contents (record text, names, record IDs in file names) must
 // never enter the session transcript (CLAUDE.md, Vault Privacy Rule).
 //
+// Threat model: this guard stops an agent from exposing vault content by
+// accident, through a read, search or listing it runs while working. It is
+// a pattern check on the tool call, not a sandbox, and it does not defend
+// against deliberate evasion (paths built at runtime, encoded commands,
+// scripts or interpreters that open files themselves).
+//
 // Port of ember-2 .claude/hooks/vault_guard.py (#294/#295) for the path
 // tools and secret_dump_guard.py for the shell tools, with ember-2's fail
 // closed rule (#296): an exception inside the check is a deny naming only
@@ -23,13 +29,15 @@
 //
 // The configured vault is PRIVATE_VAULT_PATH: the process environment
 // first, then the sibling ember-2 checkout's .env (<project>/../ember-2/.env),
-// parsed and interpolated as python-dotenv does (${VAR}, ${VAR:-default};
-// earlier keys, then the process environment). It is resolved the way
-// ember-2's src/core/vault_path.py resolves it: stripped, ~ expanded, a
-// relative value against the ember-2 project root (never the cwd), then
-// realpath. The value is never printed, deny reasons included. A .env that
-// exists but cannot be read, or a value with a `${` left after
-// interpolation, is an error, so a deny.
+// parsed and interpolated as ember-2's load_dotenv(env_file) does
+// (python-dotenv, override=False): ${VAR} and ${VAR:-default} take the
+// process environment first, then earlier keys in the file, then the
+// default. It is resolved the way ember-2's src/core/vault_path.py resolves
+// it: stripped, ~ expanded, a relative value against the ember-2 project
+// root (never the cwd), then realpath. The value is never printed, deny
+// reasons included. A .env that exists but cannot be read, a value with a
+// `${` left after interpolation, or a vault location that cannot be checked
+// (a stat error other than "not there") is an error, so a deny.
 //
 // Path tools (Read/Edit/Write/Grep/Glob): a path field that names a vault,
 // or resolves to a location at or under an existing vault, is denied.
@@ -46,22 +54,28 @@
 // checkout is ignored only by ripgrep's nested-repo rules, so every vault is
 // treated as reachable from an ancestor.
 //
-// Shell tools (Bash/PowerShell). The command is split into pipelines and
-// pipe stages. Command substitution ($(...), and backticks in Bash), the
-// strings run by bash/sh -c, pwsh/powershell -Command, cmd /c and eval, and
-// groups ( ... ) and { ... } are scanned as commands of their own. Leading
-// shell keywords (if, then, do, !, ...), VAR=value words and the wrappers
-// sudo, env, time, nice and nohup are skipped to find the command a stage
-// runs. In Bash, the body of a quoted-delimiter heredoc (<<'EOF') is literal
-// text and is dropped first, unless the command also runs a shell, eval,
-// xargs, read or an interpreter (dropLiteralHeredocs in hook-utils.cjs); an
-// unquoted delimiter body is scanned as commands. Then:
-//   - name rule: a stage whose command word, operands, flag values (--file=x, if=x,
-//     -Path:x) or redirections name a private_vault directory is denied,
-//     whatever the command, except the pattern operand of a content search
-//     and the message of git/gh -m/--body/--title/--notes. Commands that
-//     only print or test their arguments (echo, printf, test, Test-Path,
-//     Write-Output, mkdir) are checked on their redirections only;
+// Shell tools (Bash/PowerShell). The command is parsed by parseShell
+// (hook-utils.cjs: quotes, escapes, substitutions, heredocs) into
+// pipelines and pipe stages. Command substitution ($(...), and in Bash
+// backticks and <(...) >(...)), the command lines run by the programs in
+// SHELLS (bash/sh/zsh/fish/csh -c, pwsh -Command, cmd /c, eval, wsl), and
+// groups ( ... ) and { ... } are scanned as commands of their own. A
+// heredoc body is scanned as commands too, unless it is literal text an
+// inert consumer receives (literalHeredocs in hook-utils.cjs: a quoted
+// delimiter, fed to tee, git commit -F -, gh --body-file -, or to cat in a
+// git/gh message value); Bash runs the substitutions in an unquoted body, so
+// they are always scanned. Leading shell keywords (if, then, do, !, ...),
+// VAR=value words and the wrappers sudo, env, time, nice and nohup are
+// skipped to find the command a stage runs. The words a substitution
+// prints (its own words and heredoc text) count as operands of the word it
+// sits in: cat $(echo private_vault/a.json) names the vault. Then:
+//   - name rule: a stage whose command word, operands, flag values
+//     (--file=x, if=x, -Path:x) or redirections name a private_vault
+//     directory is denied, whatever the command, except the pattern operand
+//     of a content search and the message of git/gh -m/--body/--title/
+//     --notes. Commands that only print or test their arguments (echo,
+//     printf, test, Test-Path, Write-Output, mkdir) are checked on their
+//     redirections only;
 //   - location rule: a stage that runs a known content-reading utility (cat,
 //     type, Get-Content, grep, rg, findstr, Select-String, ...) or a
 //     listing/counting utility (ls, dir, gci, tree, find, wc) is denied when
@@ -72,19 +86,22 @@
 //     taken for the pattern or a root; a root that does not exist adds the
 //     cwd as a root, since its flag may have taken a value.
 //
-// A pattern check on the call, not a sandbox: a path built at runtime
-// ($VAR, %VAR%), a different utility, a script, or base64 is not caught.
-// Known limit: a literal path containing a wildcard character (`[`, `*`,
-// `?`) gets no realpath, so a junction named `[x]` that points into the
-// vault is matched only by its lexical spelling.
+// Nesting limit: substitutions, nested shells and heredoc bodies are
+// followed MAX_DEPTH (8) levels deep. A command nested deeper is denied
+// with a reason that names the nesting limit.
+//
+// Known limits: a path built at runtime ($VAR, %VAR%), a different utility,
+// a script, or base64 is not caught. A literal path containing a wildcard
+// character (`[`, `*`, `?`) gets no realpath, so a junction named `[x]`
+// that points into the vault is matched only by its lexical spelling.
 
 'use strict'
 
 const fs = require('fs')
 const path = require('path')
 const {
-  SHELL_TOOLS, WILDCARD, absolutePath, commandName, dropLiteralHeredocs, expandUser, fnmatch, main, projectDir,
-  toolCall,
+  MAX_DEPTH, NestingLimit, SHELL_TOOLS, WILDCARD, absolutePath, commandName, expandUser, fnmatch,
+  literalHeredocs, main, nestedCommand, parseShell, pipelines, projectDir, proseValues, toolCall,
 } = require('./hook-utils.cjs')
 
 const GUARD = 'vault-guard'
@@ -233,9 +250,10 @@ function dotenvBindings(text) {
 }
 
 /**
- * python-dotenv resolve_variables(override=True): each value's ${VAR} and
- * ${VAR:-default} from the keys resolved so far, then the process
- * environment, then the default, then "".
+ * python-dotenv resolve_variables(override=False), the mode ember-2's
+ * load_dotenv(env_file) uses: each value's ${VAR} and ${VAR:-default} from
+ * the process environment, then the keys resolved so far, then the
+ * default, then "".
  */
 function interpolate(bindings) {
   const values = new Map()
@@ -247,8 +265,8 @@ function interpolate(bindings) {
     values.set(
       key,
       value.replace(POSIX_VARIABLE, (_, name, fallback) => {
-        if (values.has(name)) return values.get(name) ?? ''
         if (process.env[name] !== undefined) return process.env[name]
+        if (values.has(name)) return values.get(name) ?? ''
         return fallback ?? ''
       }),
     )
@@ -281,9 +299,13 @@ function configuredVault() {
 }
 
 /**
- * Existing vault directories, deduplicated, each as { forms }: the realpath
- * and the lexical spelling as components. A glob through a junction name
- * gets no realpath (it has wildcards), so only the lexical form matches it.
+ * Existing vault directories, each as { forms, keys }: `forms` the
+ * spellings that name it as components (the realpath and every lexical
+ * spelling a candidate gave), `keys` the same joined, for deduplication. A
+ * candidate that is another spelling of a vault already listed (a junction
+ * alias of it) adds its forms to that entry: a glob through the alias name
+ * gets no realpath (it has wildcards), so only the alias spelling can
+ * match it.
  */
 function vaultDirs() {
   const project = projectDir()
@@ -295,7 +317,6 @@ function vaultDirs() {
   const configured = configuredVault()
   if (configured) candidates.push([configured, root])
   const vaults = []
-  const seen = new Set()
   for (const [raw, base] of candidates) {
     // vault_path.py: strip, ~, relative against the root, realpath. stat
     // follows junctions and symlinks, so a missing vault (the usual case
@@ -304,15 +325,23 @@ function vaultDirs() {
     let stat
     try {
       stat = fs.statSync(lexicalPath, { throwIfNoEntry: false })
-    } catch {
-      stat = undefined
+    } catch (err) {
+      // Only "not there" means no vault; any other error is a deny.
+      if (!err || (err.code !== 'ENOENT' && err.code !== 'ENOTDIR')) throw err
     }
     if (!stat || !stat.isDirectory()) continue
     const forms = [components(realpathLoose(lexicalPath)), components(absolutePath(raw.trim(), base))]
-    const keys = [...new Set(forms.map((f) => f.join('/')))]
-    if (keys.some((k) => seen.has(k))) continue
-    keys.forEach((k) => seen.add(k))
-    vaults.push({ forms: keys.length === 1 ? [forms[0]] : forms })
+    const keys = forms.map((f) => f.join('/'))
+    let vault = vaults.find((v) => keys.some((k) => v.keys.has(k)))
+    if (!vault) {
+      vault = { forms: [], keys: new Set() }
+      vaults.push(vault)
+    }
+    forms.forEach((f, k) => {
+      if (vault.keys.has(keys[k])) return
+      vault.keys.add(keys[k])
+      vault.forms.push(f)
+    })
   }
   return vaults
 }
@@ -380,128 +409,8 @@ const PATH_FIELDS = new Map([
 ])
 
 // ---------------------------------------------------------------------------
-// Shell commands: parsing
+// Shell commands: stages
 // ---------------------------------------------------------------------------
-
-// Characters that split words. `(` `)` `{` `}` and `;` end a pipeline, `|`
-// a stage, `<` `>` mark a redirection target.
-const PUNCTUATION = '();<>|&{}'
-const MAX_DEPTH = 8
-
-/**
- * Command substitutions in `command`: { outer, bodies }. Each $(...) (and,
- * in Bash, each `...`) outside single quotes is cut out of `outer` and its
- * text returned in `bodies`, to be scanned as a command of its own.
- */
-function substitutions(command, backticks) {
-  let outer = ''
-  const bodies = []
-  let single = false
-  let double = false
-  for (let i = 0; i < command.length; i++) {
-    const c = command[i]
-    if (c === "'" && !double) single = !single
-    else if (c === '"' && !single) double = !double
-    if (!single && c === '$' && command[i + 1] === '(') {
-      let depth = 1
-      let j = i + 2
-      for (; j < command.length && depth; j++) {
-        if (command[j] === '(') depth++
-        else if (command[j] === ')') depth--
-      }
-      bodies.push(command.slice(i + 2, depth ? j : j - 1))
-      outer += ' '
-      i = j - 1
-    } else if (!single && backticks && c === '`') {
-      const end = command.indexOf('`', i + 1)
-      bodies.push(command.slice(i + 1, end < 0 ? command.length : end))
-      outer += ' '
-      i = end < 0 ? command.length : end
-    } else {
-      outer += c
-    }
-  }
-  return { outer, bodies }
-}
-
-/**
- * The command as shell tokens: quote-aware (a `|` inside quotes is part of a
- * word; adjacent quoted and unquoted text join), runs of PUNCTUATION as
- * their own tokens, `${...}` kept inside its word, a newline as `;`, `#` at
- * a word start as a comment. Backslashes become `/` first so Windows paths
- * survive. Unbalanced quotes: null (no match; the shell will not run it).
- */
-function shellTokens(command) {
-  const s = command.replace(/\\/g, '/')
-  const tokens = []
-  let word = null
-  const flush = () => {
-    if (word !== null) tokens.push(word)
-    word = null
-  }
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i]
-    if (c === '\n') {
-      flush()
-      tokens.push(';')
-    } else if (/\s/.test(c)) {
-      flush()
-    } else if (c === '$' && s[i + 1] === '{') {
-      const end = s.indexOf('}', i)
-      const stop = end < 0 ? s.length : end + 1
-      word = (word || '') + s.slice(i, stop)
-      i = stop - 1
-    } else if (PUNCTUATION.includes(c)) {
-      flush()
-      let j = i
-      while (j < s.length && PUNCTUATION.includes(s[j])) j++
-      tokens.push(s.slice(i, j))
-      i = j - 1
-    } else if (c === "'" || c === '"') {
-      const end = s.indexOf(c, i + 1)
-      if (end < 0) return null
-      word = (word || '') + s.slice(i + 1, end)
-      i = end
-    } else if (c === '#' && word === null) {
-      const end = s.indexOf('\n', i)
-      if (end < 0) break
-      i = end - 1
-    } else {
-      word = (word || '') + c
-    }
-  }
-  flush()
-  return tokens
-}
-
-/**
- * Pipelines of pipe stages, each stage { words, redirs }: `redirs` are the
- * targets of < and > (a file the stage reads or writes). Pipelines end at
- * ; && || & and at ( ) { } (a group runs its own commands).
- */
-function pipelines(command) {
-  const tokens = shellTokens(command)
-  if (!tokens) return []
-  const newStage = () => ({ words: [], redirs: [] })
-  const out = [[newStage()]]
-  let redirect = false
-  for (const token of tokens) {
-    const pipeline = out[out.length - 1]
-    const stage = pipeline[pipeline.length - 1]
-    const punct = token !== '' && [...token].every((ch) => PUNCTUATION.includes(ch))
-    if (!punct) {
-      ;(redirect ? stage.redirs : stage.words).push(token)
-      redirect = false
-    } else if (token === '|' || token === '|&') {
-      pipeline.push(newStage())
-    } else if (/[;(){}]/.test(token) || token === '&&' || token === '||' || token === '&') {
-      out.push([newStage()])
-    } else if (/[<>]/.test(token)) {
-      redirect = true
-    }
-  }
-  return out
-}
 
 // Words that can open a stage before the command it runs.
 const KEYWORDS = new Set(['if', 'then', 'else', 'elif', 'fi', 'do', 'done', 'while', 'until', '!'])
@@ -516,8 +425,8 @@ const WRAPPERS = new Map([
   ['nohup', new Set()],
 ])
 
-/** `words` from the command the stage runs: keywords, VAR=value and wrappers skipped. */
-function unwrap(words) {
+/** The index in `words` of the command the stage runs: keywords, VAR=value and wrappers skipped. */
+function commandStart(words) {
   let i = 0
   while (i < words.length) {
     const word = words[i]
@@ -532,72 +441,85 @@ function unwrap(words) {
       i += valueFlags.has(words[i]) ? 2 : 1
     }
   }
-  return words.slice(i)
+  return i
+}
+
+/** Heredoc text as words: a body is text, so only blanks and punctuation split it. */
+function bodyWords(text) {
+  return text.replace(/\\/g, '/').split(/[\s'"`;|&<>(){}]+/).filter(Boolean)
 }
 
 /**
- * A stage as { words, redirs, runner, utility, at }: `runner` is the command
- * the stage starts, `utility` the one that reads (for `xargs [flags] cmd`,
- * cmd) and `at` the index of the utility word in `words`.
+ * The words a substitution can print, and so add to the word it sits in:
+ * every word in it, in the substitutions nested in it, and in its heredoc
+ * bodies.
  */
-function analyse(stage) {
-  const words = unwrap(stage.words)
+function outputWords(script, level) {
+  if (level > MAX_DEPTH) throw new NestingLimit()
+  const out = []
+  for (const token of script.tokens) {
+    if (typeof token === 'string') continue
+    if (token.heredoc) {
+      out.push(...bodyWords(token.heredoc.body))
+      continue
+    }
+    if (token.text) out.push(token.text)
+    for (const sub of token.subs) out.push(...outputWords(sub, level + 1))
+  }
+  return out
+}
+
+/**
+ * A parsed stage as { words, output, prose, redirs, heredocs, runner,
+ * utility, at }: `words` the texts from the command the stage runs,
+ * `output[k]` the words the substitutions in words[k] print (none for a
+ * git/gh message value), `prose` the indexes of message values, `redirs`
+ * the redirection targets with their substitutions' words, `runner` the
+ * command, `utility` the one that reads (for `xargs [flags] cmd`, cmd) and
+ * `at` the index of the utility word in `words`.
+ */
+function analyse(stage, level) {
+  const start = commandStart(stage.words.map((w) => w.text))
+  const parsed = stage.words.slice(start)
+  const words = parsed.map((w) => w.text)
   const runner = words.length ? commandName(words[0]) : ''
   let at = 0
   if (runner === 'xargs') {
     const i = words.findIndex((w, k) => k > 0 && !w.startsWith('-'))
     if (i > 0) at = i
   }
-  return { words, redirs: stage.redirs, runner, utility: words.length ? commandName(words[at]) : '', at }
-}
-
-// Shells and the flag after which their argument is a command line.
-const NESTED_SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh'])
-const PS_SHELLS = new Set(['pwsh', 'powershell'])
-
-/**
- * The command line a stage hands to another interpreter, as
- * { command, flavor }, or null: bash/sh -c "...", pwsh/powershell
- * -Command ..., cmd /c ..., eval ...
- */
-function nestedCommand(s) {
-  const args = s.words.slice(1)
-  if (NESTED_SHELLS.has(s.runner)) {
-    const i = args.findIndex((a) => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(a))
-    return i >= 0 && i + 1 < args.length ? { command: args[i + 1], flavor: 'bash' } : null
+  const prose = proseValues(words)
+  const printed = (w) => w.subs.flatMap((sub) => outputWords(sub, level + 1))
+  return {
+    words,
+    output: parsed.map((w, k) => (prose.has(k) ? [] : printed(w))),
+    prose,
+    redirs: stage.redirs.flatMap((w) => [w.text, ...printed(w)]).filter(Boolean),
+    heredocs: stage.heredocs,
+    runner,
+    utility: words.length ? commandName(words[at]) : '',
+    at,
   }
-  if (PS_SHELLS.has(s.runner)) {
-    const i = args.findIndex((a) => a.length >= 2 && '-command'.startsWith(a.toLowerCase()))
-    const rest = i >= 0 ? args.slice(i + 1) : s.runner === 'powershell' ? args.filter((a) => !a.startsWith('-')) : []
-    return rest.length ? { command: rest.join(' '), flavor: 'ps' } : null
-  }
-  if (s.runner === 'cmd') {
-    const i = args.findIndex((a) => /^\/[ck]$/i.test(a))
-    return i >= 0 && i + 1 < args.length ? { command: args.slice(i + 1).join(' '), flavor: 'ps' } : null
-  }
-  if (s.runner === 'eval' && args.length) return { command: args.join(' '), flavor: 'bash' }
-  return null
 }
 
 // ---------------------------------------------------------------------------
 // Shell commands: rules
 // ---------------------------------------------------------------------------
 
+// Content searches: the first positional operand is a pattern, not a path.
+// The Unix ones take the case-sensitive value flags below.
+const UNIX_SEARCHES = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack'])
+const SEARCHES = new Set([...UNIX_SEARCHES, 'findstr', 'select-string', 'sls'])
 // Whole-file dumps and content searches, lowercase (PowerShell and Windows
 // executables are case-insensitive). Deliberately narrow.
 const READ_UTILITIES = new Set([
   'cat', 'type', 'more', 'less', 'head', 'tail', 'xxd', 'hexdump', 'od', 'strings', 'get-content', 'gc',
-  'grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack', 'findstr', 'select-string', 'sls',
+  ...SEARCHES,
 ])
 // Listing and counting: their output is entry names (record IDs) or a count.
 const LIST_UTILITIES = new Set(['ls', 'dir', 'gci', 'get-childitem', 'tree', 'find', 'wc'])
-// Content searches: the first positional operand is a pattern, not a path.
-const SEARCHES = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack', 'findstr', 'select-string', 'sls'])
 // Commands that only print or test their arguments: name rule on redirections only.
 const NON_READING = new Set(['echo', 'printf', 'test', '[', '[[', 'test-path', 'write-output', 'write-host', 'mkdir'])
-// git/gh message flags: their value is prose. Substitutions inside it were
-// already cut out and scanned (substitutions()).
-const PROSE_FLAGS = new Set(['-m', '-am', '--message', '--body', '--title', '--notes'])
 const CD = new Set(['cd', 'chdir', 'pushd', 'set-location', 'sl', 'push-location'])
 const ALWAYS_RECURSIVE = new Set(['rg', 'ag', 'ack'])
 const GREP = new Set(['grep', 'egrep', 'fgrep'])
@@ -608,9 +530,8 @@ const GREP_RECURSE = /^(?:-[a-zA-Z]*[rR][a-zA-Z]*|--(?:dereference-)?recursive|-
 // cmd-style switches (/s, /i, /c:text); a path like /c/x has a second slash.
 const SWITCH = /^\/[a-z]+(?::[\s\S]*)?$/i
 // Flags whose value is a separate word: dropped before picking the pattern
-// and the roots. The Unix search flags are case-sensitive and apply to the
-// grep/rg family only; the PowerShell ones are not, and apply elsewhere.
-const UNIX_SEARCHES = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack'])
+// and the roots. The Unix search flags are case-sensitive and apply to
+// UNIX_SEARCHES only; the PowerShell ones are not, and apply elsewhere.
 const VALUE_FLAGS = new Set([
   '-A', '-B', '-C', '-m', '-g', '-t', '-T', '-j', '-e', '-f',
   '--after-context', '--before-context', '--context', '--max-count', '--glob', '--iglob',
@@ -619,30 +540,30 @@ const VALUE_FLAGS = new Set([
 const PS_VALUE_FLAGS = new Set(['-depth', '-include', '-exclude', '-filter', '-pattern'])
 // Flags that supply the pattern, so every positional operand is a path.
 const PATTERN_FLAGS = new Set(['-e', '-f', '--regexp', '--file', '-pattern'])
+// Of those, the ones whose value is the pattern itself (not a file to read).
+const PATTERN_VALUE_FLAGS = new Set(['-e', '--regexp', '-pattern'])
 
 const isValueFlag = (utility, t) =>
   UNIX_SEARCHES.has(utility) ? VALUE_FLAGS.has(t) : PS_VALUE_FLAGS.has(t.toLowerCase())
 
 /**
  * The arguments of `utility` (`args`, its words after the utility word):
- * { flags, positional, valueAt } where `positional` drops flags, switches and
- * the values of value-taking flags, and `valueAt` is the set of indexes in
- * `args` that are such values.
+ * { flags, positional } where `positional` ([word, index in args]) drops
+ * flags, switches and the values of value-taking flags.
  */
 function parseArgs(utility, args) {
   const flags = []
   const positional = []
-  const valueAt = new Set()
   for (let i = 0; i < args.length; i++) {
     const t = args[i]
     if (t.startsWith('-')) {
       flags.push(t)
-      if (isValueFlag(utility, t) && i + 1 < args.length) valueAt.add(++i)
+      if (isValueFlag(utility, t)) i++
     } else if (!SWITCH.test(t)) {
       positional.push([t, i])
     }
   }
-  return { flags, positional, valueAt }
+  return { flags, positional }
 }
 
 /** The index in `args` of a content search's pattern operand, or -1. */
@@ -663,6 +584,8 @@ function pathCandidates(token) {
   return out.filter(Boolean)
 }
 
+const namesVaultOperand = (w) => operandNamesVault(w) || pathCandidates(w).some(operandNamesVault)
+
 /** True when a stage names a private_vault directory (the name rule). */
 function stageNamesVault(s) {
   if (s.redirs.some(operandNamesVault)) return true
@@ -670,29 +593,21 @@ function stageNamesVault(s) {
   // The command word itself: a vault file run as a program, or a heredoc
   // line that a shell or xargs takes as a file name.
   if (s.words.length && operandNamesVault(s.words[0])) return true
-  const args = s.words.slice(1)
-  const skip = new Set()
-  if (s.runner === 'git' || s.runner === 'gh') {
-    args.forEach((a, i) => {
-      if (PROSE_FLAGS.has(a)) skip.add(i + 1)
-      if (/^--(?:message|body|title|notes)=/.test(a)) skip.add(i)
-    })
-  }
-  // A content search's pattern: its first positional operand, or the value
-  // of -e/--regexp/-Pattern. (-f/--file names a file the search reads, so it
-  // stays checked.)
+  // Indexes in s.words not checked: git/gh message values, and a content
+  // search's pattern (its first positional operand, or the value of
+  // -e/--regexp/-Pattern; -f/--file names a file the search reads, so it
+  // stays checked).
+  const skip = new Set(s.prose)
   const searchArgs = s.words.slice(s.at + 1)
   const pattern = patternIndex(s.utility, searchArgs)
-  if (pattern >= 0) skip.add(s.at + pattern)
+  if (pattern >= 0) skip.add(s.at + 1 + pattern)
   if (SEARCHES.has(s.utility)) {
     searchArgs.forEach((a, i) => {
-      if (['-e', '--regexp', '-pattern'].includes(a.toLowerCase())) skip.add(s.at + i + 1)
-      if (a.startsWith('--regexp=')) skip.add(s.at + i)
+      if (PATTERN_VALUE_FLAGS.has(a.toLowerCase())) skip.add(s.at + 2 + i)
+      if (a.startsWith('--regexp=')) skip.add(s.at + 1 + i)
     })
   }
-  return args.some(
-    (a, i) => !skip.has(i) && (operandNamesVault(a) || pathCandidates(a).some(operandNamesVault)),
-  )
+  return s.words.some((a, k) => k > 0 && !skip.has(k) && [a, ...s.output[k]].some(namesVaultOperand))
 }
 
 function dirOf(p) {
@@ -762,28 +677,47 @@ function stageReaches(direct, base, vaults) {
 }
 
 /**
- * The matched command name when `command`, or a command nested in it,
- * reads, lists or names vault content, else null. `state` carries the cwd
- * (moved by `cd`) and the vault list across nested scans.
+ * The matched command name when `command` (Bash or PowerShell text), or a
+ * command nested in it, reads, lists or names vault content, else null.
+ * `state` carries the cwd (moved by `cd`) and the vault list across nested
+ * scans. Throws NestingLimit past MAX_DEPTH levels.
  */
-function scanCommand(command, state, flavor, depth = 0) {
-  if (depth > MAX_DEPTH) throw new RangeError('nesting')
-  const { outer, bodies } = substitutions(command, flavor === 'bash')
-  for (const body of bodies) {
-    const hit = scanCommand(body, state, flavor, depth + 1)
-    if (hit) return hit
+function scanCommand(command, state, flavor, level) {
+  const script = parseShell(command, flavor, level)
+  const literal = flavor === 'bash' ? literalHeredocs(script) : new Set()
+  return scanScript(script, state, literal, level)
+}
+
+function scanScript(script, state, literal, level) {
+  if (level > MAX_DEPTH) throw new NestingLimit()
+  // Substitutions run first, as commands of their own.
+  for (const token of script.tokens) {
+    if (typeof token === 'string' || token.heredoc) continue
+    for (const sub of token.subs) {
+      const hit = scanScript(sub, state, literal, level + 1)
+      if (hit) return hit
+    }
   }
-  for (const pipeline of pipelines(outer)) {
-    const stages = pipeline.filter((s) => s.words.length || s.redirs.length).map(analyse)
-    if (!stages.length) continue
+  for (const pipeline of pipelines(script)) {
+    const stages = pipeline.map((st) => analyse(st, level))
+    // Heredocs: the substitutions Bash runs in an unquoted body, and every
+    // body that is not literal text for an inert consumer, as commands.
+    for (const h of stages.flatMap((s) => s.heredocs)) {
+      for (const sub of h.subs) {
+        const hit = scanScript(sub, state, literal, level + 1)
+        if (hit) return hit
+      }
+      const hit = !literal.has(h) && scanCommand(h.body, state, 'bash', level + 1)
+      if (hit) return hit
+    }
     if (stages.length === 1 && CD.has(stages[0].runner)) {
       const { words } = stages[0]
       state.pendingCd.push(words.length > 1 ? words[words.length - 1] : '~')
       continue
     }
     for (const s of stages) {
-      const nested = nestedCommand(s)
-      const hit = nested && scanCommand(nested.command, state, nested.flavor, depth + 1)
+      const nested = nestedCommand(s.runner, s.words.slice(1))
+      const hit = nested && scanCommand(nested.command, state, nested.flavor, level + 1)
       if (hit) return hit
     }
     const named = stages.find(stageNamesVault)
@@ -794,7 +728,11 @@ function scanCommand(command, state, flavor, depth = 0) {
     if (!state.vaults.length) continue
     for (const target of state.pendingCd) state.base = absolutePath(target, state.base)
     state.pendingCd.length = 0
-    const paths = stages.flatMap((s) => [...s.words.slice(1).flatMap(pathCandidates), ...s.redirs])
+    const paths = stages.flatMap((s) => [
+      ...s.words.slice(1).flatMap(pathCandidates),
+      ...s.output.slice(1).flat().flatMap(pathCandidates),
+      ...s.redirs,
+    ])
     if (paths.some((c) => insideVault(c, state.base, state.vaults))) return hit.utility
     // Stages that run their own operands; an xargs stage gets them on stdin.
     const direct = stages.filter((s) => s.at === 0 && (READ_UTILITIES.has(s.utility) || LIST_UTILITIES.has(s.utility)))
@@ -808,7 +746,7 @@ function scanCommand(command, state, flavor, depth = 0) {
 // Entry
 // ---------------------------------------------------------------------------
 
-/** { kind, target } when the call would touch vault content, else null. */
+/** { kind, target, tool } when the call would touch vault content, else null. */
 function evaluate(payload) {
   const call = toolCall(payload)
   if (!call) return null
@@ -816,28 +754,38 @@ function evaluate(payload) {
   if (SHELL_TOOLS.has(tool)) {
     if (typeof input.command !== 'string' || !input.command) return null
     const state = { base: cwd, pendingCd: [], vaults: null }
-    // Literal heredoc bodies are dropped once, here, where the whole command
-    // shows whether anything in it runs the text.
-    const bash = tool === 'Bash'
-    const utility = scanCommand(bash ? dropLiteralHeredocs(input.command) : input.command, state, bash ? 'bash' : 'ps')
-    return utility ? { kind: 'shell', target: utility } : null
+    try {
+      const utility = scanCommand(input.command, state, tool === 'Bash' ? 'bash' : 'ps', 0)
+      return utility ? { kind: 'shell', target: utility, tool } : null
+    } catch (err) {
+      if (err instanceof NestingLimit) return { kind: 'nesting', target: null, tool }
+      throw err
+    }
   }
   const fields = PATH_FIELDS.get(tool)
   if (!fields) return null
   for (const field of fields) {
-    if (namesVaultPath(input[field])) return { kind: 'path', target: input[field] }
+    if (namesVaultPath(input[field])) return { kind: 'path', target: input[field], tool }
   }
   const vaults = vaultDirs()
   if (!vaults.length) return null
   if (tool === 'Grep' || tool === 'Glob') {
     const target = reachesVault(tool, input, cwd, vaults)
-    return target ? { kind: 'path', target } : null
+    return target ? { kind: 'path', target, tool } : null
   }
   const p = input.file_path
-  return typeof p === 'string' && p && insideVault(p, cwd, vaults) ? { kind: 'path', target: p } : null
+  return typeof p === 'string' && p && insideVault(p, cwd, vaults) ? { kind: 'path', target: p, tool } : null
 }
 
-function reason({ kind, target }) {
+function reason({ kind, target, tool }) {
+  if (kind === 'nesting') {
+    return (
+      `Vault Privacy Rule: this command nests substitutions, shells or heredocs ` +
+      `past the nesting limit (${MAX_DEPTH} levels), so it cannot be checked for ` +
+      `vault reads and is denied. Split it into simpler commands. See ` +
+      `.claude/hooks/${GUARD}.cjs.`
+    )
+  }
   if (kind === 'shell') {
     return (
       `Vault Privacy Rule: '${target}' against a vault path (private_vault/ or ` +
@@ -848,12 +796,14 @@ function reason({ kind, target }) {
       `See .claude/hooks/${GUARD}.cjs.`
     )
   }
+  const advice =
+    tool === 'Grep' || tool === 'Glob'
+      ? ` If this is a search, scope \`path\` to a subdirectory or anchor the pattern (e.g. src/**/*.js).`
+      : ''
   return (
     `Vault Privacy Rule: vault content (private_vault/ or the configured ` +
     `PRIVATE_VAULT_PATH) may not be read, listed, or edited (matched ` +
-    `'${target}'). If this is a search, scope \`path\` to a subdirectory or ` +
-    `anchor the pattern (e.g. src/**/*.js). See CLAUDE.md and ` +
-    `.claude/hooks/${GUARD}.cjs.`
+    `'${target}').${advice} See CLAUDE.md and .claude/hooks/${GUARD}.cjs.`
   )
 }
 

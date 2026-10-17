@@ -59,6 +59,22 @@ test('control: the same value with the interpolation closed allows the call', (t
   deny(runGuard('vault-guard', call('Read', { file_path: path.join(fx.ember2, 'vaults', 'live', 'a.json') }), fx))
 })
 
+// A configured vault whose location cannot be checked (stat fails with
+// anything but "not there") is an error, not "no vault".
+test('vault-guard denies when the configured vault location cannot be checked', (t) => {
+  const fx = makeFixture({ env: 'PRIVATE_VAULT_PATH=vaults/live\0\n', dirs: ['ember-2/vaults/live'] })
+  t.after(fx.cleanup)
+  const r = deny(runGuard('vault-guard', call('Read', { file_path: path.join(fx.project, 'src', 'main.js') }), fx))
+  assert.match(r.reason, FAIL_REASON)
+  assert.ok(!r.reason.includes('vaults') && !r.reason.includes(fx.root), 'reason carries the value')
+})
+
+test('control: a configured vault that is simply not there allows the call', (t) => {
+  const fx = makeFixture({ env: 'PRIVATE_VAULT_PATH=vaults/gone\n', dirs: ['ember-2/vaults/live'] })
+  t.after(fx.cleanup)
+  allow(runGuard('vault-guard', call('Read', { file_path: path.join(fx.project, 'src', 'main.js') }), fx))
+})
+
 for (const guard of [envGuard, vaultGuard]) {
   test(`${guard.GUARD}: an exception in the check is a deny naming only guard and type`, () => {
     const secret = path.join('C:', 'synthetic', 'secret-vault-location')

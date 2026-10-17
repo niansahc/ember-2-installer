@@ -102,4 +102,4 @@ function allow(r) {
   return r
 }
 
-module.exports = { HOOKS, makeFixture, liveVaultFixture, hookEnv, runGuard, call, deny, allow }
+module.exports = { makeFixture, liveVaultFixture, runGuard, call, deny, allow }

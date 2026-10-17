@@ -1,0 +1,33 @@
+name: Hook guards
+
+# The PreToolUse guards in .claude/hooks (env-guard, vault-guard) and their
+# node:test suite. No dependencies to install: the tests use node built-ins
+# and tmp fixtures only. Windows, the primary platform, where the guards'
+# path forms (drive letters, Git Bash /c/, junctions) matter. Node 22 or
+# later for this job (the build jobs stay on Node 20).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hooks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hooks:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run hook guard tests
+        run: npm run test:hooks

@@ -8,6 +8,12 @@
 // session transcript. A transcript is not a secret store. This hook refuses
 // the call before it runs. It replaces reject-env-edit.sh (Edit/Write only).
 //
+// Threat model: this guard stops an agent from exposing a .env file by
+// accident, through a read, search or listing it runs while working. It is
+// a pattern check on the tool call, not a sandbox, and it does not defend
+// against deliberate evasion (names built at runtime, encoded commands,
+// scripts or interpreters that open files themselves).
+//
 // Port of ember-2 .claude/hooks/env_guard.py (#293), itself a port of
 // ember-2-ui block-env-reads.cjs (#64): basename match after backslash
 // normalisation, Win32 name aliases (`.env.`, `.env::$DATA`, `C:.env`),
@@ -26,21 +32,24 @@
 //     (find -name, rg -g/--glob, grep --include), and
 //   - in a double-quoted span holding command substitution ($(...) or
 //     backticks), or anywhere in a command that runs a nested shell
-//     (bash -c, sh -c, eval, pwsh, ...), where the shell does expand it.
+//     (SHELLS in hook-utils.cjs: bash -c, eval, pwsh, wsl, ...), where the
+//     shell does expand it.
 // PowerShell expands wildcards in quoted cmdlet arguments, so quoting
 // changes nothing there.
 //
-// Heredocs (Bash only). The body of a quoted-delimiter heredoc (<<'EOF',
-// <<"EOF") is literal text and is dropped before the scan, so
-// git commit -m "$(cat <<'EOF' ... EOF)" may mention .env. An unquoted
-// delimiter body is scanned. The body is kept when the command also runs a
-// shell, eval, xargs, read or an interpreter, which could run the text
-// (dropLiteralHeredocs in hook-utils.cjs).
+// Heredocs (Bash only). A heredoc body is scanned like the rest of the
+// command, unless it is literal text an inert consumer receives
+// (literalHeredocs in hook-utils.cjs): a quoted delimiter (<<'EOF',
+// <<"EOF", <<\EOF), and the body fed to tee, git commit -F -,
+// gh --body-file -, or to cat inside a git/gh message value, as in
+// git commit -m "$(cat <<'EOF' ... EOF)". Such a body is dropped before
+// the scan, so a commit message may mention .env. Any other receiver (an
+// interpreter, a shell, xargs, a substitution used as arguments, a pipe)
+// keeps the body scanned.
 //
-// Limits: a pattern check on the call, not a sandbox. A name built at
-// runtime (`.e""nv`, PowerShell backtick escapes, base64, a script that
-// opens the file, an 8.3 short name) is not caught, nor is a recursive read
-// that never names the file (grep -r KEY .).
+// Limits: a name built at runtime (`.e""nv`, PowerShell backtick escapes,
+// base64, a script that opens the file, an 8.3 short name) is not caught,
+// nor is a recursive read that never names the file (grep -r KEY .).
 //
 // Input: hook JSON on stdin. Output: a deny decision on stdout, or nothing.
 // Exit code is always 0. Fail closed: an exception inside the check is a
@@ -49,7 +58,8 @@
 'use strict'
 
 const {
-  SHELL_TOOLS, WILDCARD, bracketEnd, commandName, dropLiteralHeredocs, fnmatch, main, toolCall,
+  PROSE_FLAGS, SHELLS, SHELL_TOOLS, WILDCARD, bracketEnd, commandName, dropLiteralHeredocs, fnmatch, main,
+  toolCall,
 } = require('./hook-utils.cjs')
 
 const GUARD = 'env-guard'
@@ -214,14 +224,16 @@ const PATH_FIELDS = new Map([
 // Shell commands
 // ---------------------------------------------------------------------------
 
-// The quoted value of a message flag on a git or gh command is prose, not a
-// path. Scoped to git/gh segments so `cmd -m ".env"` elsewhere is still
-// scanned, and only the quoted value right after the flag is dropped. Only
-// a single-quoted value, or a double-quoted one with no command
-// substitution: bash runs `$(cat .env)` inside double quotes, and its
-// output would land in the commit or PR text.
-const PROSE_FLAG_VALUE =
-  /(?:^|\s)(?:-a?m|--message|--body|--title|--notes)(?:\s+|=)(?:"(?:[^"\\$`]|\\.|\$(?!\())*"|'[^']*')/g
+// The quoted value of a message flag (PROSE_FLAGS) on a git or gh command is
+// prose, not a path. Scoped to git/gh segments so `cmd -m ".env"` elsewhere
+// is still scanned, and only the quoted value right after the flag is
+// dropped. Only a single-quoted value, or a double-quoted one with no
+// command substitution: bash runs `$(cat .env)` inside double quotes, and
+// its output would land in the commit or PR text.
+const PROSE_FLAG_VALUE = new RegExp(
+  `(?:^|\\s)(?:${PROSE_FLAGS.join('|')})(?:\\s+|=)(?:"(?:[^"\\\\$\`]|\\\\.|\\$(?!\\())*"|'[^']*')`,
+  'g',
+)
 const SEGMENT_SPLIT = /([;&|]+)/
 const GIT_OR_GH = /^\s*(?:git|gh)\s/
 // Quotes, separators, redirections and `=` (for --path=.env) all delimit.
@@ -229,9 +241,6 @@ const GIT_OR_GH = /^\s*(?:git|gh)\s/
 const TOKEN_SPLIT = /[\s"'`;|&<>(){}=,]+/
 // A closed quoted span, a lone unmatched quote, or an unquoted run.
 const SPAN = /"(?:[^"\\]|\\.)*"|'[^']*'|["']|[^"']+/g
-// Programs that run quoted text as a command line of their own, where the
-// wildcards in it are expanded after all.
-const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'eval', 'pwsh', 'powershell', 'cmd', 'wsl'])
 // Flags whose value the program matches as a glob against file names.
 const GLOB_FLAGS = new Set([
   '-name', '-iname', '-path', '-ipath', '-wholename', '-iwholename',
