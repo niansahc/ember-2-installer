@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.18.2](https://github.com/niansahc/ember-2-installer/compare/v0.18.1...v0.18.2) (2026-10-17)
+
+
+### Features
+
+* **hooks:** .env and vault read guards, fail closed ([74ae635](https://github.com/niansahc/ember-2-installer/commit/74ae635bf0aa60a6cfc6386fbfe7438697ef0b0c))
+* **hooks:** .env and vault read guards, fail closed ([34a7707](https://github.com/niansahc/ember-2-installer/commit/34a7707b032e0df4b29491424de21461ad52a272))
+
+
+### Bug Fixes
+
+* **e2e:** stabilize startup-task toggle spec; correct e2e count ([347627f](https://github.com/niansahc/ember-2-installer/commit/347627fe57a187a64a95b15f70dc8c4a8dd27dfc))
+* **e2e:** stabilize startup-task toggle spec; correct e2e count ([89cc5a4](https://github.com/niansahc/ember-2-installer/commit/89cc5a421db3a70ef13a33fa5424098aaa1d7465))
+* fail-open business-hours hook and bare version rendering ([86f17db](https://github.com/niansahc/ember-2-installer/commit/86f17db61aa94a84c545765934980bfea9401cf5))
+* **hooks:** escape-aware scanner, substitution operands, inert-consumer heredoc rule, dotenv precedence ([91af391](https://github.com/niansahc/ember-2-installer/commit/91af391573ae243655ceba4392ba483d9c1a2fbc))
+* **hooks:** substitution, wrapper, flag-value and interpolation gaps from review ([456edcd](https://github.com/niansahc/ember-2-installer/commit/456edcdf3fef1d104f582fec18b4d0463cd24e6e))
+* **hooks:** treat quoted-delimiter heredoc bodies as literal text ([1e2499c](https://github.com/niansahc/ember-2-installer/commit/1e2499cef429100b9a53a4f6606168bbf9458f2a))
+* **installer:** launch the API through src.api.asgi ([111ae04](https://github.com/niansahc/ember-2-installer/commit/111ae041819d12b7ffec5493317df4659292bd4c))
+* **installer:** launch the API through src.api.asgi ([24efbdf](https://github.com/niansahc/ember-2-installer/commit/24efbdffaed0facb9ceda18bf02ced07a587f8d8))
+* **release:** pin publish type so assets attach to the published release ([829a90f](https://github.com/niansahc/ember-2-installer/commit/829a90f6f37603cca35938b0649029cefe0d9186))
+
 ## [0.18.1](https://github.com/niansahc/ember-2-installer/compare/v0.18.0...v0.18.1) (2026-08-31)
 
 
