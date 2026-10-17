@@ -63,6 +63,10 @@ const DENY = [
   ['Bash', { command: 'git commit -m "x; y" ; cat .env' }],
   ['PowerShell', { command: 'git commit -m "x; y" ; Get-Content .env' }],
   ['PowerShell', { command: "git commit -m @'\nok\n'@; Get-Content .env" }],
+  // A message value with text outside its quotes, or a quote left open, is scanned.
+  ['Bash', { command: 'git commit -m "x".env' }],
+  ['Bash', { command: 'git commit -m "x .env' }],
+  ['PowerShell', { command: "git commit -m @'\nx .env" }],
   // A here-string is prose only as a git/gh message.
   ['PowerShell', { command: "Write-Output @'\n.env\n'@" }],
 ]

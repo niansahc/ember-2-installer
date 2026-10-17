@@ -65,8 +65,8 @@
 'use strict'
 
 const {
-  NestingLimit, SHELLS, SHELL_TOOLS, WILDCARD, bracketEnd, commandName, dropLiteralHeredocs, fnmatch, main,
-  parseShell, pipelines, proseValues, toolCall,
+  SHELLS, SHELL_TOOLS, WILDCARD, bracketEnd, commandName, cutSpans, dropLiteralHeredocs, fnmatch, main,
+  parseOrNull, pipelines, proseValues, toolCall,
 } = require('./hook-utils.cjs')
 
 const GUARD = 'env-guard'
@@ -231,14 +231,9 @@ const PATH_FIELDS = new Map([
 // Shell commands
 // ---------------------------------------------------------------------------
 
-// A message value quoted end to end (see Messages above): '...' or "...",
-// and in PowerShell a here-string. Whether it runs a substitution is the
-// parsed word's `subs`: bash runs `$(cat .env)` inside double quotes, and
-// its output would land in the commit or PR text.
-const QUOTED_VALUE = {
-  bash: /^(?:'[\s\S]*'|"[\s\S]*")$/,
-  ps: /^(?:'[\s\S]*'|"[\s\S]*"|@'[\s\S]*\n'@|@"[\s\S]*\n"@)$/,
-}
+// What a quoted message value reads outside quotes: nothing, or the flag of
+// the --message="..." form.
+const QUOTED_VALUE_BARE = /^(?:--[a-z]+=)?$/
 // Quotes, separators, redirections and `=` (for --path=.env) all delimit.
 // Backslashes do NOT, so Windows paths survive intact.
 const TOKEN_SPLIT = /[\s"'`;|&<>(){}=,]+/
@@ -251,36 +246,25 @@ const GLOB_FLAGS = new Set([
 ])
 
 /**
- * The command with each git/gh message value (proseValues) that is quoted
- * and runs nothing cut out. `--message="..."` is tested past the `=`. Too
- * deeply nested to parse: unchanged, so all of it is scanned.
+ * The command with each git/gh message value (proseValues) cut out when it
+ * is quoted end to end (QUOTED_VALUE_BARE, no quote left open) and runs no
+ * substitution: bash runs `$(cat .env)` inside double quotes, and its
+ * output would land in the commit or PR text. Too deeply nested to parse:
+ * unchanged, so all of it is scanned.
  */
 function withoutProse(command, flavor) {
-  let script
-  try {
-    script = parseShell(command, flavor)
-  } catch (err) {
-    if (err instanceof NestingLimit) return command
-    throw err
-  }
+  const script = parseOrNull(command, flavor)
+  if (!script) return command
   const cuts = []
   for (const pipeline of pipelines(script)) {
     for (const st of pipeline) {
       for (const k of proseValues(st.words.map((w) => w.text))) {
         const w = st.words[k]
-        if (!w || w.subs.length) continue
-        const raw = command.slice(w.start, w.end)
-        if (QUOTED_VALUE[flavor].test(raw.startsWith('--') ? raw.slice(raw.indexOf('=') + 1) : raw)) cuts.push(w)
+        if (w && !w.subs.length && !w.open && QUOTED_VALUE_BARE.test(w.bare)) cuts.push(w)
       }
     }
   }
-  let out = ''
-  let at = 0
-  for (const w of cuts.sort((a, b) => a.start - b.start)) {
-    out += `${command.slice(at, w.start)} `
-    at = w.end
-  }
-  return out + command.slice(at)
+  return cutSpans(command, cuts, ' ')
 }
 
 /**

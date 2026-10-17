@@ -12,7 +12,9 @@
 //   - parseShell(), pipelines(): one quote- and escape-aware shell parser
 //     (words, operators, substitutions, heredocs).
 //   - SHELLS, nestedCommand(): one table of programs that run a command line.
-//   - PROSE_FLAGS, proseValues(): one rule for git/gh message values.
+//   - proseValues(): one rule for git/gh message values.
+//   - parseOrNull(), cutSpans(): parse a command, tolerating the nesting
+//     limit, and cut parsed spans out of its text.
 //   - literalHeredocs(), dropLiteralHeredocs(): one rule for heredoc bodies
 //     that no command runs.
 //   - toolCall(), SHELL_TOOLS: the usable part of a payload.
@@ -157,10 +159,12 @@ const OPERATORS = ';<>|&{}'
 
 /**
  * A shell command parsed for both guards: { tokens }, each token an operator
- * string, a word { text, subs, start, end }, or { heredoc } where a heredoc
- * operator stands. `subs` are the parsed bodies of the substitutions inside
- * the word: $(...), and in Bash `...`, <(...) and >(...). `start`/`end` are
- * the word's offsets in `command`, quotes included.
+ * string, a word { text, bare, subs, start, end, open }, or { heredoc } where
+ * a heredoc operator stands. `subs` are the parsed bodies of the
+ * substitutions inside the word: $(...), and in Bash `...`, <(...) and
+ * >(...). `bare` is the part of `text` read outside quotes, `start`/`end`
+ * the word's offsets in `command` (quotes included), and `open` true when
+ * the word ends inside a quote left open.
  *
  * The one quote and escape scanner:
  *   - Bash: '...' is literal; inside "..." a backslash escapes only $ ` " \
@@ -221,8 +225,8 @@ function parseShell(command, flavor, depth = 0) {
 
   /** True when only blanks stand between s[j] and the next newline: a PowerShell here-string opener. */
   function hereStringOpens(j) {
-    const nl = s.indexOf('\n', j)
-    return nl >= 0 && /^[ \t\r]*$/.test(s.slice(j, nl))
+    while (s[j] === ' ' || s[j] === '\t' || s[j] === '\r') j++
+    return s[j] === '\n'
   }
 
   /** The bodies of `heredocs`, one after another from s[i] (the line after the operator). */
@@ -268,16 +272,20 @@ function parseShell(command, flavor, depth = 0) {
     let quote = null
     let parens = 0
     let pending = []
-    const cur = () => (word ||= { text: '', subs: [], start: i, end: i })
+    const cur = () => (word ||= { text: '', bare: '', subs: [], start: i })
     const flush = () => {
       if (word) {
         word.end = i
+        word.open = quote !== null
         tokens.push(word)
       }
       word = null
     }
     const append = (ch) => {
-      cur().text += ch === '\\' ? '/' : ch
+      const w = cur()
+      const t = ch === '\\' ? '/' : ch
+      w.text += t
+      if (quote === null) w.bare += t
     }
     const sub = (skip, end) => {
       const isArith = end === ')' && s[i + skip] === '('
@@ -289,19 +297,21 @@ function parseShell(command, flavor, depth = 0) {
     // here-string its closing pair at the start of a line.
     const closes = () =>
       quote.length === 1 ? s[i] === quote : s[i] === quote[1] && s[i + 1] === '@' && s[i - 1] === '\n'
-    const endQuote = () => {
-      i += quote.length
-      quote = null
+    // One character inside `quote`: the closing one ends it.
+    const quoted = () => {
+      if (closes()) {
+        i += quote.length
+        quote = null
+      } else {
+        append(s[i])
+        i++
+      }
     }
     while (i < s.length) {
       const c = s[i]
       const n = s[i + 1]
       if (quote === "'" || quote === "@'") {
-        if (closes()) endQuote()
-        else {
-          append(c)
-          i++
-        }
+        quoted()
       } else if (bash && c === '\\') {
         if (n === '\n') i += 2
         else if (n === undefined || (quote === '"' && !'$`"\\'.includes(n))) {
@@ -323,11 +333,7 @@ function parseShell(command, flavor, depth = 0) {
       } else if (bash && c === '`') {
         sub(1, '`')
       } else if (quote === '"' || quote === '@"') {
-        if (closes()) endQuote()
-        else {
-          append(c)
-          i++
-        }
+        quoted()
       } else if (!bash && c === '@' && (n === "'" || n === '"') && word === null && hereStringOpens(i + 2)) {
         cur()
         quote = c + n
@@ -355,7 +361,10 @@ function parseShell(command, flavor, depth = 0) {
       } else if (c === '$' && n === '{') {
         const end = s.indexOf('}', i)
         const stop = end < 0 ? s.length : end + 1
-        cur().text += s.slice(i, stop).replace(/\\/g, '/')
+        const w = cur()
+        const t = s.slice(i, stop).replace(/\\/g, '/')
+        w.text += t
+        w.bare += t
         i = stop
       } else if (bash && (c === '<' || c === '>') && n === '(') {
         // Process substitution: a word of its own (a /dev/fd name).
@@ -561,26 +570,34 @@ function literalHeredocs(script, context = 'top', out = new Set()) {
   return out
 }
 
+/** parseShell, or null when the command nests past MAX_DEPTH. */
+function parseOrNull(command, flavor) {
+  try {
+    return parseShell(command, flavor)
+  } catch (err) {
+    if (err instanceof NestingLimit) return null
+    throw err
+  }
+}
+
+/** `command` with each { start, end } span in `spans` replaced by `filler`. */
+function cutSpans(command, spans, filler = '') {
+  let out = ''
+  let at = 0
+  for (const span of [...spans].sort((a, b) => a.start - b.start)) {
+    out += command.slice(at, span.start) + filler
+    at = span.end
+  }
+  return out + command.slice(at)
+}
+
 /**
  * A Bash command with the literal heredoc bodies (literalHeredocs) and
  * their terminator lines cut out. Too deeply nested to parse: unchanged.
  */
 function dropLiteralHeredocs(command) {
-  let script
-  try {
-    script = parseShell(command, 'bash')
-  } catch (err) {
-    if (err instanceof NestingLimit) return command
-    throw err
-  }
-  const cuts = [...literalHeredocs(script)].sort((a, b) => a.start - b.start)
-  let out = ''
-  let at = 0
-  for (const h of cuts) {
-    out += command.slice(at, h.start)
-    at = h.end
-  }
-  return out + command.slice(at)
+  const script = parseOrNull(command, 'bash')
+  return script ? cutSpans(command, literalHeredocs(script)) : command
 }
 
 // ---------------------------------------------------------------------------
@@ -686,6 +703,8 @@ module.exports = {
   proseValues,
   literalHeredocs,
   dropLiteralHeredocs,
+  parseOrNull,
+  cutSpans,
   toolCall,
   runHook,
   main,

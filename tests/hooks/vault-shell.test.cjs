@@ -106,15 +106,6 @@ test('name rule catches an unknown wrapper in front of a private_vault path', (t
   allow(runGuard('vault-guard', call('Bash', { command: 'stdbuf -o0 cat src/main.js' }), fx))
 })
 
-test('name rule follows bash -c past option words (control: a file outside the vault)', (t) => {
-  const fx = makeFixture()
-  t.after(fx.cleanup)
-  for (const opts of ['--', '-x']) {
-    deny(runGuard('vault-guard', call('Bash', { command: `bash -c ${opts} 'cat private_vault/a.json'` }), fx))
-    allow(runGuard('vault-guard', call('Bash', { command: `bash -c ${opts} 'cat src/main.js'` }), fx))
-  }
-})
-
 // A PowerShell here-string closes only at '@ or "@ starting a line: a quote
 // inside the body does not end it, so the command after it is still a command.
 const HERE_STRINGS = [
@@ -312,6 +303,9 @@ const NAME_RULE = [
   ['Bash', 'ls priv*', 'ls *_vault'],
   ['PowerShell', 'Select-String -Pattern private_vault -Path src/*.js', 'Select-String -Pattern KEY -Path private_vault/*.json'],
   ['PowerShell', 'Get-ChildItem p*', 'Get-ChildItem *vault*'],
+  // bash -c past option words: a file outside the vault, then the vault.
+  ['Bash', "bash -c -- 'cat src/main.js'", "bash -c -- 'cat private_vault/a.json'"],
+  ['Bash', "bash -c -x 'cat src/main.js'", "bash -c -x 'cat private_vault/a.json'"],
 ]
 
 test('shell name rule: patterns and broad globs allowed, vault names denied', async (t) => {
