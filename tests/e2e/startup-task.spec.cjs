@@ -8,6 +8,11 @@ test.describe('Startup Task', () => {
   let app, window
 
   test.beforeEach(async () => {
+    // The beforeEach install flow alone takes ~28 s unloaded in demo mode
+    // (install sleeps + Done-screen health poll), against a 30 s config cap
+    // that includes hook time. slow() triples it so the explicit waits below
+    // are reachable.
+    test.slow()
     const launched = await launchApp()
     app = launched.app
     window = launched.window
