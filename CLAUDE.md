@@ -2,7 +2,7 @@
 
 ## Repo Identity
 This is ember-2-installer — the Electron installer for Ember-2. Tab color: YELLOW.
-If you are not in C:\Users\nians\OneDrive\Desktop\Ember-2\ember-2-installer, stop and check.
+If you are not in C:\dev\Ember-2\ember-2-installer, stop and check.
 
 ---
 

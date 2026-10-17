@@ -59,6 +59,16 @@ const DENY = [
   ['PowerShell', { command: 'Get-Content .env' }],
   ['PowerShell', { command: "Get-Content '.e*'" }],
   ['PowerShell', { command: 'Get-ChildItem -Force .env.local' }],
+  // A separator inside a message ends nothing outside it.
+  ['Bash', { command: 'git commit -m "x; y" ; cat .env' }],
+  ['PowerShell', { command: 'git commit -m "x; y" ; Get-Content .env' }],
+  ['PowerShell', { command: "git commit -m @'\nok\n'@; Get-Content .env" }],
+  // A message value with text outside its quotes, or a quote left open, is scanned.
+  ['Bash', { command: 'git commit -m "x".env' }],
+  ['Bash', { command: 'git commit -m "x .env' }],
+  ['PowerShell', { command: "git commit -m @'\nx .env" }],
+  // A here-string is prose only as a git/gh message.
+  ['PowerShell', { command: "Write-Output @'\n.env\n'@" }],
 ]
 
 // [tool, allowed input, deny control]
@@ -86,6 +96,20 @@ const ALLOW = [
   ['Bash', { command: 'ls .github' }, { command: 'ls .env' }],
   ['PowerShell', { command: 'Get-Content .env.example' }, { command: 'Get-Content .env' }],
   ['PowerShell', { command: 'Get-ChildItem src' }, { command: 'Get-ChildItem .env.local' }],
+  // A ; & or | inside a quoted message is part of it. Control: a
+  // substitution in the value.
+  ['Bash', { command: 'git commit -m "fix: read .env; add test"' }, { command: 'git commit -m "$(cat .env)"' }],
+  ['Bash', { command: "git commit -m 'fix: read .env; add test'" }, { command: 'git commit -m "$(cat .env)"' }],
+  ['Bash', { command: 'git commit -m "a | b && c & .env"' }, { command: 'git commit -m "$(cat .env)"' }],
+  ['Bash', { command: 'git commit --message="read .env; test"' }, { command: 'git commit --message="$(cat .env); test"' }],
+  ['Bash', { command: 'gh pr create --title "x; y" --body "reads .env | not"' }, { command: 'gh pr create --title "x; y" --body "$(cat .env)"' }],
+  ['PowerShell', { command: 'git commit -m "fix: read .env; add test"' }, { command: 'git commit -m "$(Get-Content .env)"' }],
+  ['PowerShell', { command: "git commit -m 'fix: read .env; add test'" }, { command: 'git commit -m "$(Get-Content .env)"' }],
+  // PowerShell here-strings. Control: @"..."@ running $(...).
+  ['PowerShell', { command: "git commit -m @'\nmentions .env\n'@" }, { command: 'git commit -m @"\n$(Get-Content .env)\n"@' }],
+  ['PowerShell', { command: 'git commit -m @"\nmentions .env\n"@' }, { command: 'git commit -m @"\n$(Get-Content .env)\n"@' }],
+  ['PowerShell', { command: "git commit -m @'\nit's .env; a | b & c\n'@" }, { command: "git commit -m @\"\nit's $(Get-Content .env)\n\"@" }],
+  ['PowerShell', { command: "git commit -m @'\r\nmentions .env\r\n'@" }, { command: 'git commit -m @"\r\n$(Get-Content .env)\r\n"@' }],
 ]
 
 for (const [tool, input] of DENY) {
