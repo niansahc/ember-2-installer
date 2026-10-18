@@ -100,7 +100,7 @@
 const fs = require('fs')
 const path = require('path')
 const {
-  MAX_DEPTH, NestingLimit, SHELL_TOOLS, WILDCARD, absolutePath, commandName, expandUser, fnmatch,
+  MAX_DEPTH, NestingLimit, SHELL_TOOLS, WILDCARD, absolutePath, commandName, commandStart, expandUser, fnmatch,
   literalHeredocs, main, nestedCommand, parseShell, pipelines, projectDir, proseValues, toolCall,
 } = require('./hook-utils.cjs')
 
@@ -411,38 +411,6 @@ const PATH_FIELDS = new Map([
 // ---------------------------------------------------------------------------
 // Shell commands: stages
 // ---------------------------------------------------------------------------
-
-// Words that can open a stage before the command it runs.
-const KEYWORDS = new Set(['if', 'then', 'else', 'elif', 'fi', 'do', 'done', 'while', 'until', '!'])
-const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
-// Wrappers that run the next word as the command, with the flags of each
-// that take a separate value.
-const WRAPPERS = new Map([
-  ['sudo', new Set(['-u', '-g', '-C', '-D', '-h', '-p', '-U', '-r', '-t'])],
-  ['env', new Set(['-u', '-C', '-S'])],
-  ['time', new Set(['-f', '-o'])],
-  ['nice', new Set(['-n'])],
-  ['nohup', new Set()],
-])
-
-/** The index in `words` of the command the stage runs: keywords, VAR=value and wrappers skipped. */
-function commandStart(words) {
-  let i = 0
-  while (i < words.length) {
-    const word = words[i]
-    if (KEYWORDS.has(word) || ASSIGNMENT.test(word)) {
-      i++
-      continue
-    }
-    const valueFlags = WRAPPERS.get(commandName(word))
-    if (!valueFlags) break
-    i++
-    while (i < words.length && (words[i].startsWith('-') || ASSIGNMENT.test(words[i]))) {
-      i += valueFlags.has(words[i]) ? 2 : 1
-    }
-  }
-  return i
-}
 
 /** Heredoc text as words: a body is text, so only blanks and punctuation split it. */
 function bodyWords(text) {

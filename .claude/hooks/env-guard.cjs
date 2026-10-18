@@ -47,6 +47,18 @@
 // interpreter, a shell, xargs, a substitution used as arguments, a pipe)
 // keeps the body scanned.
 //
+// Messages. The value of a git/gh message flag (-m, --body, --title, ...)
+// is prose, not a path, when it is quoted and runs nothing: '...', "..."
+// with no command substitution ($(...), and in Bash backticks), and in
+// PowerShell a here-string @'...'@, or @"..."@ with no $(...). parseShell
+// finds the value, so a ; & or | inside the quotes stays part of it. The
+// word after a flag must be quoted end to end; only the flag word itself
+// may carry its name outside the quotes (--message="..."). The command is
+// found past VAR=value, wrappers and keywords (commandStart), so
+// FOO=1 git commit -m "..." counts. Such a value is dropped before the
+// scan, so a commit message may mention .env. Any other message value is
+// scanned.
+//
 // Limits: a name built at runtime (`.e""nv`, PowerShell backtick escapes,
 // base64, a script that opens the file, an 8.3 short name) is not caught,
 // nor is a recursive read that never names the file (grep -r KEY .).
@@ -58,8 +70,8 @@
 'use strict'
 
 const {
-  PROSE_FLAGS, SHELLS, SHELL_TOOLS, WILDCARD, bracketEnd, commandName, dropLiteralHeredocs, fnmatch, main,
-  toolCall,
+  SHELLS, SHELL_TOOLS, WILDCARD, bracketEnd, commandName, cutSpans, dropLiteralHeredocs, fnmatch, main,
+  parseOrNull, pipelines, proseFlagPrefix, proseValues, toolCall,
 } = require('./hook-utils.cjs')
 
 const GUARD = 'env-guard'
@@ -224,18 +236,6 @@ const PATH_FIELDS = new Map([
 // Shell commands
 // ---------------------------------------------------------------------------
 
-// The quoted value of a message flag (PROSE_FLAGS) on a git or gh command is
-// prose, not a path. Scoped to git/gh segments so `cmd -m ".env"` elsewhere
-// is still scanned, and only the quoted value right after the flag is
-// dropped. Only a single-quoted value, or a double-quoted one with no
-// command substitution: bash runs `$(cat .env)` inside double quotes, and
-// its output would land in the commit or PR text.
-const PROSE_FLAG_VALUE = new RegExp(
-  `(?:^|\\s)(?:${PROSE_FLAGS.join('|')})(?:\\s+|=)(?:"(?:[^"\\\\$\`]|\\\\.|\\$(?!\\())*"|'[^']*')`,
-  'g',
-)
-const SEGMENT_SPLIT = /([;&|]+)/
-const GIT_OR_GH = /^\s*(?:git|gh)\s/
 // Quotes, separators, redirections and `=` (for --path=.env) all delimit.
 // Backslashes do NOT, so Windows paths survive intact.
 const TOKEN_SPLIT = /[\s"'`;|&<>(){}=,]+/
@@ -247,11 +247,29 @@ const GLOB_FLAGS = new Set([
   '-g', '--glob', '--iglob', '--include',
 ])
 
-function withoutProse(command) {
-  return command
-    .split(SEGMENT_SPLIT)
-    .map((seg) => (GIT_OR_GH.test(seg) ? seg.replace(PROSE_FLAG_VALUE, ' ') : seg))
-    .join('')
+/**
+ * The command with each git/gh message value (proseValues) cut out when it
+ * is quoted end to end (nothing read outside quotes but, on a
+ * --message="..." word, the flag itself; no quote left open) and runs no
+ * substitution: bash runs `$(cat .env)` inside double quotes, and its
+ * output would land in the commit or PR text. Too deeply nested to parse:
+ * unchanged, so all of it is scanned.
+ */
+function withoutProse(command, flavor) {
+  const script = parseOrNull(command, flavor)
+  if (!script) return command
+  const cuts = []
+  for (const pipeline of pipelines(script)) {
+    for (const st of pipeline) {
+      for (const k of proseValues(st.words.map((w) => w.text))) {
+        const w = st.words[k]
+        if (!w || w.subs.length || w.open) continue
+        const flag = proseFlagPrefix(w.text)
+        if (w.bare === '' || (flag && w.bare === flag)) cuts.push(w)
+      }
+    }
+  }
+  return cutSpans(command, cuts, ' ')
 }
 
 /**
@@ -259,7 +277,7 @@ function withoutProse(command) {
  * runs no nested shell, the shell passes the word's wildcards through as text.
  */
 function words(command, bash) {
-  const spans = (withoutProse(command).match(SPAN) || []).map((span) => [
+  const spans = (withoutProse(command, bash ? 'bash' : 'ps').match(SPAN) || []).map((span) => [
     span,
     span.split(TOKEN_SPLIT).filter(Boolean),
   ])

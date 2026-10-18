@@ -75,6 +75,23 @@ const WRAPPED = [
   ['PowerShell', '1 | ForEach-Object { Get-Content % }'],
   ['PowerShell', 'pwsh -Command "Get-Content %"'],
   ['PowerShell', 'wsl cat %'],
+  // Option words between -c and the command line, for every POSIX shell; a
+  // lone -- or - ends them, and -o/-O take a value.
+  ...['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh'].flatMap((sh) => [
+    ['Bash', `${sh} -c -- 'cat %'`],
+    ['Bash', `${sh} -c -x 'cat %'`],
+  ]),
+  ['Bash', "bash -c +x 'cat %'"],
+  ['Bash', "bash -c -x -- 'cat %'"],
+  ['Bash', "bash -c - 'cat %'"],
+  ['Bash', "bash -xc -- 'cat %'"],
+  ['Bash', "bash -c -o errexit 'cat %'"],
+  ['Bash', "bash -c -eo pipefail 'cat %'"],
+  ['Bash', "bash -co errexit 'cat %'"],
+  ['Bash', "bash -c -O extglob -- 'cat %'"],
+  ['Bash', "bash -c + 'cat %'"],
+  ['Bash', "bash -c -x + 'cat %'"],
+  ['PowerShell', "bash -c -- 'cat %'"],
 ]
 
 for (const [tool, form] of WRAPPED) {
@@ -90,6 +107,25 @@ test('name rule catches an unknown wrapper in front of a private_vault path', (t
   deny(runGuard('vault-guard', call('Bash', { command: 'bash -c "cat private_vault/a.json"' }), fx))
   allow(runGuard('vault-guard', call('Bash', { command: 'stdbuf -o0 cat src/main.js' }), fx))
 })
+
+// A PowerShell here-string closes only at '@ or "@ starting a line: a quote
+// inside the body does not end it, so the command after it is still a command.
+// The bodies hold an odd number of quotes, so a parser that read them as
+// ordinary quotes would swallow the command after them.
+const HERE_STRINGS = [
+  "Write-Output @'\nit's\n'@; Get-Content %",
+  "Write-Output @'\nit's\n'@\nGet-Content %",
+  'Write-Output @"\nsay "hi\n"@; Get-Content %',
+  'Write-Output @"\na " b\n"@; Get-Content %',
+  // Glued to an assignment or a hashtable key.
+  "$x=@'\nit's\n'@; Get-Content %",
+  "@{a=@'\nit's\n'@}; Get-Content %",
+  'Write-Output @"\n$(Get-Content %)\n"@', // @"..."@ still runs $(...)
+]
+
+for (const form of HERE_STRINGS) {
+  test(`PowerShell here-string: ${JSON.stringify(form)}`, () => pairAtRoot('PowerShell', form))
+}
 
 // ---------------------------------------------------------------------------
 // Quotes and escapes: outside single quotes \x is a literal x, so an
@@ -275,6 +311,9 @@ const NAME_RULE = [
   ['Bash', 'ls priv*', 'ls *_vault'],
   ['PowerShell', 'Select-String -Pattern private_vault -Path src/*.js', 'Select-String -Pattern KEY -Path private_vault/*.json'],
   ['PowerShell', 'Get-ChildItem p*', 'Get-ChildItem *vault*'],
+  // bash -c past option words: a file outside the vault, then the vault.
+  ['Bash', "bash -c -- 'cat src/main.js'", "bash -c -- 'cat private_vault/a.json'"],
+  ['Bash', "bash -c -x 'cat src/main.js'", "bash -c -x 'cat private_vault/a.json'"],
 ]
 
 test('shell name rule: patterns and broad globs allowed, vault names denied', async (t) => {
