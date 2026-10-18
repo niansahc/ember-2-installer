@@ -1,7 +1,7 @@
 // Model selection screen tests — runs in demo mode
 
 const { test, expect } = require('@playwright/test')
-const { launchApp } = require('./helpers.cjs')
+const { launchApp, closeApp } = require('./helpers.cjs')
 
 test.describe('Model Selection', () => {
   let app, window
@@ -20,7 +20,9 @@ test.describe('Model Selection', () => {
   })
 
   test.afterEach(async () => {
-    await app.close()
+    const closing = app
+    app = undefined
+    await closeApp(closing)
   })
 
   test('model cards render', async () => {

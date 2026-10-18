@@ -2,7 +2,7 @@
 // Navigates every screen from Welcome to Done in a single test
 
 const { test, expect } = require('@playwright/test')
-const { launchApp } = require('./helpers.cjs')
+const { launchApp, closeApp } = require('./helpers.cjs')
 
 test.describe('Full Happy Path', () => {
   let app, window
@@ -14,7 +14,9 @@ test.describe('Full Happy Path', () => {
   })
 
   test.afterEach(async () => {
-    await app.close()
+    const closing = app
+    app = undefined
+    await closeApp(closing)
   })
 
   test('complete install flow from Welcome to Done', async () => {

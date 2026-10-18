@@ -3,7 +3,7 @@
 // Runs in demo mode.
 
 const { test, expect } = require('@playwright/test')
-const { launchApp } = require('./helpers.cjs')
+const { launchApp, closeApp } = require('./helpers.cjs')
 
 test.describe('Developer Mode', () => {
   let app, window
@@ -28,7 +28,9 @@ test.describe('Developer Mode', () => {
   })
 
   test.afterEach(async () => {
-    await app.close()
+    const closing = app
+    app = undefined
+    await closeApp(closing)
   })
 
   test('dev mode toggle is visible and unchecked by default', async () => {

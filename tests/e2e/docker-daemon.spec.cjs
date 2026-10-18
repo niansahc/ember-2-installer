@@ -1,7 +1,7 @@
 // Docker daemon check tests — runs in demo mode
 
 const { test, expect } = require('@playwright/test')
-const { launchApp } = require('./helpers.cjs')
+const { launchApp, closeApp } = require('./helpers.cjs')
 
 test.describe('Docker Daemon Check', () => {
   let app, window
@@ -16,7 +16,9 @@ test.describe('Docker Daemon Check', () => {
   })
 
   test.afterEach(async () => {
-    await app.close()
+    const closing = app
+    app = undefined
+    await closeApp(closing)
   })
 
   test('Docker daemon row is visible when Docker is installed', async () => {

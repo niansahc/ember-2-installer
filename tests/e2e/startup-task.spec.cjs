@@ -2,7 +2,7 @@
 // Verifies the startup toggle appears on the Done screen and can be toggled
 
 const { test, expect } = require('@playwright/test')
-const { launchApp } = require('./helpers.cjs')
+const { launchApp, closeApp } = require('./helpers.cjs')
 
 test.describe('Startup Task', () => {
   let app, window
@@ -32,7 +32,9 @@ test.describe('Startup Task', () => {
   })
 
   test.afterEach(async () => {
-    await app.close()
+    const closing = app
+    app = undefined
+    await closeApp(closing)
   })
 
   test('startup task toggle is visible on Done screen', async () => {

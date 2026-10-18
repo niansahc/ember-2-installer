@@ -2,7 +2,7 @@
 // Tests unusual interactions, state persistence, and boundary conditions
 
 const { test, expect } = require('@playwright/test')
-const { launchApp } = require('./helpers.cjs')
+const { launchApp, closeApp } = require('./helpers.cjs')
 
 test.describe('Edge Cases', () => {
   let app, window
@@ -14,7 +14,9 @@ test.describe('Edge Cases', () => {
   })
 
   test.afterEach(async () => {
-    await app.close()
+    const closing = app
+    app = undefined
+    await closeApp(closing)
   })
 
   // --- Navigation edge cases ---

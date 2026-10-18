@@ -10,7 +10,7 @@
 // emits staged log markers so row animations can be observed.
 
 const { test, expect } = require('@playwright/test')
-const { launchApp } = require('./helpers.cjs')
+const { launchApp, closeApp } = require('./helpers.cjs')
 
 test.describe('Update Screen — cute additions', () => {
   let app, window
@@ -39,7 +39,9 @@ test.describe('Update Screen — cute additions', () => {
   })
 
   test.afterEach(async () => {
-    await app.close()
+    const closing = app
+    app = undefined
+    await closeApp(closing)
   })
 
   test('updates show as a banner on Welcome, not as a forced screen', async () => {

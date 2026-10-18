@@ -3,7 +3,7 @@
 // Requires --demo-updates so the update screen appears on boot.
 
 const { test, expect } = require('@playwright/test')
-const { launchApp } = require('./helpers.cjs')
+const { launchApp, closeApp } = require('./helpers.cjs')
 
 test.describe('Release Notes Panel', () => {
   let app, window
@@ -27,7 +27,9 @@ test.describe('Release Notes Panel', () => {
   })
 
   test.afterEach(async () => {
-    await app.close()
+    const closing = app
+    app = undefined
+    await closeApp(closing)
   })
 
   test('release notes panel is visible on the update screen', async () => {
