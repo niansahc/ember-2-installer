@@ -49,10 +49,15 @@
 //
 // Messages. The value of a git/gh message flag (-m, --body, --title, ...)
 // is prose, not a path, when it is quoted and runs nothing: '...', "..."
-// with no $(...) or backticks, and in PowerShell a here-string @'...'@, or
-// @"..."@ with no $(...). parseShell finds the value, so a ; & or | inside
-// the quotes stays part of it. Such a value is dropped before the scan, so
-// a commit message may mention .env. Any other message value is scanned.
+// with no command substitution ($(...), and in Bash backticks), and in
+// PowerShell a here-string @'...'@, or @"..."@ with no $(...). parseShell
+// finds the value, so a ; & or | inside the quotes stays part of it. The
+// word after a flag must be quoted end to end; only the flag word itself
+// may carry its name outside the quotes (--message="..."). The command is
+// found past VAR=value, wrappers and keywords (commandStart), so
+// FOO=1 git commit -m "..." counts. Such a value is dropped before the
+// scan, so a commit message may mention .env. Any other message value is
+// scanned.
 //
 // Limits: a name built at runtime (`.e""nv`, PowerShell backtick escapes,
 // base64, a script that opens the file, an 8.3 short name) is not caught,
@@ -66,7 +71,7 @@
 
 const {
   SHELLS, SHELL_TOOLS, WILDCARD, bracketEnd, commandName, cutSpans, dropLiteralHeredocs, fnmatch, main,
-  parseOrNull, pipelines, proseValues, toolCall,
+  parseOrNull, pipelines, proseFlagPrefix, proseValues, toolCall,
 } = require('./hook-utils.cjs')
 
 const GUARD = 'env-guard'
@@ -231,9 +236,6 @@ const PATH_FIELDS = new Map([
 // Shell commands
 // ---------------------------------------------------------------------------
 
-// What a quoted message value reads outside quotes: nothing, or the flag of
-// the --message="..." form.
-const QUOTED_VALUE_BARE = /^(?:--[a-z]+=)?$/
 // Quotes, separators, redirections and `=` (for --path=.env) all delimit.
 // Backslashes do NOT, so Windows paths survive intact.
 const TOKEN_SPLIT = /[\s"'`;|&<>(){}=,]+/
@@ -247,7 +249,8 @@ const GLOB_FLAGS = new Set([
 
 /**
  * The command with each git/gh message value (proseValues) cut out when it
- * is quoted end to end (QUOTED_VALUE_BARE, no quote left open) and runs no
+ * is quoted end to end (nothing read outside quotes but, on a
+ * --message="..." word, the flag itself; no quote left open) and runs no
  * substitution: bash runs `$(cat .env)` inside double quotes, and its
  * output would land in the commit or PR text. Too deeply nested to parse:
  * unchanged, so all of it is scanned.
@@ -260,7 +263,9 @@ function withoutProse(command, flavor) {
     for (const st of pipeline) {
       for (const k of proseValues(st.words.map((w) => w.text))) {
         const w = st.words[k]
-        if (w && !w.subs.length && !w.open && QUOTED_VALUE_BARE.test(w.bare)) cuts.push(w)
+        if (!w || w.subs.length || w.open) continue
+        const flag = proseFlagPrefix(w.text)
+        if (w.bare === '' || (flag && w.bare === flag)) cuts.push(w)
       }
     }
   }

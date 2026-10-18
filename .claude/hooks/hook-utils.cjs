@@ -12,7 +12,9 @@
 //   - parseShell(), pipelines(): one quote- and escape-aware shell parser
 //     (words, operators, substitutions, heredocs).
 //   - SHELLS, nestedCommand(): one table of programs that run a command line.
-//   - proseValues(): one rule for git/gh message values.
+//   - commandStart(): one rule for the command a stage runs (keywords,
+//     VAR=value and wrappers skipped).
+//   - proseValues(), proseFlagPrefix(): one rule for git/gh message values.
 //   - parseOrNull(), cutSpans(): parse a command, tolerating the nesting
 //     limit, and cut parsed spans out of its text.
 //   - literalHeredocs(), dropLiteralHeredocs(): one rule for heredoc bodies
@@ -172,9 +174,10 @@ const OPERATORS = ';<>|&{}'
  *     literal x and a backslash-newline joins lines.
  *   - PowerShell: '...' is literal; the escape character is the backtick;
  *     $(...) is a subexpression, inside "..." too. A here-string opens with
- *     @' or @" at a word start, the rest of that line blank, and closes at
- *     '@ or "@ at the start of a line: @'...'@ is literal like '...' (a
- *     quote inside does not close it), @"..."@ is read like "...".
+ *     @' or @" at a word start or after `=` ($x=@', @{a=@'), the rest of
+ *     that line blank, and closes at '@ or "@ at the start of a line:
+ *     @'...'@ is literal like '...' (a quote inside does not close it),
+ *     @"..."@ is read like "...".
  *   - A literal backslash becomes `/`, so a Windows path stays a path.
  *   - A quote left open runs to the end of the command: its text is still
  *     scanned.
@@ -219,7 +222,8 @@ function parseShell(command, flavor, depth = 0) {
       }
     }
     if (!delimiter) return null
-    i = j
+    // A trailing backslash steps j past the end; keep offsets inside s.
+    i = Math.min(j, s.length)
     return { quoted, strip, delimiter, body: '', subs: [], start: i, end: i, terminated: false }
   }
 
@@ -334,7 +338,13 @@ function parseShell(command, flavor, depth = 0) {
         sub(1, '`')
       } else if (quote === '"' || quote === '@"') {
         quoted()
-      } else if (!bash && c === '@' && (n === "'" || n === '"') && word === null && hereStringOpens(i + 2)) {
+      } else if (
+        !bash &&
+        c === '@' &&
+        (n === "'" || n === '"') &&
+        (word === null || word.text.endsWith('=')) &&
+        hereStringOpens(i + 2)
+      ) {
         cur()
         quote = c + n
         i = s.indexOf('\n', i) + 1
@@ -454,8 +464,9 @@ function optionValues(word) {
 
 /**
  * The command line `runner` (a commandName) runs from `args`, as
- * { command, flavor }, or null: POSIX shells -c [options] [--|-] <line>
- * (option words after -c are skipped, with the values of -o/-O);
+ * { command, flavor }, or null: POSIX shells -c [options] [--|-|+] <line>
+ * (option words after -c are skipped, with the values of -o/-O; a lone -
+ * or + ends them like --);
  * pwsh/powershell -Command <line...> (powershell also takes bare words);
  * cmd /c|/k <line...>; eval <line...>; wsl [options] [--|-e|--exec]
  * <command...>.
@@ -466,7 +477,7 @@ function nestedCommand(runner, args) {
     if (i < 0) return null
     let k = i + 1 + optionValues(args[i])
     while (k < args.length && /^[-+]./.test(args[k]) && args[k] !== '--') k += 1 + optionValues(args[k])
-    if (args[k] === '--' || args[k] === '-') k++
+    if (args[k] === '--' || args[k] === '-' || args[k] === '+') k++
     return k < args.length ? { command: args[k], flavor: 'bash' } : null
   }
   if (PS_SHELLS.has(runner)) {
@@ -496,18 +507,61 @@ function nestedCommand(runner, args) {
 // Message values and literal heredocs
 // ---------------------------------------------------------------------------
 
+// Words that can open a stage before the command it runs.
+const KEYWORDS = new Set(['if', 'then', 'else', 'elif', 'fi', 'do', 'done', 'while', 'until', '!'])
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
+// Wrappers that run the next word as the command, with the flags of each
+// that take a separate value.
+const WRAPPERS = new Map([
+  ['sudo', new Set(['-u', '-g', '-C', '-D', '-h', '-p', '-U', '-r', '-t'])],
+  ['env', new Set(['-u', '-C', '-S'])],
+  ['time', new Set(['-f', '-o'])],
+  ['nice', new Set(['-n'])],
+  ['nohup', new Set()],
+])
+
+/** The index in `words` of the command the stage runs: keywords, VAR=value and wrappers skipped. */
+function commandStart(words) {
+  let i = 0
+  while (i < words.length) {
+    const word = words[i]
+    if (KEYWORDS.has(word) || ASSIGNMENT.test(word)) {
+      i++
+      continue
+    }
+    const valueFlags = WRAPPERS.get(commandName(word))
+    if (!valueFlags) break
+    i++
+    while (i < words.length && (words[i].startsWith('-') || ASSIGNMENT.test(words[i]))) {
+      i += valueFlags.has(words[i]) ? 2 : 1
+    }
+  }
+  return i
+}
+
 // git/gh flags whose value is a message: prose, not a path.
 const PROSE_FLAGS = ['-m', '-am', '--message', '--body', '--title', '--notes']
 
-/** Indexes in `words` (texts, words[0] the command) that hold a git/gh message value. */
+/** `--message=` when `text` is the --message=<value> form of a long message flag, else ''. */
+function proseFlagPrefix(text) {
+  const flag = PROSE_FLAGS.find((f) => f.startsWith('--') && text.startsWith(`${f}=`))
+  return flag ? `${flag}=` : ''
+}
+
+/**
+ * Indexes in `words` (texts of one stage) that hold a git/gh message value:
+ * the word after a message flag, or a --flag=<value> word. The command is
+ * found by commandStart, so FOO=1 git and sudo git count.
+ */
 function proseValues(words) {
   const out = new Set()
-  const runner = commandName(words[0] || '')
+  const start = commandStart(words)
+  const runner = commandName(words[start] || '')
   if (runner !== 'git' && runner !== 'gh') return out
-  words.forEach((w, k) => {
-    if (PROSE_FLAGS.includes(w)) out.add(k + 1)
-    else if (PROSE_FLAGS.some((f) => f.startsWith('--') && w.startsWith(`${f}=`))) out.add(k)
-  })
+  for (let k = start + 1; k < words.length; k++) {
+    if (PROSE_FLAGS.includes(words[k])) out.add(k + 1)
+    else if (proseFlagPrefix(words[k])) out.add(k)
+  }
   return out
 }
 
@@ -700,7 +754,9 @@ module.exports = {
   parseShell,
   pipelines,
   nestedCommand,
+  commandStart,
   proseValues,
+  proseFlagPrefix,
   literalHeredocs,
   dropLiteralHeredocs,
   parseOrNull,

@@ -89,6 +89,8 @@ const WRAPPED = [
   ['Bash', "bash -c -eo pipefail 'cat %'"],
   ['Bash', "bash -co errexit 'cat %'"],
   ['Bash', "bash -c -O extglob -- 'cat %'"],
+  ['Bash', "bash -c + 'cat %'"],
+  ['Bash', "bash -c -x + 'cat %'"],
   ['PowerShell', "bash -c -- 'cat %'"],
 ]
 
@@ -108,10 +110,16 @@ test('name rule catches an unknown wrapper in front of a private_vault path', (t
 
 // A PowerShell here-string closes only at '@ or "@ starting a line: a quote
 // inside the body does not end it, so the command after it is still a command.
+// The bodies hold an odd number of quotes, so a parser that read them as
+// ordinary quotes would swallow the command after them.
 const HERE_STRINGS = [
   "Write-Output @'\nit's\n'@; Get-Content %",
   "Write-Output @'\nit's\n'@\nGet-Content %",
-  'Write-Output @"\nsay "hi"\n"@; Get-Content %',
+  'Write-Output @"\nsay "hi\n"@; Get-Content %',
+  'Write-Output @"\na " b\n"@; Get-Content %',
+  // Glued to an assignment or a hashtable key.
+  "$x=@'\nit's\n'@; Get-Content %",
+  "@{a=@'\nit's\n'@}; Get-Content %",
   'Write-Output @"\n$(Get-Content %)\n"@', // @"..."@ still runs $(...)
 ]
 
