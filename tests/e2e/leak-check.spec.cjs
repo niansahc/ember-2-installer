@@ -3,6 +3,7 @@
 // disappear, including one whose graceful close never finishes. Other workers
 // run their own apps, so each test follows only its own launch pid.
 
+const fs = require('fs')
 const { test, expect } = require('@playwright/test')
 const { launchApp, closeApp } = require('./helpers.cjs')
 const { isInstallerLaunch } = require('./electron-processes.cjs')
@@ -37,6 +38,20 @@ test.describe('Leak check', () => {
     expect(isInstallerLaunch(strayPid)).toBe(true)
     await closeApp(app)
     await expect.poll(() => isInstallerLaunch(strayPid), { timeout: 10000 }).toBe(false)
+  })
+
+  test('each launch runs in its own user-data dir, removed by closeApp', async () => {
+    const first = await launchApp()
+    const second = await launchApp()
+    const userData = (app) => app.evaluate(({ app: a }) => a.getPath('userData'))
+    const [dirA, dirB] = [await userData(first.app), await userData(second.app)]
+    // Positive control: the dirs exist while the apps are live and differ.
+    expect(dirA).not.toBe(dirB)
+    expect(fs.existsSync(dirA)).toBe(true)
+    expect(fs.existsSync(dirB)).toBe(true)
+    await closeApp(first.app)
+    expect(fs.existsSync(dirA)).toBe(false)
+    expect(fs.existsSync(dirB)).toBe(false)
   })
 
   test('closeApp accepts an app that never launched', async () => {
