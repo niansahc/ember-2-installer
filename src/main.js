@@ -13,6 +13,7 @@ const { cloneRepo } = require('./exec/clone')
 const { run } = require('./exec/run')
 const { readApiKey } = require('./exec/api-key')
 const { redactSecrets } = require('./lib/redact')
+const { isAllowedExternalUrl } = require('./lib/external-url')
 const { API_PKILL_PATTERN, apiSpawnSpec } = require('./lib/api-launch')
 
 const IS_PACKAGED = app.isPackaged
@@ -113,6 +114,20 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  })
+
+  // No in-app windows: a target="_blank" link or window.open goes to the default
+  // browser when the URL is allowed and is dropped otherwise.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedExternalUrl(url)) shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  // The app is one local page. Any navigation away from it is cancelled, with
+  // allowed URLs handed to the default browser instead.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url === mainWindow.webContents.getURL()) return
+    event.preventDefault()
+    if (isAllowedExternalUrl(url)) shell.openExternal(url)
   })
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'))
@@ -1470,11 +1485,8 @@ ipcMain.handle('get-startup-task', async () => {
 })
 
 ipcMain.handle('open-url', (_e, url) => {
-  if (typeof url !== 'string') return
-  const isHttps = url.startsWith('https://')
-  const isLocalhost = url.startsWith('http://localhost') || url.startsWith('http://127.0.0.1')
-  if (!isHttps && !isLocalhost) {
-    console.warn(`[open-url] Blocked URL with disallowed scheme: ${url}`)
+  if (!isAllowedExternalUrl(url)) {
+    console.warn(`[open-url] Blocked URL not on the external allowlist: ${url}`)
     return
   }
   shell.openExternal(url)
