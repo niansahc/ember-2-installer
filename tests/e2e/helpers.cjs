@@ -41,6 +41,9 @@ async function removeProfile(dir) {
 /**
  * Kill `pid` and its child processes (renderer, GPU, utility). Synchronous so a
  * teardown can rely on it; src/exec/run.js has an async, unexported equivalent.
+ * Playwright starts the app detached off Windows, so `pid` leads its own
+ * process group and `-pid` reaches the children. Killing only the leader
+ * orphans them, and they keep writing into the user-data dir.
  */
 function killTree(pid) {
   if (!pid) return
@@ -48,8 +51,12 @@ function killTree(pid) {
     spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' })
   } else {
     try {
-      process.kill(pid, 'SIGKILL')
-    } catch {}
+      process.kill(-pid, 'SIGKILL')
+    } catch {
+      try {
+        process.kill(pid, 'SIGKILL')
+      } catch {}
+    }
   }
 }
 
