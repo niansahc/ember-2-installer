@@ -68,6 +68,10 @@ test.describe('isAllowedExternalUrl', () => {
     }
   })
 
+  test('denies a bare tailnet IP (the API binds 127.0.0.1, nothing listens there)', () => {
+    expect(isAllowedExternalUrl('http://100.72.128.44:8000')).toBe(false)
+  })
+
   test('every allowlisted host is reachable over https only', () => {
     for (const host of ALLOWED_EXTERNAL_HOSTS) {
       expect(isAllowedExternalUrl(`https://${host}/`), host).toBe(true)
