@@ -10,7 +10,7 @@
 // appears exactly once after a normal install.
 
 const { test, expect } = require('@playwright/test')
-const { launchApp } = require('./helpers.cjs')
+const { launchApp, closeApp } = require('./helpers.cjs')
 
 test.describe('Install-log listener', () => {
   let app, window
@@ -27,7 +27,9 @@ test.describe('Install-log listener', () => {
   })
 
   test.afterEach(async () => {
-    await app.close()
+    const closing = app
+    app = undefined
+    await closeApp(closing)
   })
 
   test('does not duplicate log output when a prior listener is present', async () => {

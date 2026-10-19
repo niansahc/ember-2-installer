@@ -1,7 +1,7 @@
 // Hardware detection tests — runs in demo mode
 
 const { test, expect } = require('@playwright/test')
-const { launchApp } = require('./helpers.cjs')
+const { launchApp, closeApp } = require('./helpers.cjs')
 
 test.describe('Hardware Detection', () => {
   let app, window
@@ -13,7 +13,9 @@ test.describe('Hardware Detection', () => {
   })
 
   test.afterEach(async () => {
-    await app.close()
+    const closing = app
+    app = undefined
+    await closeApp(closing)
   })
 
   test('hardware summary exists on model screen', async () => {

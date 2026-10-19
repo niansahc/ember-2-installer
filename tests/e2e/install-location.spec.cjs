@@ -1,7 +1,7 @@
 // Install location screen tests — runs in demo mode
 
 const { test, expect } = require('@playwright/test')
-const { launchApp } = require('./helpers.cjs')
+const { launchApp, closeApp } = require('./helpers.cjs')
 
 test.describe('Install Location', () => {
   let app, window
@@ -17,7 +17,9 @@ test.describe('Install Location', () => {
   })
 
   test.afterEach(async () => {
-    await app.close()
+    const closing = app
+    app = undefined
+    await closeApp(closing)
   })
 
   test('install location screen renders with path input', async () => {

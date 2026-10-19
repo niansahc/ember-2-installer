@@ -2,7 +2,7 @@
 // concurrently in the install step loop.  Runs in standard demo mode.
 
 const { test, expect } = require('@playwright/test')
-const { launchApp } = require('./helpers.cjs')
+const { launchApp, closeApp } = require('./helpers.cjs')
 
 test.describe('Parallel Install Steps', () => {
   let app, window
@@ -29,7 +29,9 @@ test.describe('Parallel Install Steps', () => {
   })
 
   test.afterEach(async () => {
-    await app.close()
+    const closing = app
+    app = undefined
+    await closeApp(closing)
   })
 
   test('pip and embed-model steps are active at the same time during the parallel group', async () => {

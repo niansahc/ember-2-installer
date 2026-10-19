@@ -1,7 +1,7 @@
 // AGPL acknowledgment screen tests — runs in demo mode
 
 const { test, expect } = require('@playwright/test')
-const { launchApp } = require('./helpers.cjs')
+const { launchApp, closeApp } = require('./helpers.cjs')
 
 test.describe('AGPL Screen', () => {
   let app, window
@@ -13,7 +13,9 @@ test.describe('AGPL Screen', () => {
   })
 
   test.afterEach(async () => {
-    await app.close()
+    const closing = app
+    app = undefined
+    await closeApp(closing)
   })
 
   test('AGPL screen exists in DOM', async () => {

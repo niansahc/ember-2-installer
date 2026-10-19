@@ -7,7 +7,7 @@
 // HTML, and asserts no elements are created from it and no inline handler fires.
 
 const { test, expect } = require('@playwright/test')
-const { launchApp } = require('./helpers.cjs')
+const { launchApp, closeApp } = require('./helpers.cjs')
 
 test.describe('Renderer injection surface', () => {
   let app, window
@@ -21,7 +21,9 @@ test.describe('Renderer injection surface', () => {
   })
 
   test.afterEach(async () => {
-    await app.close()
+    const closing = app
+    app = undefined
+    await closeApp(closing)
   })
 
   test('model card renders dynamic fields as text, not markup', async () => {

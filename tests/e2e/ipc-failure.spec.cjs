@@ -17,7 +17,7 @@
 //   - btn-install-ember       (Install-location screen, #clone-log box)
 
 const { test, expect } = require('@playwright/test')
-const { launchApp } = require('./helpers.cjs')
+const { launchApp, closeApp } = require('./helpers.cjs')
 
 // Drive the full install flow to the Done screen (mirrors done-screen.spec.cjs).
 async function navigateToDone(window) {
@@ -46,7 +46,9 @@ test.describe('IPC failure does not hang the button', () => {
   let app
 
   test.afterEach(async () => {
-    if (app) await app.close()
+    const closing = app
+    app = undefined
+    await closeApp(closing)
   })
 
   test('btn-check-ember-update recovers when checkAllUpdates rejects', async () => {
