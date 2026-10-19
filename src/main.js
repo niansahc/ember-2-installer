@@ -14,6 +14,7 @@ const { run } = require('./exec/run')
 const { readApiKey } = require('./exec/api-key')
 const { redactSecrets } = require('./lib/redact')
 const { isAllowedExternalUrl } = require('./lib/external-url')
+const { RELEASES_URL, downloadInstallerUpdate } = require('./lib/installer-update')
 const { API_PKILL_PATTERN, apiSpawnSpec } = require('./lib/api-launch')
 
 const IS_PACKAGED = app.isPackaged
@@ -21,6 +22,11 @@ const HAS_REAL_FLAG = process.argv.includes('--real')
 const DEMO_MODE = !IS_PACKAGED && !HAS_REAL_FLAG
 // Opt-in: demo mode pretends updates exist so the update screen can be inspected.
 const HAS_DEMO_UPDATES_FLAG = process.argv.includes('--demo-updates')
+// Opt-in with --demo-updates: Update All also downloads the installer update.
+// --demo-installer-update=manual makes the download return a manual result.
+const demoInstallerArg = process.argv.find((a) =>
+  a === '--demo-installer-update' || a.startsWith('--demo-installer-update='))
+const DEMO_INSTALLER_UPDATE = demoInstallerArg ? (demoInstallerArg.split('=')[1] || 'download') : null
 // Test seam (issue #12): --demo-fail=<channel>[,<channel>] forces the named IPC
 // channels to reject, so the renderer's IPC-failure handling can be exercised.
 const DEMO_FAIL_CHANNELS = (process.argv.find((a) => a.startsWith('--demo-fail=')) || '')
@@ -153,7 +159,9 @@ app.whenReady().then(() => {
     autoUpdater.autoDownload = false
     autoUpdater.autoInstallOnAppQuit = false
 
-    autoUpdater.on('error', () => {})
+    // A listener stops electron-updater showing its own error dialog. Errors
+    // still reach the renderer through download-installer-update's result.
+    autoUpdater.on('error', (err) => console.error('[autoUpdater]', err && err.message))
 
     autoUpdater.on('update-available', (info) => {
       if (mainWindow) {
@@ -188,20 +196,12 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-ipcMain.handle('download-installer-update', async () => {
-  // AppImage self-replacement via electron-updater is untested on real Linux
-  // hardware, so we don't drive it here. Backend/UI update checks still work;
-  // the installer itself is updated by downloading a fresh AppImage manually.
-  if (process.platform === 'linux') {
-    return { ok: false, manual: true, message: 'On Linux, download the latest AppImage from the GitHub Releases page.' }
-  }
-  if (autoUpdater) autoUpdater.downloadUpdate()
-  return true
-})
+// Linux and macOS get a manual result; see src/lib/installer-update.js.
+ipcMain.handle('download-installer-update', () => downloadInstallerUpdate(autoUpdater, process.platform))
 
 ipcMain.handle('install-installer-update', () => {
-  // No-op on Linux — see download-installer-update.
-  if (process.platform === 'linux') return
+  // No-op where the update is manual — see download-installer-update.
+  if (process.platform !== 'win32') return
   if (autoUpdater) autoUpdater.quitAndInstall()
 })
 
@@ -1812,12 +1812,29 @@ if (DEMO_MODE) {
         await wait(700)
       }
       log('\nAll updates applied.\n')
-      // needsInstallerUpdate=false so the celebration card has time to play
-      // instead of the app quit-and-installing before we see it.
-      return { ok: true, needsInstallerUpdate: false }
+      // The installer download runs only with --demo-installer-update; the
+      // other update-screen tests end on the Done screen.
+      return { ok: true, needsInstallerUpdate: !!(DEMO_INSTALLER_UPDATE && updates.installer) }
     }
     return { ok: true, needsInstallerUpdate: false }
   })
+
+  // Installer self-update: progress events, then update-downloaded, as
+  // electron-updater emits them. Installing is a no-op so demo never quits.
+  ipcMain.removeHandler('download-installer-update')
+  ipcMain.handle('download-installer-update', async () => {
+    if (DEMO_INSTALLER_UPDATE === 'manual') {
+      return { ok: false, manual: true, message: 'On this platform, download the latest installer from the GitHub Releases page. (demo)', url: RELEASES_URL }
+    }
+    for (const percent of [10, 45, 80, 100]) {
+      mainWindow?.webContents.send('installer-download-progress', { percent })
+      await sleep(300)
+    }
+    mainWindow?.webContents.send('installer-update-downloaded')
+    return { ok: true }
+  })
+  ipcMain.removeHandler('install-installer-update')
+  ipcMain.handle('install-installer-update', () => {})
 
   // Override Tailscale checks — simulate installed + connected
   ipcMain.removeHandler('check-tailscale-installed')

@@ -2124,6 +2124,58 @@ window.ember.onInstallerUpdateAvailable((data) => {
   state.installerUpdateVersion = data.version
 })
 
+// A download that sends no progress for this long has failed. Generous because
+// the updater's own release check runs first and emits no progress.
+const INSTALLER_STALL_MS = 60000
+const INSTALLER_RELEASES_URL = 'https://github.com/niansahc/ember-2-installer/releases/latest'
+
+// Download the installer update. Resolves { ok: true } once the update is
+// downloaded, the main process's manual result, or { ok: false, error }.
+function downloadInstallerUpdate(onProgress) {
+  return new Promise((resolve) => {
+    let timer = null
+    const finish = (result) => {
+      clearTimeout(timer)
+      window.ember.removeAllListeners('installer-download-progress')
+      window.ember.removeAllListeners('installer-update-downloaded')
+      resolve(result)
+    }
+    const armStallTimer = () => {
+      clearTimeout(timer)
+      timer = setTimeout(
+        () => finish({ ok: false, error: 'The download stopped making progress.' }),
+        INSTALLER_STALL_MS,
+      )
+    }
+    window.ember.onInstallerDownloadProgress((data) => {
+      armStallTimer()
+      if (onProgress) onProgress(data.percent)
+    })
+    window.ember.onInstallerUpdateDownloaded(() => finish({ ok: true }))
+    armStallTimer()
+    window.ember.downloadInstallerUpdate().then(
+      (result) => finish(result && typeof result === 'object' ? result : { ok: false, error: 'No result from the updater.' }),
+      (err) => finish({ ok: false, error: err.message }),
+    )
+  })
+}
+
+// Tell the user on the Done screen that the installer has to be updated by
+// hand, with a button to the Releases page.
+function showInstallerUpdateNotice(text, url) {
+  document.getElementById('done-installer-update-text').textContent = text
+  const link = document.getElementById('btn-open-installer-releases')
+  link.dataset.url = url || ''
+  link.classList.toggle('hidden', !url)
+  document.getElementById('done-installer-update-note').classList.remove('hidden')
+}
+
+document.getElementById('btn-open-installer-releases').addEventListener('click', (e) => {
+  e.preventDefault()
+  const url = e.currentTarget.dataset.url
+  if (url) window.ember.openUrl(url)
+})
+
 document.getElementById('btn-installer-update').addEventListener('click', () => {
   const btn = document.getElementById('btn-installer-update')
   const text = document.getElementById('installer-update-text')
@@ -2131,27 +2183,22 @@ document.getElementById('btn-installer-update').addEventListener('click', () => 
   guardClick(btn, async () => {
     btn.disabled = true
     btn.textContent = 'Downloading...'
-
-    window.ember.onInstallerDownloadProgress((data) => {
-      btn.textContent = `Downloading ${data.percent}%`
+    const result = await downloadInstallerUpdate((percent) => {
+      btn.textContent = `Downloading ${percent}%`
     })
-
-    window.ember.onInstallerUpdateDownloaded(() => {
-      text.textContent = 'Update downloaded. Restarting...'
-      btn.textContent = 'Restarting...'
-      setTimeout(() => {
-        window.ember.installInstallerUpdate()
-      }, 1000)
-    })
-
-    await window.ember.downloadInstallerUpdate()
+    if (result.manual) {
+      text.textContent = result.message
+      btn.textContent = 'Update & Restart'
+      btn.disabled = false
+      return
+    }
+    if (!result.ok) throw new Error(result.error)
+    text.textContent = 'Update downloaded. Restarting...'
+    btn.textContent = 'Restarting...'
+    setTimeout(() => window.ember.installInstallerUpdate(), 1000)
   }, {
     errorEl: text,
     errorMsg: 'Download failed — please try again.',
-    onError: () => {
-      window.ember.removeAllListeners('installer-download-progress')
-      window.ember.removeAllListeners('installer-update-downloaded')
-    },
   })
 })
 
@@ -2224,18 +2271,20 @@ document.getElementById('btn-run-update-all').addEventListener('click', () => {
 
       if (result.needsInstallerUpdate) {
         logBox.textContent += '\nBackend and UI updated. Downloading installer update...\n'
-        btn.textContent = 'Restarting...'
-        const downloadTimeout = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('timeout')), 30000)
-        )
-        try {
-          await Promise.race([
-            window.ember.downloadInstallerUpdate(),
-            downloadTimeout,
-          ])
-          // electron-updater will quit-and-install when download completes
-        } catch {
-          logBox.textContent += '\nInstaller download timed out. Backend and UI are updated — skipping installer update.\n'
+        btn.textContent = 'Downloading...'
+        const download = await downloadInstallerUpdate((percent) => {
+          btn.textContent = `Downloading ${percent}%`
+        })
+        if (download.ok) {
+          logBox.textContent += 'Installer update downloaded. Restarting...\n'
+          btn.textContent = 'Restarting...'
+          window.ember.installInstallerUpdate()
+        } else {
+          const notice = download.manual
+            ? download.message
+            : `The installer update failed (${download.error}). Backend and UI are updated. Download the latest installer from the GitHub Releases page.`
+          logBox.textContent += `\n${notice}\n`
+          showInstallerUpdateNotice(notice, download.url || INSTALLER_RELEASES_URL)
           btn.textContent = 'Done'
           showScreen('screen-done')
           loadEmberVersion()
