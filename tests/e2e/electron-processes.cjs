@@ -51,4 +51,4 @@ function isInstallerLaunch(launchPid) {
   return listInstallerProcesses().some((p) => p.pid === launchPid || p.ppid === launchPid)
 }
 
-module.exports = { installerElectronPids, isInstallerLaunch, listInstallerProcesses }
+module.exports = { installerElectronPids, isInstallerLaunch }

@@ -8,6 +8,9 @@ const { test, expect } = require('@playwright/test')
 const { launchApp, closeApp } = require('./helpers.cjs')
 const { isInstallerLaunch } = require('./electron-processes.cjs')
 
+const expectGone = (pid) =>
+  expect.poll(() => isInstallerLaunch(pid), { timeout: 10000 }).toBe(false)
+
 test.describe('Leak check', () => {
   test('finder sees a live installer process and loses it after closeApp', async () => {
     const { app } = await launchApp()
@@ -17,7 +20,7 @@ test.describe('Leak check', () => {
     } finally {
       await closeApp(app)
     }
-    await expect.poll(() => isInstallerLaunch(pid), { timeout: 10000 }).toBe(false)
+    await expectGone(pid)
   })
 
   test('closeApp kills a process whose graceful close never finishes', async () => {
@@ -26,7 +29,7 @@ test.describe('Leak check', () => {
     expect(isInstallerLaunch(pid)).toBe(true)
     app.close = () => new Promise(() => {})
     await closeApp(app, { timeoutMs: 500 })
-    await expect.poll(() => isInstallerLaunch(pid), { timeout: 10000 }).toBe(false)
+    await expectGone(pid)
   })
 
   test('closeApp also kills an app that never reached the spec', async () => {
@@ -37,7 +40,7 @@ test.describe('Leak check', () => {
     const { app } = await launchApp()
     expect(isInstallerLaunch(strayPid)).toBe(true)
     await closeApp(app)
-    await expect.poll(() => isInstallerLaunch(strayPid), { timeout: 10000 }).toBe(false)
+    await expectGone(strayPid)
   })
 
   test('each launch runs in its own user-data dir, removed by closeApp', async () => {

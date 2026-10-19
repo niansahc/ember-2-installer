@@ -12,8 +12,8 @@ const MAIN_PATH = path.join(__dirname, '..', '..', 'src', 'main.js')
 // How long closeApp waits for a graceful app.close() before killing the process tree.
 const CLOSE_TIMEOUT_MS = 10000
 
-// How long removeProfile keeps retrying a user-data dir that is still locked.
-const PROFILE_REMOVE_TIMEOUT_MS = 15000
+// removeProfile retries a still-locked user-data dir every 200 ms: 75 tries, about 15 s.
+const PROFILE_REMOVE_RETRIES = 75
 
 // Apps launchApp started that nothing has closed yet, mapped to the private
 // user-data dir each one runs in. A worker runs one test at
@@ -28,17 +28,20 @@ const live = new Map()
  */
 async function removeProfile(dir) {
   if (!dir) return
-  const deadline = Date.now() + PROFILE_REMOVE_TIMEOUT_MS
-  for (;;) {
-    try {
-      fs.rmSync(dir, { recursive: true, force: true })
-    } catch {}
-    if (!fs.existsSync(dir) || Date.now() > deadline) return
-    await new Promise((resolve) => setTimeout(resolve, 200))
-  }
+  try {
+    await fs.promises.rm(dir, {
+      recursive: true,
+      force: true,
+      maxRetries: PROFILE_REMOVE_RETRIES,
+      retryDelay: 200,
+    })
+  } catch {}
 }
 
-/** Kill `pid` and its child processes (renderer, GPU, utility). */
+/**
+ * Kill `pid` and its child processes (renderer, GPU, utility). Synchronous so a
+ * teardown can rely on it; src/exec/run.js has an async, unexported equivalent.
+ */
 function killTree(pid) {
   if (!pid) return
   if (process.platform === 'win32') {
@@ -58,11 +61,10 @@ function killTree(pid) {
 async function closeApp(app, options = {}) {
   const profile = live.get(app)
   live.delete(app)
-  for (const [stray, strayProfile] of live) {
-    live.delete(stray)
-    killTree(stray.process().pid)
-    await removeProfile(strayProfile)
-  }
+  const strays = [...live]
+  live.clear()
+  for (const [stray] of strays) killTree(stray.process().pid)
+  await Promise.all(strays.map(([, strayProfile]) => removeProfile(strayProfile)))
   if (!app) return
   const timeoutMs = options.timeoutMs ?? CLOSE_TIMEOUT_MS
   const pid = app.process().pid
