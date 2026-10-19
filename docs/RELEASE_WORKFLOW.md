@@ -60,6 +60,11 @@ not notarized (Gatekeeper-blocked; right-click-open to run). Code signing is tra
 Both run the demo-mode suite only; real system integrations (docker, systemctl, package managers)
 remain best-effort and untested on hardware.
 
+Network egress is checked outside CI by the fresh-install capture gate: the real installer on a
+clean Windows 11 VirtualBox guest, compared against the declared download list
+(`docs/network-destinations.json`). Procedure: `docs/NETWORK_GATE.md`. CI runs only its logic and
+drift tests (`npm run test:netgate`).
+
 ### Linux CI defects (fixed 2026-07-29 — kept for context)
 
 Two separate defects, both surfacing through `linux-build.yml`. Both are fixed; the reasoning is

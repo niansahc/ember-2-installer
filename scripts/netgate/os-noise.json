@@ -1,0 +1,29 @@
+{
+  "$comment": "Windows background traffic the guest makes with or without the installer. A name here passes only when no process in the installer set queried or connected to it; the same name from the installer set fails the gate. Seed list; prune or extend only from a reviewed baseline run (run-capture.ps1 -Baseline), never to make a failing gate pass.",
+  "hosts": [
+    "*.windowsupdate.com",
+    "*.update.microsoft.com",
+    "*.delivery.mp.microsoft.com",
+    "*.dl.delivery.mp.microsoft.com",
+    "*.events.data.microsoft.com",
+    "*.telemetry.microsoft.com",
+    "www.msftconnecttest.com",
+    "dns.msftncsi.com",
+    "www.msftncsi.com",
+    "time.windows.com",
+    "*.smartscreen.microsoft.com",
+    "*.smartscreen-prod.microsoft.com",
+    "*.wdcp.microsoft.com",
+    "*.wd.microsoft.com",
+    "go.microsoft.com",
+    "fe3cr.delivery.mp.microsoft.com",
+    "settings-win.data.microsoft.com",
+    "login.live.com",
+    "*.msn.com",
+    "*.bing.com",
+    "ctldl.windowsupdate.com",
+    "*.digicert.com",
+    "*.msocsp.com",
+    "*.pki.goog"
+  ]
+}
