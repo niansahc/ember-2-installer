@@ -1857,13 +1857,13 @@ if (DEMO_MODE) {
   ipcMain.removeHandler('run-tailscale-serve')
   ipcMain.handle('run-tailscale-serve', async () => {
     await sleep(1000)
-    return { ok: true, output: 'Available at https://ember-desktop.exocomet-alpha.ts.net' }
+    return { ok: true, output: 'Available at https://ember.example.ts.net' }
   })
 
   ipcMain.removeHandler('get-tailscale-dns')
   ipcMain.handle('get-tailscale-dns', async () => {
     await sleep(300)
-    return 'ember-desktop.exocomet-alpha.ts.net'
+    return 'ember.example.ts.net'
   })
 
   ipcMain.removeHandler('check-ember-update')
