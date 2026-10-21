@@ -3,27 +3,13 @@
 // the replacement records the URLs it was given.
 
 const { test, expect } = require('@playwright/test')
-const { launchApp, closeApp } = require('./helpers.cjs')
+const { launchApp, closeApp, stubOpenExternal, openedExternal, walkToModelScreen } = require('./helpers.cjs')
 
 const GUIDE_LINK = 'a[href$="docs/model_guide.md"]'
 const GUIDE_URL = 'https://github.com/niansahc/ember-2/blob/main/docs/model_guide.md'
 
-async function stubOpenExternal(app) {
-  await app.evaluate(({ shell }) => {
-    globalThis.__openedExternal = []
-    shell.openExternal = async (url) => { globalThis.__openedExternal.push(url) }
-  })
-}
-
-const openedExternal = (app) => app.evaluate(() => globalThis.__openedExternal)
-
 async function gotoModelScreen(window) {
-  await window.locator('button[data-next="screen-prereqs"]').click()
-  await expect(window.locator('#btn-prereqs-next')).toBeEnabled({ timeout: 5000 })
-  await window.locator('#btn-prereqs-next').click()
-  await window.locator('#btn-install-ember').click()
-  await expect(window.locator('.screen.active')).toHaveAttribute('id', 'screen-vault', { timeout: 10000 })
-  await window.locator('button[data-next="screen-model"]').click()
+  await walkToModelScreen(window)
   await expect(window.locator(GUIDE_LINK)).toBeVisible()
 }
 

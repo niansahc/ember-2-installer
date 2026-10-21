@@ -4,16 +4,10 @@
 // shell.openExternal is replaced in the main process and records its URLs.
 
 const { test, expect } = require('@playwright/test')
-const { launchApp, closeApp } = require('./helpers.cjs')
+const { launchApp, closeApp, stubOpenExternal, openedExternal, walkToHostScreen } = require('./helpers.cjs')
 
 async function installWithTailscale(window, { setUpServe }) {
-  await window.locator('button[data-next="screen-prereqs"]').click()
-  await window.locator('#btn-prereqs-next').click({ timeout: 5000 })
-  await window.locator('#btn-install-ember').click()
-  await expect(window.locator('.screen.active')).toHaveAttribute('id', 'screen-vault', { timeout: 10000 })
-  await window.locator('button[data-next="screen-model"]').click()
-  await window.locator('#btn-model-next').click()
-  await window.locator('button[data-next="screen-host"]').click()
+  await walkToHostScreen(window)
   await window.locator('input[name="host"][value="tailscale"]').check()
   // Connected: the walkthrough has read the tailnet IP and offers Serve.
   await expect(window.locator('#ts-step-serve')).toBeVisible({ timeout: 10000 })
@@ -36,10 +30,7 @@ test.describe('Open Ember with Tailscale', () => {
     const launched = await launchApp()
     app = launched.app
     window = launched.window
-    await app.evaluate(({ shell }) => {
-      globalThis.__openedExternal = []
-      shell.openExternal = async (url) => { globalThis.__openedExternal.push(url) }
-    })
+    await stubOpenExternal(app)
   })
 
   test.afterEach(async () => {
@@ -48,20 +39,18 @@ test.describe('Open Ember with Tailscale', () => {
     await closeApp(closing)
   })
 
-  const openedExternal = () => app.evaluate(() => globalThis.__openedExternal)
-
   test('without Serve, opens the local API', async () => {
     test.slow()
     await installWithTailscale(window, { setUpServe: false })
     await window.locator('#btn-open-ember').click()
-    await expect.poll(openedExternal).toEqual(['http://localhost:8000'])
+    await expect.poll(() => openedExternal(app)).toEqual(['http://localhost:8000'])
   })
 
   test('with Serve, opens the tailnet HTTPS name', async () => {
     test.slow()
     await installWithTailscale(window, { setUpServe: true })
     await window.locator('#btn-open-ember').click()
-    await expect.poll(openedExternal).toHaveLength(1)
-    expect((await openedExternal())[0]).toMatch(/^https:\/\/[a-z0-9.-]+\.ts\.net$/)
+    await expect.poll(() => openedExternal(app)).toHaveLength(1)
+    expect((await openedExternal(app))[0]).toMatch(/^https:\/\/[a-z0-9.-]+\.ts\.net$/)
   })
 })

@@ -46,16 +46,22 @@ test.describe('readApiKey', () => {
 
   test('returns the key and reports a newly created one', async () => {
     writeScript({ keyExists: false })
-    const r = await readApiKey({ pyBin: NODE, emberPath })
+    const r = await readApiKey({ pyBin: NODE, emberPath, detectCreated: true })
     expect(r).toEqual({ ok: true, created: true, key: KEY, error: null })
   })
 
   test('reports an existing key as not created', async () => {
     writeScript({ keyExists: true })
-    const r = await readApiKey({ pyBin: NODE, emberPath })
+    const r = await readApiKey({ pyBin: NODE, emberPath, detectCreated: true })
     expect(r.ok).toBe(true)
     expect(r.created).toBe(false)
     expect(r.key).toBe(KEY)
+  })
+
+  test('without detectCreated, skips --check: returns the key, created is false', async () => {
+    writeScript({ keyExists: false })
+    const r = await readApiKey({ pyBin: NODE, emberPath })
+    expect(r).toEqual({ ok: true, created: false, key: KEY, error: null })
   })
 
   test('the log sink never receives the key', async () => {

@@ -5,9 +5,8 @@
 // --demo-fail=download-installer-update makes the IPC reject.
 
 const { test, expect } = require('@playwright/test')
-const { launchApp, closeApp } = require('./helpers.cjs')
-
-const RELEASES_URL = 'https://github.com/niansahc/ember-2-installer/releases/latest'
+const { launchApp, closeApp, stubOpenExternal, openedExternal } = require('./helpers.cjs')
+const { RELEASES_URL } = require('../../src/lib/installer-update')
 
 async function launchOnUpdateScreen(extraArgs) {
   const launched = await launchApp({ extraArgs: ['--demo-updates', ...extraArgs] })
@@ -55,15 +54,12 @@ test.describe('Installer update in Update All', () => {
     const launched = await launchOnUpdateScreen(['--demo-installer-update=manual'])
     app = launched.app
     const { window } = launched
-    await app.evaluate(({ shell }) => {
-      globalThis.__openedExternal = []
-      shell.openExternal = async (url) => { globalThis.__openedExternal.push(url) }
-    })
+    await stubOpenExternal(app)
     await window.locator('#btn-run-update-all').click()
     await expect(window.locator('.screen.active')).toHaveAttribute('id', 'screen-done', { timeout: 60000 })
     await expect(window.locator('#done-installer-update-text')).toContainText('download the latest installer from the GitHub Releases page')
     await window.locator('#btn-open-installer-releases').click()
-    await expect.poll(() => app.evaluate(() => globalThis.__openedExternal)).toEqual([RELEASES_URL])
+    await expect.poll(() => openedExternal(app)).toEqual([RELEASES_URL])
   })
 
   test('without an installer update, Done shows no installer notice', async () => {

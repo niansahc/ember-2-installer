@@ -8,13 +8,13 @@ const os = require('os')
 const { isNewer, displayVersion } = require('./lib/version')
 const { releaseSummary } = require('./lib/notes')
 const { buildEnvFile, uiBuildEnv } = require('./lib/env')
-const { uiSourceDir, uiTargetDir, uiIndexFile } = require('./lib/paths')
+const { uiSourceDir, uiTargetDir, uiIndexFile, venvPython } = require('./lib/paths')
 const { cloneRepo } = require('./exec/clone')
 const { run } = require('./exec/run')
 const { readApiKey } = require('./exec/api-key')
 const { redactSecrets } = require('./lib/redact')
 const { isAllowedExternalUrl } = require('./lib/external-url')
-const { RELEASES_URL, downloadInstallerUpdate } = require('./lib/installer-update')
+const { downloadInstallerUpdate, isManualPlatform, manualResult } = require('./lib/installer-update')
 const { API_PKILL_PATTERN, apiSpawnSpec } = require('./lib/api-launch')
 
 const IS_PACKAGED = app.isPackaged
@@ -24,9 +24,9 @@ const DEMO_MODE = !IS_PACKAGED && !HAS_REAL_FLAG
 const HAS_DEMO_UPDATES_FLAG = process.argv.includes('--demo-updates')
 // Opt-in with --demo-updates: Update All also downloads the installer update.
 // --demo-installer-update=manual makes the download return a manual result.
-const demoInstallerArg = process.argv.find((a) =>
-  a === '--demo-installer-update' || a.startsWith('--demo-installer-update='))
-const DEMO_INSTALLER_UPDATE = demoInstallerArg ? (demoInstallerArg.split('=')[1] || 'download') : null
+const DEMO_INSTALLER_UPDATE = process.argv.includes('--demo-installer-update=manual') ? 'manual'
+  : process.argv.includes('--demo-installer-update') ? 'download'
+  : null
 // Test seam (issue #12): --demo-fail=<channel>[,<channel>] forces the named IPC
 // channels to reject, so the renderer's IPC-failure handling can be exercised.
 const DEMO_FAIL_CHANNELS = (process.argv.find((a) => a.startsWith('--demo-fail=')) || '')
@@ -55,6 +55,31 @@ function sendLog(channel, payload) {
       : { ...payload, text: redactSecrets(payload.text) }
   }
   mainWindow?.webContents.send(channel, out)
+}
+
+// The venv Python for run(), which goes through a shell: quoted on Windows,
+// where install paths can contain spaces.
+function shellVenvPython(emberPath) {
+  const bin = venvPython(emberPath, process.platform)
+  return process.platform === 'win32' ? `"${bin}"` : bin
+}
+
+// The API key read in this session (the apikey step, or the first UI build),
+// so a UI build right after it does not start Python again to read it.
+let sessionApiKey = null
+
+// The environment for `npm run build` in ember-2-ui. The bundle needs the API
+// key baked in, or every authenticated request to the backend fails. It reaches
+// the build through the child's environment only; nothing holding it is
+// written to disk.
+async function uiBuildEnvWithKey({ pyBin, emberPath, log }) {
+  if (!sessionApiKey) {
+    log('Reading API key for the UI build...\n')
+    const keyResult = await readApiKey({ pyBin, emberPath, onLog: log })
+    if (keyResult.ok) sessionApiKey = keyResult.key
+    else log('Warning: could not retrieve API key — UI will build without auth\n')
+  }
+  return uiBuildEnv(process.env, sessionApiKey)
 }
 
 // Deferred until app is ready — getPath() is not available at require time.
@@ -201,7 +226,7 @@ ipcMain.handle('download-installer-update', () => downloadInstallerUpdate(autoUp
 
 ipcMain.handle('install-installer-update', () => {
   // No-op where the update is manual — see download-installer-update.
-  if (process.platform !== 'win32') return
+  if (isManualPlatform(process.platform)) return
   if (autoUpdater) autoUpdater.quitAndInstall()
 })
 
@@ -648,9 +673,7 @@ ipcMain.handle('setup-dev-mode', (_e, { emberPath, demoVault, testVault }) => {
 
 ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
   const isWin = process.platform === 'win32'
-  const pyBin = isWin
-    ? `"${path.join(emberPath, '.venv', 'Scripts', 'python.exe')}"`
-    : path.join(emberPath, '.venv', 'bin', 'python')
+  const pyBin = shellVenvPython(emberPath)
 
   if (step === 'apikey') {
     // The script prints the key, so its output is never streamed here: only
@@ -659,7 +682,9 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
       pyBin,
       emberPath,
       onLog: (text) => sendLog('install-log', { step, text }),
+      detectCreated: true,
     })
+    if (keyResult.ok) sessionApiKey = keyResult.key
     let text
     if (!keyResult.ok) text = `Could not set up the API key: ${keyResult.error}\n`
     else if (keyResult.created) text = 'API key generated and stored in the system credential store ✓\n'
@@ -755,23 +780,16 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
       return { ok: false }
     }
 
-    // The UI bundle needs the API key baked in, or every authenticated request
-    // to the backend fails. It reaches the build through the child's
-    // environment only; nothing holding it is written to disk.
-    sendLog('install-log', { step, text: 'Reading API key for the UI build...\n' })
-    const keyResult = await readApiKey({
+    const env = await uiBuildEnvWithKey({
       pyBin,
       emberPath,
-      onLog: (text) => sendLog('install-log', { step, text }),
+      log: (text) => sendLog('install-log', { step, text }),
     })
-    if (!keyResult.ok) {
-      sendLog('install-log', { step, text: 'Warning: could not retrieve API key — UI will build without auth\n' })
-    }
 
     sendLog('install-log', { step, text: 'Building Ember UI...\n' })
     const buildOk = (await run('npm', ['run', 'build'], {
       cwd: uiDir,
-      env: uiBuildEnv(process.env, keyResult.key),
+      env,
       onData: (chunk) => sendLog('install-log', { step, text: chunk }),
     })).ok
     if (!buildOk) {
@@ -961,9 +979,7 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
   if (!emberPath) return { ok: false, error: 'No ember-2 path configured' }
 
   const isWin = process.platform === 'win32'
-  const pyBin = isWin
-    ? `"${path.join(emberPath, '.venv', 'Scripts', 'python.exe')}"`
-    : path.join(emberPath, '.venv', 'bin', 'python')
+  const pyBin = shellVenvPython(emberPath)
   const uiDir = uiSourceDir(emberPath)
   const log = (text) => sendLog('update-all-log', text)
 
@@ -1097,14 +1113,10 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     const npmOk = (await run('npm', ['ci'], { cwd: uiDir, onData: log })).ok
     if (!npmOk) { log('npm ci failed.\n'); return { ok: false, stage: 'ui-npm' } }
 
-    log('Reading API key...\n')
-    const keyResult = await readApiKey({ pyBin, emberPath, onLog: log })
-    if (!keyResult.ok) log('Warning: could not retrieve API key — UI will build without auth\n')
+    const env = await uiBuildEnvWithKey({ pyBin, emberPath, log })
 
     log('Building UI...\n')
-    const buildOk = (await run('npm', ['run', 'build'], {
-      cwd: uiDir, env: uiBuildEnv(process.env, keyResult.key), onData: log,
-    })).ok
+    const buildOk = (await run('npm', ['run', 'build'], { cwd: uiDir, env, onData: log })).ok
     if (!buildOk) { log('UI build failed.\n'); return { ok: false, stage: 'ui-build' } }
 
     const targetUiDir = uiTargetDir(emberPath)
@@ -1156,17 +1168,10 @@ ipcMain.handle('run-git-pull', async (_e) => {
   const npmOk = (await run('npm', ['ci'], { cwd: uiDir, onData: log })).ok
   if (!npmOk) { log('npm ci failed.\n'); return { ok: false } }
 
-  const pyBin = process.platform === 'win32'
-    ? `"${path.join(emberPath, '.venv', 'Scripts', 'python.exe')}"`
-    : path.join(emberPath, '.venv', 'bin', 'python')
-  log('Reading API key...\n')
-  const keyResult = await readApiKey({ pyBin, emberPath, onLog: log })
-  if (!keyResult.ok) log('Warning: could not retrieve API key — UI will build without auth\n')
+  const env = await uiBuildEnvWithKey({ pyBin: shellVenvPython(emberPath), emberPath, log })
 
   log('Building Ember UI...\n')
-  const buildOk = (await run('npm', ['run', 'build'], {
-    cwd: uiDir, env: uiBuildEnv(process.env, keyResult.key), onData: log,
-  })).ok
+  const buildOk = (await run('npm', ['run', 'build'], { cwd: uiDir, env, onData: log })).ok
   if (!buildOk) { log('UI build failed.\n'); return { ok: false } }
 
   try {
@@ -1824,7 +1829,7 @@ if (DEMO_MODE) {
   ipcMain.removeHandler('download-installer-update')
   ipcMain.handle('download-installer-update', async () => {
     if (DEMO_INSTALLER_UPDATE === 'manual') {
-      return { ok: false, manual: true, message: 'On this platform, download the latest installer from the GitHub Releases page. (demo)', url: RELEASES_URL }
+      return manualResult('On this platform, download the latest installer from the GitHub Releases page. (demo)')
     }
     for (const percent of [10, 45, 80, 100]) {
       mainWindow?.webContents.send('installer-download-progress', { percent })

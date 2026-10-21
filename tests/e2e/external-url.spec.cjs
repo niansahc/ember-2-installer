@@ -3,26 +3,20 @@
 // launch (build-config.spec pattern).
 
 const { test, expect } = require('@playwright/test')
+const fs = require('fs')
+const path = require('path')
 const { ALLOWED_EXTERNAL_HOSTS, isAllowedExternalUrl } = require('../../src/lib/external-url')
 
-// Every URL the renderer opens today (index.html, app.js).
-const RENDERER_URLS = [
-  'https://git-scm.com/downloads',
-  'https://www.python.org/downloads/',
-  'https://nodejs.org/en/download',
-  'https://ollama.com/download',
-  'https://www.docker.com/products/docker-desktop/',
-  'https://brew.sh',
-  'https://github.com/niansahc/ember-2/blob/main/docs/model_guide.md',
-  'https://github.com/niansahc/ember-2-installer/blob/main/docs/model-evals.md',
-  'https://github.com/niansahc/ember-2/blob/main/LICENSE',
-  'https://tailscale.com/download',
-  'https://apps.apple.com/app/tailscale/id1470499037',
-  'https://play.google.com/store/apps/details?id=com.tailscale.ipn',
-  'https://ember.example.ts.net',
-  'http://localhost:8000',
-  'http://127.0.0.1:8000',
-]
+// Every literal URL in the renderer, read from source so a link added there is
+// checked here too. Templated URLs (`https://${dns}`) are skipped; the samples
+// below stand in for them.
+const RENDERER_URLS = [...new Set(['index.html', 'app.js'].flatMap((file) => {
+  const source = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'renderer', file), 'utf-8')
+  return source.match(/https?:\/\/[^"'`<>\s)]+/g) || []
+}))].filter((url) => !url.includes('${'))
+
+// The tailnet HTTPS name and the local API, which the renderer builds at runtime.
+const TEMPLATED_URL_SAMPLES = ['https://ember.example.ts.net', 'http://127.0.0.1:8000']
 
 // https or http-localhost strings that are not allowed destinations.
 const LOOKALIKES = [
@@ -51,7 +45,11 @@ function oldOpenUrlCheck(url) {
 
 test.describe('isAllowedExternalUrl', () => {
   test('allows every URL the renderer opens', () => {
-    for (const url of RENDERER_URLS) expect(isAllowedExternalUrl(url), url).toBe(true)
+    // Guards the scan itself: a regex that found nothing would pass vacuously.
+    expect(RENDERER_URLS.length).toBeGreaterThan(10)
+    for (const url of [...RENDERER_URLS, ...TEMPLATED_URL_SAMPLES]) {
+      expect(isAllowedExternalUrl(url), url).toBe(true)
+    }
   })
 
   test('denies lookalike hosts and embedded credentials', () => {

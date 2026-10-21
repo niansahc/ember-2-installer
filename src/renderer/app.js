@@ -2123,7 +2123,6 @@ window.ember.onInstallerUpdateAvailable((data) => {
 // A download that sends no progress for this long has failed. Generous because
 // the updater's own release check runs first and emits no progress.
 const INSTALLER_STALL_MS = 60000
-const INSTALLER_RELEASES_URL = 'https://github.com/niansahc/ember-2-installer/releases/latest'
 
 // Download the installer update. Resolves { ok: true } once the update is
 // downloaded, the main process's manual result, or { ok: false, error }.
@@ -2145,31 +2144,27 @@ function downloadInstallerUpdate(onProgress) {
     }
     window.ember.onInstallerDownloadProgress((data) => {
       armStallTimer()
-      if (onProgress) onProgress(data.percent)
+      onProgress(data.percent)
     })
     window.ember.onInstallerUpdateDownloaded(() => finish({ ok: true }))
     armStallTimer()
     window.ember.downloadInstallerUpdate().then(
-      (result) => finish(result && typeof result === 'object' ? result : { ok: false, error: 'No result from the updater.' }),
+      finish,
       (err) => finish({ ok: false, error: err.message }),
     )
   })
 }
 
 // Tell the user on the Done screen that the installer has to be updated by
-// hand, with a button to the Releases page.
-function showInstallerUpdateNotice(text, url) {
+// hand, with a link to the Releases page (its URL is on the link in index.html).
+function showInstallerUpdateNotice(text) {
   document.getElementById('done-installer-update-text').textContent = text
-  const link = document.getElementById('btn-open-installer-releases')
-  link.dataset.url = url || ''
-  link.classList.toggle('hidden', !url)
   document.getElementById('done-installer-update-note').classList.remove('hidden')
 }
 
 document.getElementById('btn-open-installer-releases').addEventListener('click', (e) => {
   e.preventDefault()
-  const url = e.currentTarget.dataset.url
-  if (url) window.ember.openUrl(url)
+  window.ember.openUrl(e.currentTarget.dataset.url)
 })
 
 document.getElementById('btn-installer-update').addEventListener('click', () => {
@@ -2275,22 +2270,19 @@ document.getElementById('btn-run-update-all').addEventListener('click', () => {
           logBox.textContent += 'Installer update downloaded. Restarting...\n'
           btn.textContent = 'Restarting...'
           window.ember.installInstallerUpdate()
-        } else {
-          const notice = download.manual
-            ? download.message
-            : `The installer update failed (${download.error}). Backend and UI are updated. Download the latest installer from the GitHub Releases page.`
-          logBox.textContent += `\n${notice}\n`
-          showInstallerUpdateNotice(notice, download.url || INSTALLER_RELEASES_URL)
-          btn.textContent = 'Done'
-          showScreen('screen-done')
-          loadEmberVersion()
+          return
         }
+        const notice = download.manual
+          ? download.message
+          : `The installer update failed (${download.error}). Backend and UI are updated. Download the latest installer from the GitHub Releases page.`
+        logBox.textContent += `\n${notice}\n`
+        showInstallerUpdateNotice(notice)
       } else {
         logBox.textContent += '\nAll updates applied. Starting Ember...\n'
-        btn.textContent = 'Done'
-        showScreen('screen-done')
-        loadEmberVersion()
       }
+      btn.textContent = 'Done'
+      showScreen('screen-done')
+      loadEmberVersion()
     } else {
       logBox.textContent += `\nUpdate failed at stage: ${result.stage || 'unknown'}\n`
       btn.textContent = 'Failed'

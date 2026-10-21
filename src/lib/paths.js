@@ -21,4 +21,12 @@ function uiIndexFile(emberPath) {
   return path.join(uiTargetDir(emberPath), 'index.html')
 }
 
-module.exports = { uiSourceDir, uiTargetDir, uiIndexFile }
+// The install's venv Python. Unquoted: callers that run it through a shell
+// quote it themselves.
+function venvPython(emberPath, platform) {
+  return platform === 'win32'
+    ? path.join(emberPath, '.venv', 'Scripts', 'python.exe')
+    : path.join(emberPath, '.venv', 'bin', 'python')
+}
+
+module.exports = { uiSourceDir, uiTargetDir, uiIndexFile, venvPython }

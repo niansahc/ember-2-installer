@@ -4,7 +4,9 @@
 // "Please check update first" unless a check that found an update ran first.
 
 const { test, expect } = require('@playwright/test')
-const { RELEASES_URL, downloadInstallerUpdate } = require('../../src/lib/installer-update')
+const fs = require('fs')
+const path = require('path')
+const { RELEASES_URL, downloadInstallerUpdate, isManualPlatform } = require('../../src/lib/installer-update')
 
 function fakeUpdater({ available = true, checkError = null, downloadError = null } = {}) {
   const calls = []
@@ -41,7 +43,7 @@ test.describe('downloadInstallerUpdate', () => {
   test('no update in the release metadata: manual result, download never called', async () => {
     const updater = fakeUpdater({ available: false })
     const r = await downloadInstallerUpdate(updater, 'win32')
-    expect(r).toMatchObject({ ok: false, manual: true, url: RELEASES_URL })
+    expect(r).toMatchObject({ ok: false, manual: true })
     expect(updater.calls).toEqual(['check'])
   })
 
@@ -69,9 +71,20 @@ test.describe('downloadInstallerUpdate', () => {
     for (const platform of ['linux', 'darwin']) {
       const updater = fakeUpdater()
       const r = await downloadInstallerUpdate(updater, platform)
-      expect(r).toMatchObject({ ok: false, manual: true, url: RELEASES_URL })
+      expect(r).toMatchObject({ ok: false, manual: true })
       expect(r.message).toMatch(platform === 'linux' ? /AppImage/ : /DMG/)
       expect(updater.calls).toEqual([])
+      expect(isManualPlatform(platform)).toBe(true)
     }
+    expect(isManualPlatform('win32')).toBe(false)
+  })
+
+  // Every manual result's notice links to the Releases page; the link's URL
+  // lives on the anchor in index.html, which the renderer cannot require from here.
+  test('the Done-screen Releases link points at RELEASES_URL', () => {
+    const html = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'renderer', 'index.html'), 'utf-8')
+    const anchor = html.match(/<a [^>]*id="btn-open-installer-releases"[^>]*>/)
+    expect(anchor).not.toBeNull()
+    expect(anchor[0]).toContain(`data-url="${RELEASES_URL}"`)
   })
 })

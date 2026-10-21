@@ -5,19 +5,12 @@
 // otherwise be visible, so the absence assertion can fail.
 
 const { test, expect } = require('@playwright/test')
-const { launchApp, closeApp } = require('./helpers.cjs')
+const { launchApp, closeApp, walkToHostScreen } = require('./helpers.cjs')
 
 const DEMO_KEY = 'ember_demo_xxxxxxxxxxxx'
 
 async function runInstallToAgpl(window) {
-  await window.locator('button[data-next="screen-prereqs"]').click()
-  await expect(window.locator('#btn-prereqs-next')).toBeEnabled({ timeout: 5000 })
-  await window.locator('#btn-prereqs-next').click()
-  await window.locator('#btn-install-ember').click()
-  await expect(window.locator('.screen.active')).toHaveAttribute('id', 'screen-vault', { timeout: 10000 })
-  await window.locator('button[data-next="screen-model"]').click()
-  await window.locator('#btn-model-next').click()
-  await window.locator('button[data-next="screen-host"]').click()
+  await walkToHostScreen(window)
   await window.locator('#btn-host-next').click()
   await expect(window.locator('.screen.active')).toHaveAttribute('id', 'screen-summary')
   await window.locator('#btn-start-install').click()

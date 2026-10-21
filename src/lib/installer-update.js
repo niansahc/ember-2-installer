@@ -19,19 +19,24 @@ const MANUAL_PLATFORMS = {
 // The release has no update metadata (latest.yml), or it is not newer than this build.
 const UNAVAILABLE_MESSAGE = 'The automatic installer update is not available for this release. Download the latest installer from the GitHub Releases page.'
 
-function manual(message) {
-  return { ok: false, manual: true, message, url: RELEASES_URL }
+// The renderer's Done-screen notice links to RELEASES_URL for every manual result.
+function manualResult(message) {
+  return { ok: false, manual: true, message }
+}
+
+function isManualPlatform(platform) {
+  return Object.hasOwn(MANUAL_PLATFORMS, platform)
 }
 
 // Resolves { ok: true } once the update is downloaded (electron-updater then
 // emits update-downloaded), a manual result, or { ok: false, error }. Never rejects.
 async function downloadInstallerUpdate(updater, platform) {
-  if (MANUAL_PLATFORMS[platform]) return manual(MANUAL_PLATFORMS[platform])
+  if (isManualPlatform(platform)) return manualResult(MANUAL_PLATFORMS[platform])
   if (!updater) return { ok: false, error: 'The installer updater is not available in this build.' }
   try {
     // null when the app is not packaged: electron-updater skips the check.
     const result = await updater.checkForUpdates()
-    if (!result || !result.isUpdateAvailable) return manual(UNAVAILABLE_MESSAGE)
+    if (!result || !result.isUpdateAvailable) return manualResult(UNAVAILABLE_MESSAGE)
     await updater.downloadUpdate()
     return { ok: true }
   } catch (err) {
@@ -39,4 +44,4 @@ async function downloadInstallerUpdate(updater, platform) {
   }
 }
 
-module.exports = { RELEASES_URL, downloadInstallerUpdate }
+module.exports = { RELEASES_URL, downloadInstallerUpdate, isManualPlatform, manualResult }

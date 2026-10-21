@@ -4,19 +4,21 @@
 // gets no onData hook, so the key is never streamed to a log channel.
 
 const { run } = require('./run')
-const { registerSecret, redactSecrets } = require('../lib/redact')
+const { parseKeyLine, registerSecret, redactSecrets } = require('../lib/redact')
 
 const SCRIPT = 'scripts/set_api_key.py'
 
 // Ensure a key exists and return it. --non-interactive generates one when none
-// is stored and prints the existing one otherwise; --check runs first only to
-// tell the two apart. onLog receives the script's stderr, redacted.
+// is stored and prints the existing one otherwise. With detectCreated, --check
+// runs first to tell the two apart (one more Python start); without it, created
+// is always false. onLog receives the script's stderr, redacted.
 // Resolves { ok, created, key, error }; never rejects (run() never does).
-async function readApiKey({ pyBin, emberPath, onLog } = {}) {
-  const existed = (await run(pyBin, [SCRIPT, '--check'], { cwd: emberPath })).ok
+async function readApiKey({ pyBin, emberPath, onLog, detectCreated = false } = {}) {
+  const existed = detectCreated
+    ? (await run(pyBin, [SCRIPT, '--check'], { cwd: emberPath })).ok
+    : true
   const r = await run(pyBin, [SCRIPT, '--non-interactive'], { cwd: emberPath })
-  const match = r.error === null ? r.stdout.match(/Key:[ \t]*(\S+)/) : null
-  const key = match ? match[1] : null
+  const key = parseKeyLine(r.stdout)
   if (key) registerSecret(key)
 
   const stderr = redactSecrets(r.stderr.trim())
