@@ -82,6 +82,35 @@ test.describe('External links', () => {
     expect(await openedExternal(app)).toEqual([])
   })
 
+  // A plain link (no target) to an allowed host goes through will-navigate, not
+  // the window-open handler. No such link ships today, so one is injected.
+  const clickPlainLink = (url) => window.evaluate((href) => {
+    const a = document.createElement('a')
+    a.href = href
+    a.textContent = 'plain link'
+    document.body.appendChild(a)
+    a.click()
+  }, url)
+
+  test('a plain link to an allowed host opens in the default browser and the page stays', async () => {
+    const before = window.url()
+    await clickPlainLink(GUIDE_URL)
+    await expect.poll(() => openedExternal(app)).toEqual([GUIDE_URL])
+    expect(window.url()).toBe(before)
+    expect(app.windows()).toHaveLength(1)
+  })
+
+  test('control: a guard that only cancels (no openExternal) opens nothing for the same link', async () => {
+    await app.evaluate(({ BrowserWindow }) => {
+      const wc = BrowserWindow.getAllWindows()[0].webContents
+      wc.removeAllListeners('will-navigate')
+      wc.on('will-navigate', (event) => event.preventDefault())
+    })
+    await clickPlainLink(GUIDE_URL)
+    await window.waitForTimeout(WINDOW_SETTLE_MS)
+    expect(await openedExternal(app)).toEqual([])
+  })
+
   test('control: without the navigation guard the same navigation happens', async () => {
     await app.evaluate(({ BrowserWindow }) => {
       BrowserWindow.getAllWindows()[0].webContents.removeAllListeners('will-navigate')
