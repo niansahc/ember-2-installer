@@ -47,6 +47,10 @@ test.describe('Installer update in Update All', () => {
     await expect(window.locator('#done-installer-update-note')).toBeVisible()
     await expect(window.locator('#done-installer-update-text')).toContainText('The installer update failed')
     await expect(window.locator('#btn-open-installer-releases')).toBeVisible()
+    // The rejection's own text ("[demo-fail] ... rejected on purpose") stays out
+    // of the notice and the log. --demo-fail is the control: it does reject.
+    await expect(window.locator('#done-installer-update-text')).not.toContainText('demo-fail')
+    await expect(window.locator('#update-all-log')).not.toContainText('demo-fail')
   })
 
   test('a manual result shows its message and opens the Releases page on click', async () => {

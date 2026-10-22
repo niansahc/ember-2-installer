@@ -19,6 +19,13 @@ const MANUAL_PLATFORMS = {
 // The release has no update metadata (latest.yml), or it is not newer than this build.
 const UNAVAILABLE_MESSAGE = 'The automatic installer update is not available for this release. Download the latest installer from the GitHub Releases page.'
 
+// Any other updater failure. The error itself goes to logError in the main
+// process: electron-updater messages carry stacks and HTTP response headers.
+const FAILED_MESSAGE = 'The automatic installer update failed. Download the latest installer from the GitHub Releases page.'
+
+// electron-updater error codes for a release without usable update metadata.
+const UNAVAILABLE_CODES = new Set(['ERR_UPDATER_CHANNEL_FILE_NOT_FOUND', 'ERR_UPDATER_LATEST_VERSION_NOT_FOUND'])
+
 // The renderer's Done-screen notice links to RELEASES_URL for every manual result.
 function manualResult(message) {
   return { ok: false, manual: true, message }
@@ -29,10 +36,14 @@ function isManualPlatform(platform) {
 }
 
 // Resolves { ok: true } once the update is downloaded (electron-updater then
-// emits update-downloaded), a manual result, or { ok: false, error }. Never rejects.
-async function downloadInstallerUpdate(updater, platform) {
+// emits update-downloaded), or a manual result. Never rejects, and never
+// returns an updater error: those go to logError only.
+async function downloadInstallerUpdate(updater, platform, { logError = console.error } = {}) {
   if (isManualPlatform(platform)) return manualResult(MANUAL_PLATFORMS[platform])
-  if (!updater) return { ok: false, error: 'The installer updater is not available in this build.' }
+  if (!updater) {
+    logError('[installer-update] electron-updater is not available in this build')
+    return manualResult(UNAVAILABLE_MESSAGE)
+  }
   try {
     // null when the app is not packaged: electron-updater skips the check.
     const result = await updater.checkForUpdates()
@@ -40,8 +51,9 @@ async function downloadInstallerUpdate(updater, platform) {
     await updater.downloadUpdate()
     return { ok: true }
   } catch (err) {
-    return { ok: false, error: (err && err.message) || String(err) }
+    logError('[installer-update]', err)
+    return manualResult(UNAVAILABLE_CODES.has(err && err.code) ? UNAVAILABLE_MESSAGE : FAILED_MESSAGE)
   }
 }
 
-module.exports = { RELEASES_URL, downloadInstallerUpdate, isManualPlatform, manualResult }
+module.exports = { FAILED_MESSAGE, RELEASES_URL, UNAVAILABLE_MESSAGE, downloadInstallerUpdate, isManualPlatform, manualResult }

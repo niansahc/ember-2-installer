@@ -2124,8 +2124,13 @@ window.ember.onInstallerUpdateAvailable((data) => {
 // the updater's own release check runs first and emits no progress.
 const INSTALLER_STALL_MS = 60000
 
+// Fixed notices for failures the main process does not report: no error text
+// from the updater or the IPC layer is shown.
+const INSTALLER_STALLED_MESSAGE = 'The installer update stopped making progress. Download the latest installer from the GitHub Releases page.'
+const INSTALLER_FAILED_MESSAGE = 'The installer update failed. Download the latest installer from the GitHub Releases page.'
+
 // Download the installer update. Resolves { ok: true } once the update is
-// downloaded, the main process's manual result, or { ok: false, error }.
+// downloaded, or a manual result { ok: false, manual: true, message }.
 function downloadInstallerUpdate(onProgress) {
   return new Promise((resolve) => {
     let timer = null
@@ -2138,7 +2143,7 @@ function downloadInstallerUpdate(onProgress) {
     const armStallTimer = () => {
       clearTimeout(timer)
       timer = setTimeout(
-        () => finish({ ok: false, error: 'The download stopped making progress.' }),
+        () => finish({ ok: false, manual: true, message: INSTALLER_STALLED_MESSAGE }),
         INSTALLER_STALL_MS,
       )
     }
@@ -2150,7 +2155,7 @@ function downloadInstallerUpdate(onProgress) {
     armStallTimer()
     window.ember.downloadInstallerUpdate().then(
       finish,
-      (err) => finish({ ok: false, error: err.message }),
+      () => finish({ ok: false, manual: true, message: INSTALLER_FAILED_MESSAGE }),
     )
   })
 }
@@ -2177,13 +2182,12 @@ document.getElementById('btn-installer-update').addEventListener('click', () => 
     const result = await downloadInstallerUpdate((percent) => {
       btn.textContent = `Downloading ${percent}%`
     })
-    if (result.manual) {
+    if (!result.ok) {
       text.textContent = result.message
       btn.textContent = 'Update & Restart'
       btn.disabled = false
       return
     }
-    if (!result.ok) throw new Error(result.error)
     text.textContent = 'Update downloaded. Restarting...'
     btn.textContent = 'Restarting...'
     setTimeout(() => window.ember.installInstallerUpdate(), 1000)
@@ -2272,11 +2276,8 @@ document.getElementById('btn-run-update-all').addEventListener('click', () => {
           window.ember.installInstallerUpdate()
           return
         }
-        const notice = download.manual
-          ? download.message
-          : `The installer update failed (${download.error}). Backend and UI are updated. Download the latest installer from the GitHub Releases page.`
-        logBox.textContent += `\n${notice}\n`
-        showInstallerUpdateNotice(notice)
+        logBox.textContent += `\n${download.message}\n`
+        showInstallerUpdateNotice(download.message)
       } else {
         logBox.textContent += '\nAll updates applied. Starting Ember...\n'
       }

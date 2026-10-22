@@ -6,23 +6,42 @@
 const { test, expect } = require('@playwright/test')
 const fs = require('fs')
 const path = require('path')
-const { RELEASES_URL, downloadInstallerUpdate, isManualPlatform } = require('../../src/lib/installer-update')
+const { HttpError, newError } = require('builder-util-runtime')
+const {
+  FAILED_MESSAGE, RELEASES_URL, UNAVAILABLE_MESSAGE, downloadInstallerUpdate, isManualPlatform,
+} = require('../../src/lib/installer-update')
+
+// The error electron-updater 6.x throws from checkForUpdates when the release has
+// no latest.yml, built the way GitHubProvider builds it: a 404 HttpError (whose
+// message carries the response headers, as createHttpError writes it) wrapped by newError.
+const LEAK_MARKERS = ['Cannot find latest.yml', 'Headers:', 'x-github-request-id', 'HttpError']
+function missingLatestYmlError() {
+  const http = new HttpError(404, '404 Not Found\nHeaders: {\n  "x-github-request-id": "0000:1111:2222"\n}')
+  const url = 'https://github.com/niansahc/ember-2-installer/releases/download/v9.9.9/latest.yml'
+  return newError(`Cannot find latest.yml in the latest release artifacts (${url}): ${http.stack}`, 'ERR_UPDATER_CHANNEL_FILE_NOT_FOUND')
+}
+
+function leaks(value) {
+  const text = JSON.stringify(value)
+  return LEAK_MARKERS.filter((m) => text.includes(m))
+}
 
 function fakeUpdater({ available = true, checkError = null, downloadError = null } = {}) {
+  const toError = (e) => (e instanceof Error ? e : new Error(e))
   const calls = []
   let checked = false
   return {
     calls,
     async checkForUpdates() {
       calls.push('check')
-      if (checkError) throw new Error(checkError)
+      if (checkError) throw toError(checkError)
       if (available) checked = true
       return { isUpdateAvailable: available, updateInfo: { version: '9.9.9' } }
     },
     async downloadUpdate() {
       calls.push('download')
       if (!checked) throw new Error('Please check update first')
-      if (downloadError) throw new Error(downloadError)
+      if (downloadError) throw toError(downloadError)
       return ['Ember Setup 9.9.9.exe']
     },
   }
@@ -54,17 +73,38 @@ test.describe('downloadInstallerUpdate', () => {
     expect(updater.calls).toEqual([])
   })
 
-  test('a failing check or download resolves ok:false with the error', async () => {
-    expect(await downloadInstallerUpdate(fakeUpdater({ checkError: 'net::ERR_INTERNET_DISCONNECTED' }), 'win32'))
-      .toEqual({ ok: false, error: 'net::ERR_INTERNET_DISCONNECTED' })
-    expect(await downloadInstallerUpdate(fakeUpdater({ downloadError: 'sha512 checksum mismatch' }), 'win32'))
-      .toEqual({ ok: false, error: 'sha512 checksum mismatch' })
+  test('a release without latest.yml: the unavailable message, raw error logged only', async () => {
+    const logged = []
+    const r = await downloadInstallerUpdate(fakeUpdater({ checkError: missingLatestYmlError() }), 'win32', {
+      logError: (...args) => logged.push(args),
+    })
+    expect(r).toEqual({ ok: false, manual: true, message: UNAVAILABLE_MESSAGE })
+    expect(leaks(r)).toEqual([])
+    expect(logged).toHaveLength(1)
   })
 
-  test('no updater (dev build): ok:false, not a silent success', async () => {
-    const r = await downloadInstallerUpdate(null, 'win32')
-    expect(r.ok).toBe(false)
-    expect(r.error).toBeTruthy()
+  test('control: the fixture error carries the raw text the result must not', () => {
+    const err = missingLatestYmlError()
+    expect(err.code).toBe('ERR_UPDATER_CHANNEL_FILE_NOT_FOUND')
+    expect(leaks({ error: err.message })).toEqual(LEAK_MARKERS)
+  })
+
+  test('any other check or download error: the failed message, raw error logged only', async () => {
+    for (const [opts, raw] of [
+      [{ checkError: 'net::ERR_INTERNET_DISCONNECTED' }, 'net::ERR_INTERNET_DISCONNECTED'],
+      [{ downloadError: 'sha512 checksum mismatch' }, 'sha512 checksum mismatch'],
+    ]) {
+      const logged = []
+      const r = await downloadInstallerUpdate(fakeUpdater(opts), 'win32', { logError: (...args) => logged.push(args) })
+      expect(r).toEqual({ ok: false, manual: true, message: FAILED_MESSAGE })
+      expect(JSON.stringify(r)).not.toContain(raw)
+      expect(logged[0][1].message).toBe(raw)
+    }
+  })
+
+  test('no updater (dev build): a manual result, not a silent success', async () => {
+    const r = await downloadInstallerUpdate(null, 'win32', { logError: () => {} })
+    expect(r).toEqual({ ok: false, manual: true, message: UNAVAILABLE_MESSAGE })
   })
 
   test('Linux and macOS: manual result, updater never touched', async () => {

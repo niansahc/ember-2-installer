@@ -184,8 +184,8 @@ app.whenReady().then(() => {
     autoUpdater.autoDownload = false
     autoUpdater.autoInstallOnAppQuit = false
 
-    // A listener stops electron-updater showing its own error dialog. Errors
-    // still reach the renderer through download-installer-update's result.
+    // A listener stops electron-updater showing its own error dialog. The
+    // renderer gets a manual result from download-installer-update instead.
     autoUpdater.on('error', (err) => console.error('[autoUpdater]', err && err.message))
 
     autoUpdater.on('update-available', (info) => {
@@ -221,7 +221,8 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-// Linux and macOS get a manual result; see src/lib/installer-update.js.
+// Linux and macOS get a manual result, and so does any updater error (logged
+// here, never sent to the renderer); see src/lib/installer-update.js.
 ipcMain.handle('download-installer-update', () => downloadInstallerUpdate(autoUpdater, process.platform))
 
 ipcMain.handle('install-installer-update', () => {
