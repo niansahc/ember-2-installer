@@ -35,6 +35,28 @@ test.describe('Installer update in Update All', () => {
     await expect(window.locator('#update-all-log')).toContainText('Installer update downloaded. Restarting...', { timeout: 60000 })
     await expect(window.locator('#btn-run-update-all')).toHaveText('Restarting...')
     await expect(window.locator('.screen.active')).toHaveAttribute('id', 'screen-update')
+    // Control for the two tests below: a completed download does mark the row done.
+    await expect(window.locator('#update-row-installer')).toHaveClass(/\bdone\b/)
+  })
+
+  test('the installer row is not done while the download runs', async () => {
+    test.slow()
+    const launched = await launchOnUpdateScreen(['--demo-installer-update'])
+    app = launched.app
+    const { window } = launched
+    await window.locator('#btn-run-update-all').click()
+    // Read the row classes in the page at the moment the download starts, so a
+    // fast demo download cannot finish between the check and the assertions.
+    const handle = await window.waitForFunction(() => {
+      if (!/Downloading/.test(document.getElementById('btn-run-update-all').textContent)) return null
+      const cls = (r) => document.getElementById(`update-row-${r}`).className
+      return { backend: cls('backend'), ui: cls('ui'), installer: cls('installer') }
+    }, null, { timeout: 60000 })
+    const rows = await handle.jsonValue()
+    expect(rows.backend).toMatch(/\bdone\b/)
+    expect(rows.ui).toMatch(/\bdone\b/)
+    expect(rows.installer).toMatch(/\bin-progress\b/)
+    expect(rows.installer).not.toMatch(/\bdone\b/)
   })
 
   test('a failed download lands on Done with a notice and the Releases link', async () => {
@@ -51,6 +73,7 @@ test.describe('Installer update in Update All', () => {
     // of the notice and the log. --demo-fail is the control: it does reject.
     await expect(window.locator('#done-installer-update-text')).not.toContainText('demo-fail')
     await expect(window.locator('#update-all-log')).not.toContainText('demo-fail')
+    await expect(window.locator('#update-row-installer')).not.toHaveClass(/\bdone\b/)
   })
 
   test('a manual result shows its message and opens the Releases page on click', async () => {
@@ -62,6 +85,7 @@ test.describe('Installer update in Update All', () => {
     await window.locator('#btn-run-update-all').click()
     await expect(window.locator('.screen.active')).toHaveAttribute('id', 'screen-done', { timeout: 60000 })
     await expect(window.locator('#done-installer-update-text')).toContainText('download the latest installer from the GitHub Releases page')
+    await expect(window.locator('#update-row-installer')).not.toHaveClass(/\bdone\b/)
     await window.locator('#btn-open-installer-releases').click()
     await expect.poll(() => openedExternal(app)).toEqual([RELEASES_URL])
   })

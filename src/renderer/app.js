@@ -2243,7 +2243,6 @@ document.getElementById('btn-run-update-all').addEventListener('click', () => {
       logBox.scrollTop = logBox.scrollHeight
       if (/Updating Ember backend/i.test(text)) advanceTo('backend')
       else if (/Updating Ember UI|Updating UI|Building UI/i.test(text)) advanceTo('ui')
-      else if (/Downloading installer update|Installing installer/i.test(text)) advanceTo('installer')
     })
 
     const result = await window.ember.runAllUpdates(pendingUpdates, state.host)
@@ -2252,9 +2251,11 @@ document.getElementById('btn-run-update-all').addEventListener('click', () => {
     if (result.ok) {
       // Finish the currently in-progress row, and mark any visible rows the
       // log markers never touched as done too (defensive — some stages don't
-      // emit a distinctive marker).
+      // emit a distinctive marker). An installer update still to download is
+      // marked from the download's result below, not here.
       if (currentStage) markUpdateRowDone(currentStage)
-      for (const r of ['backend', 'ui', 'installer']) {
+      const finished = result.needsInstallerUpdate ? ['backend', 'ui'] : ['backend', 'ui', 'installer']
+      for (const r of finished) {
         const row = document.getElementById(`update-row-${r}`)
         if (row && !row.classList.contains('hidden') && !row.classList.contains('done')) {
           markUpdateRowDone(r)
@@ -2267,10 +2268,12 @@ document.getElementById('btn-run-update-all').addEventListener('click', () => {
       if (result.needsInstallerUpdate) {
         logBox.textContent += '\nBackend and UI updated. Downloading installer update...\n'
         btn.textContent = 'Downloading...'
+        markUpdateRowInProgress('installer')
         const download = await downloadInstallerUpdate((percent) => {
           btn.textContent = `Downloading ${percent}%`
         })
         if (download.ok) {
+          markUpdateRowDone('installer')
           logBox.textContent += 'Installer update downloaded. Restarting...\n'
           btn.textContent = 'Restarting...'
           window.ember.installInstallerUpdate()

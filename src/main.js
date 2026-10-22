@@ -1792,7 +1792,8 @@ if (DEMO_MODE) {
         log('  built dist/\n')
         await wait(900)
       }
-      if (updates.installer) {
+      // With --demo-installer-update the renderer downloads it afterwards, as in real mode.
+      if (updates.installer && !DEMO_INSTALLER_UPDATE) {
         log('Downloading installer update...\n')
         await wait(1600)
         log('  installer ready\n')
