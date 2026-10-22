@@ -22,8 +22,9 @@ Three things must be present for auto-update to work:
 - The installer binary (`.exe`, `.dmg`, `.AppImage`)
 
 If `app-update.yml` is missing from an installed version, that version can never auto-update; the
-user must reinstall manually. In-app self-update is wired for Windows; on Linux it is a manual
-AppImage download and on macOS it is untested (see `download-installer-update` in `src/main.js`).
+user must reinstall manually. In-app self-update is wired for Windows only. On Linux (AppImage) and
+macOS (unsigned DMG) the update is manual: the installer points the user to the GitHub Releases page
+(see `MANUAL_PLATFORMS` in `src/lib/installer-update.js`).
 
 ## Three-Repo Version Coordination
 

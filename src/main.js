@@ -925,11 +925,12 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
   }
   const uiLatest = displayVersion(uiRelease?.tag_name) || null
 
-  // Linux has no in-app installer self-update (AppImage self-replacement is
-  // untested on hardware), so don't raise the auto-update banner there — its
-  // button would drive a no-op download. Backend/UI checks below are unaffected.
-  // manual=true lets the renderer optionally surface a "download manually" hint.
-  const installerSelfUpdate = process.platform !== 'linux'
+  // Linux and macOS have no in-app installer self-update (isManualPlatform in
+  // src/lib/installer-update.js), so don't offer the installer update there:
+  // Update All would mark it done and then hand back a manual result.
+  // Backend/UI checks below are unaffected. manual=true lets the renderer
+  // optionally surface a "download manually" hint.
+  const installerSelfUpdate = !isManualPlatform(process.platform)
   return {
     reachable: !!(installerRelease || backendRelease || uiRelease),
     installer: {

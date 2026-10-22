@@ -119,6 +119,13 @@ test.describe('downloadInstallerUpdate', () => {
     expect(isManualPlatform('win32')).toBe(false)
   })
 
+  // check-all-updates runs in main.js, which cannot be required here; this pins
+  // that it offers the installer update exactly where the download is not manual.
+  test('check-all-updates uses isManualPlatform for installer self-update', () => {
+    const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'main.js'), 'utf-8')
+    expect(main).toMatch(/const installerSelfUpdate = !isManualPlatform\(process\.platform\)/)
+  })
+
   // Every manual result's notice links to the Releases page; the link's URL
   // lives on the anchor in index.html, which the renderer cannot require from here.
   test('the Done-screen Releases link points at RELEASES_URL', () => {
