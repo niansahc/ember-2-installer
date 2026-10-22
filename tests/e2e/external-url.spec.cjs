@@ -15,8 +15,9 @@ const RENDERER_URLS = [...new Set(['index.html', 'app.js'].flatMap((file) => {
   return source.match(/https?:\/\/[^"'`<>\s)]+/g) || []
 }))].filter((url) => !url.includes('${'))
 
-// The tailnet HTTPS name and the local API, which the renderer builds at runtime.
-const TEMPLATED_URL_SAMPLES = ['https://ember.example.ts.net', 'http://127.0.0.1:8000']
+// The tailnet HTTPS name, the tailnet IP fallback and the local API, which the
+// renderer builds at runtime.
+const TEMPLATED_URL_SAMPLES = ['https://ember.example.ts.net', 'http://100.101.102.103:8000', 'http://127.0.0.1:8000']
 
 // https or http-localhost strings that are not allowed destinations.
 const LOOKALIKES = [
@@ -66,8 +67,24 @@ test.describe('isAllowedExternalUrl', () => {
     }
   })
 
-  test('denies a bare tailnet IP (the API binds 127.0.0.1, nothing listens there)', () => {
-    expect(isAllowedExternalUrl('http://100.72.128.44:8000')).toBe(false)
+  test('allows http to a tailnet IP (100.64.0.0/10) on the API port', () => {
+    for (const url of ['http://100.72.128.44:8000', 'http://100.64.0.1:8000/', 'http://100.127.255.254:8000']) {
+      expect(isAllowedExternalUrl(url), url).toBe(true)
+    }
+  })
+
+  // The allow test above is the control: the same hosts pass on port 8000.
+  test('denies addresses outside 100.64.0.0/10, other ports and lookalike names', () => {
+    for (const url of [
+      'http://100.128.0.1:8000',
+      'http://100.63.255.255:8000',
+      'http://100.72.128.44:8080',
+      'http://100.72.128.44',
+      'https://100.72.128.44:8000',
+      'http://100.72.128.44.evil.test:8000',
+    ]) {
+      expect(isAllowedExternalUrl(url), url).toBe(false)
+    }
   })
 
   test('every allowlisted host is reachable over https only', () => {
