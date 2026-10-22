@@ -13,7 +13,6 @@ const state = {
   model: 'qwen3:8b',
   vision: null,
   host: '127.0.0.1',
-  tailscaleIp: null,
   tailscaleDns: null,
   models: [],
   ollamaModelsPath: null,
@@ -822,7 +821,6 @@ async function tsCheckConnected() {
     icon.textContent = '✅'
     // API always binds to localhost — Tailscale handles external routing
     state.host = '127.0.0.1'
-    state.tailscaleIp = ip
     // hostname/ip come from `tailscale status` output — insert as text, not markup.
     body.innerHTML = ''
     const connectedP = document.createElement('p')
@@ -848,6 +846,8 @@ async function tsCheckConnected() {
   }
 }
 
+const TS_PHONE_NOT_SET_UP = "Phone access isn't set up yet."
+
 document.getElementById('btn-ts-serve').addEventListener('click', () => {
   const btn = document.getElementById('btn-ts-serve')
   const resultEl = document.getElementById('ts-serve-result')
@@ -863,16 +863,17 @@ document.getElementById('btn-ts-serve').addEventListener('click', () => {
       window.ember.getTailscaleDns(),
     ])
 
-    if (serveResult.ok) {
+    // Phone access needs the Serve HTTPS name. There is no tailnet IP fallback:
+    // the API binds 127.0.0.1, so nothing listens on <tailnet IP>:8000.
+    if (serveResult.ok && dnsName) {
       icon.textContent = '✅'
-      if (dnsName) state.tailscaleDns = dnsName
-      const url = dnsName ? `https://${dnsName}` : `http://${state.tailscaleIp || '127.0.0.1'}:8000`
+      state.tailscaleDns = dnsName
       btn.classList.add('hidden')
       resultEl.classList.remove('hidden')
       resultEl.textContent = 'Your Ember URL: '
       const urlSpan = document.createElement('span')
       urlSpan.className = 'ts-url-display'
-      urlSpan.textContent = url
+      urlSpan.textContent = `https://${dnsName}`
       resultEl.appendChild(urlSpan)
 
       document.getElementById('ts-step-phone').classList.remove('hidden')
@@ -881,11 +882,11 @@ document.getElementById('btn-ts-serve').addEventListener('click', () => {
       btn.disabled = false
       btn.textContent = 'Retry'
       resultEl.classList.remove('hidden')
-      resultEl.textContent = 'Failed — you can set this up later. Using IP address instead.'
+      resultEl.textContent = TS_PHONE_NOT_SET_UP
     }
   }, {
     errorEl: resultEl,
-    errorMsg: 'Setup failed — you can set this up later. Using IP address instead.',
+    errorMsg: TS_PHONE_NOT_SET_UP,
     onError: () => { icon.textContent = '❌'; btn.textContent = 'Retry' },
   })
 })
@@ -1476,8 +1477,8 @@ document.getElementById('btn-launch-ember').addEventListener('click', () => {
 })
 
 // Open Ember — the Tailscale Serve HTTPS name if it was set up, otherwise the
-// local API. Not the bare tailnet IP: open-url allows it, but the installer
-// configures the API to bind 127.0.0.1, so nothing listens on <tailnet IP>:8000.
+// local API. Not the bare tailnet IP: the API binds 127.0.0.1 only, so nothing
+// listens on <tailnet IP>:8000, and open-url does not allow that URL.
 document.getElementById('btn-open-ember').addEventListener('click', () => {
   window.ember.openUrl(state.tailscaleDns ? `https://${state.tailscaleDns}` : 'http://localhost:8000')
 })
