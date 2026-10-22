@@ -67,10 +67,12 @@ test.describe('External links', () => {
     expect(app.windows()).toHaveLength(1)
   })
 
-  // A local file URL, so the control's navigation loads nothing remote.
+  // A local file URL, so the control's navigation loads nothing remote. The
+  // navigation is deferred so evaluate returns before the page can leave;
+  // otherwise the control races "Execution context was destroyed".
   const navigateToSibling = () => window.evaluate(() => {
     const target = new URL('preload-missing.html', location.href).href
-    location.href = target
+    setTimeout(() => { location.href = target }, 0)
     return target
   })
 
