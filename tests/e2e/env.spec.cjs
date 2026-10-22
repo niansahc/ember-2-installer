@@ -75,4 +75,11 @@ test.describe('uiBuildEnv', () => {
     uiBuildEnv(parent, 'synthetic_key_value')
     expect(parent).toEqual({ PATH: '/usr/bin', HOME: '/home/demo' })
   })
+
+  test('control: the same assertion fails for a builder that writes into the parent', () => {
+    const mutatingBuildEnv = (base, apiKey) => Object.assign(base, uiBuildEnv(base, apiKey))
+    const copy = { ...parent }
+    mutatingBuildEnv(copy, 'synthetic_key_value')
+    expect(copy).not.toEqual({ PATH: '/usr/bin', HOME: '/home/demo' })
+  })
 })
