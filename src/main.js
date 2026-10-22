@@ -7,11 +7,11 @@ const http = require('http')
 const os = require('os')
 const { isNewer, displayVersion } = require('./lib/version')
 const { releaseSummary } = require('./lib/notes')
-const { buildEnvFile, uiBuildEnv } = require('./lib/env')
+const { buildEnvFile } = require('./lib/env')
 const { uiSourceDir, uiTargetDir, uiIndexFile, venvPython } = require('./lib/paths')
 const { cloneRepo } = require('./exec/clone')
 const { run } = require('./exec/run')
-const { readApiKey } = require('./exec/api-key')
+const { readApiKey, uiBuildEnvWithKey } = require('./exec/api-key')
 const { redactSecrets } = require('./lib/redact')
 const { isAllowedExternalUrl } = require('./lib/external-url')
 const { downloadInstallerUpdate, isManualPlatform, manualResult } = require('./lib/installer-update')
@@ -62,24 +62,6 @@ function sendLog(channel, payload) {
 function shellVenvPython(emberPath) {
   const bin = venvPython(emberPath, process.platform)
   return process.platform === 'win32' ? `"${bin}"` : bin
-}
-
-// The API key read in this session (the apikey step, or the first UI build),
-// so a UI build right after it does not start Python again to read it.
-let sessionApiKey = null
-
-// The environment for `npm run build` in ember-2-ui. The bundle needs the API
-// key baked in, or every authenticated request to the backend fails. It reaches
-// the build through the child's environment only; nothing holding it is
-// written to disk.
-async function uiBuildEnvWithKey({ pyBin, emberPath, log }) {
-  if (!sessionApiKey) {
-    log('Reading API key for the UI build...\n')
-    const keyResult = await readApiKey({ pyBin, emberPath, onLog: log })
-    if (keyResult.ok) sessionApiKey = keyResult.key
-    else log('Warning: could not retrieve API key — UI will build without auth\n')
-  }
-  return uiBuildEnv(process.env, sessionApiKey)
 }
 
 // Deferred until app is ready — getPath() is not available at require time.
@@ -683,9 +665,7 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
       pyBin,
       emberPath,
       onLog: (text) => sendLog('install-log', { step, text }),
-      detectCreated: true,
     })
-    if (keyResult.ok) sessionApiKey = keyResult.key
     let text
     if (!keyResult.ok) text = `Could not set up the API key: ${keyResult.error}\n`
     else if (keyResult.created) text = 'API key generated and stored in the system credential store ✓\n'
