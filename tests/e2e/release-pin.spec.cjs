@@ -5,7 +5,9 @@
 const { test, expect } = require('@playwright/test')
 const fs = require('fs')
 const path = require('path')
+const yaml = require('js-yaml')
 const { releaseTag, updateAction } = require('../../src/lib/release-pin')
+const { compareVersions } = require('../../src/lib/version')
 
 const SRC = path.resolve(__dirname, '..', '..', 'src')
 
@@ -49,6 +51,47 @@ test.describe('releaseTag', () => {
 
   test('the shipped package.json pin is valid', () => {
     expect(releaseTag(require('../../package.json'))).toMatch(/^v\d+\.\d+\.\d+$/)
+  })
+})
+
+// The pin rule: emberRelease is x.y.z, shares version's major.minor, and is not
+// newer than version (equal in a coordinated release; older only in an
+// installer-only patch).
+function pinRuleViolations({ version, emberRelease }) {
+  if (typeof emberRelease !== 'string' || !/^\d+\.\d+\.\d+$/.test(emberRelease)) return ['emberRelease is not x.y.z']
+  const [pin, ver] = [emberRelease, version].map((v) => v.split('.').map(Number))
+  const out = []
+  if (pin[0] !== ver[0] || pin[1] !== ver[1]) out.push('major.minor differs from version')
+  if (compareVersions(emberRelease, version) === 1) out.push('newer than version')
+  return out
+}
+
+test.describe('package.json pin rule', () => {
+  test('emberRelease is x.y.z, shares version\'s major.minor and is not newer', () => {
+    const pkg = require('../../package.json')
+    expect(pinRuleViolations(pkg)).toEqual([])
+  })
+
+  test('control: each broken pin is flagged', () => {
+    expect(pinRuleViolations({ version: '0.18.2', emberRelease: '0.18.1' })).toEqual([])
+    expect(pinRuleViolations({ version: '0.18.1', emberRelease: '0.18.2' })).toEqual(['newer than version'])
+    expect(pinRuleViolations({ version: '0.19.0', emberRelease: '0.18.1' })).toEqual(['major.minor differs from version'])
+    expect(pinRuleViolations({ version: '0.18.1', emberRelease: '0.18' })).toEqual(['emberRelease is not x.y.z'])
+    expect(pinRuleViolations({ version: '0.18.1' })).toEqual(['emberRelease is not x.y.z'])
+  })
+})
+
+test.describe('release gate', () => {
+  test('release.yml builds nothing until both pinned tags exist', () => {
+    const wf = yaml.load(fs.readFileSync(path.join(SRC, '..', '.github', 'workflows', 'release.yml'), 'utf8'))
+    const gate = wf.jobs['check-pinned-tags']
+    const script = gate.steps.map((s) => s.run || '').join('\n')
+    expect(script).toContain("require('./package.json').emberRelease")
+    expect(script).toContain('git ls-remote --exit-code --tags')
+    expect(script).toMatch(/for repo in ember-2 ember-2-ui/)
+    const publishJobs = Object.keys(wf.jobs).filter((k) => k.startsWith('publish-'))
+    expect(publishJobs.sort()).toEqual(['publish-linux', 'publish-mac', 'publish-windows'])
+    for (const k of publishJobs) expect([].concat(wf.jobs[k].needs || []), k).toContain('check-pinned-tags')
   })
 })
 

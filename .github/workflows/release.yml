@@ -11,8 +11,10 @@ name: Release
 # electron-builder.yml.
 #
 # The installer is the Electron setup wizard ONLY. ember-2 (backend) and
-# ember-2-ui (frontend) are cloned and built on the user's machine at install
-# time, so there is deliberately no frontend build step here.
+# ember-2-ui (frontend) are cloned at the pinned tag (package.json
+# emberRelease) and built on the user's machine at install time, so there is
+# deliberately no frontend build step here; check-pinned-tags only confirms
+# both tags exist.
 #
 # Artifacts are unsigned: the Windows .exe triggers SmartScreen and the macOS
 # DMG is not notarized (Gatekeeper-blocked — right-click-open to run). Code
@@ -33,7 +35,24 @@ permissions:
   contents: write
 
 jobs:
+  # The installer clones ember-2 and ember-2-ui at tag v<emberRelease>
+  # (package.json). A release pointing at a tag either repo lacks would ship an
+  # installer whose every fresh install fails, so nothing is built until both
+  # tags exist.
+  check-pinned-tags:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if a pinned ember-2 or ember-2-ui tag is missing
+        run: |
+          tag="v$(node -p "require('./package.json').emberRelease")"
+          for repo in ember-2 ember-2-ui; do
+            git ls-remote --exit-code --tags "https://github.com/niansahc/$repo.git" "refs/tags/$tag" \
+              || { echo "::error::package.json emberRelease names $tag, but niansahc/$repo has no such tag"; exit 1; }
+          done
+
   publish-windows:
+    needs: check-pinned-tags
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,6 +67,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   publish-mac:
+    needs: check-pinned-tags
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -64,6 +84,7 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
   publish-linux:
+    needs: check-pinned-tags
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
