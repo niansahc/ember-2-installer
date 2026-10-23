@@ -43,9 +43,9 @@ Key optimizations and features:
 
 ## Current State
 
-Shipped release: v0.8.1. **0.18.0 is staged but not cut** — release-please PR #5 ("chore(main): release ember-2-installer 0.18.0") is open and holds the generated changelog and version bump; `package.json` is still 0.8.1. The version jump is deliberate: it aligns the installer with the ember-2 backend so all three repos share one number. Update-panel copy for 0.18.0 is already written (`release_notes.html`, commit `c1e9683`).
+Shipped release: v0.18.1 (2026-08-31). `package.json` `version` is 0.18.1, and `emberRelease` (the ember-2 / ember-2-ui tag the installer pins) is 0.18.1. The jump from 0.8.1 to 0.18.0 was deliberate: it aligned the installer with the ember-2 backend so all three repos share one number.
 
-126 e2e + 11 integration Playwright tests. Builds and ships the Windows NSIS installer (primary, verified). The Linux AppImage now builds in CI; Mac DMG is configured but not built or verified. Neither Mac nor Linux is verified on real hardware.
+199 e2e + 33 integration Playwright tests, 25 network-gate tests (`npm run test:netgate`), 349 hook tests. Builds and ships the Windows NSIS installer (primary, verified). The Linux AppImage now builds in CI; Mac DMG is configured but not built or verified. Neither Mac nor Linux is verified on real hardware.
 
 ---
 
@@ -70,7 +70,11 @@ The installer walks the user through 12 screens:
 
 ## Inter-Repo Dependencies
 
-The installer shallow-clones (`--depth 1`) ember-2 and ember-2-ui at specific tags. Frontend must be built from the pinned ember-2-ui tag — never from an unpinned clone. Backend version must be documented in release notes. Mismatched versions will produce an installer that ships stale UI or incompatible backend.
+The installer clones ember-2 and ember-2-ui with `git clone --depth 1 --branch v<emberRelease>`, where `emberRelease` is set in `package.json`. Updates move both repos to that same tag. Nothing clones or pulls `main`.
+
+All three repos share one version number. `emberRelease` equals the installer `version`, except in an installer-only patch release, which keeps the previous value.
+
+The Release workflow fails if either tag is missing. A new backend or UI reaches users through an installer release with `emberRelease` bumped, and arrives after the installer updates.
 
 ---
 

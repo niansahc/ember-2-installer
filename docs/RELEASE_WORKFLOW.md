@@ -4,8 +4,8 @@
 
 The installer is the Electron **setup wizard** only. Its packaged binary contains just the wizard
 (`src/**`, `assets/**`, `release_notes.html`). It does **not** bundle the backend or the frontend:
-at install time it clones ember-2 and ember-2-ui onto the user's machine and builds the UI there
-(the `build-ui` step in `src/main.js`). So releasing the installer is just packaging the wizard —
+at install time it clones ember-2 and ember-2-ui onto the user's machine, at the pinned release tag
+(see Three-Repo Version Coordination), and builds the UI there (the `build-ui` step in `src/main.js`). So releasing the installer is just packaging the wizard —
 there is no frontend build at release time.
 
 ## How electron-updater Works
@@ -28,8 +28,35 @@ macOS (unsigned DMG) the update is manual: the installer points the user to the 
 
 ## Three-Repo Version Coordination
 
-ember-2-installer is the source of truth for what ships together. Document the ember-2 (backend)
-and ember-2-ui (frontend) versions a release expects in that release's notes.
+All three repos share one version number. ember-2-installer is the source of truth for what ships
+together: `emberRelease` in `package.json` names the ember-2 (backend) and ember-2-ui (frontend)
+release, and the installer uses tag `v<emberRelease>` for both.
+
+- **Fresh installs** clone both repos with `git clone --depth 1 --branch v<emberRelease>`
+  (`src/exec/clone.js`).
+- **Updates** move both repos to that same tag (`src/exec/move-to-tag.js`), and only when the tag is
+  newer than what is installed (backend `version.json`, UI `package.json`). Nothing is downgraded,
+  and nothing clones or pulls `main`. A full (non-shallow) clone, such as a developer's working repo,
+  is refused, and so is a clone with edited tracked files.
+- **The update screen** targets the pin for the backend and UI rows, not GitHub's latest release. A
+  newer backend or UI reaches users with the installer release that pins it, and appears after the
+  installer updates itself (on Linux and macOS, after the user downloads the new installer).
+
+Who bumps `emberRelease`:
+
+- **Coordinated release** (all three repos): once the ember-2 and ember-2-ui tags exist, set
+  `emberRelease` to the new version in the installer's release-please PR before merging it. It then
+  equals `version`.
+- **Installer-only patch release:** leave `emberRelease` alone. It stays behind `version`, at the same
+  major.minor, so the tags it names still exist.
+
+Checks:
+
+- `tests/e2e/release-pin.spec.cjs` fails if `emberRelease` is not x.y.z, has a different major.minor
+  from `version`, or is newer than `version`. A release-please PR that bumps the minor therefore stays
+  red until `emberRelease` is bumped with it.
+- The `check-pinned-tags` job in `release.yml` runs before any build and fails the release if
+  `v<emberRelease>` is missing from either repo (`git ls-remote --exit-code --tags`).
 
 ## Automated Release (implemented)
 
@@ -137,7 +164,8 @@ Per the testing discipline in CLAUDE.md, this must be fixed or marked skip-with-
 
 If you must release by hand:
 
-1. Bump the version in `package.json` (normally release-please does this).
+1. Bump the version in `package.json` (normally release-please does this), and `emberRelease` too
+   for a coordinated release. Confirm both `v<emberRelease>` tags exist.
 2. `npm ci`
 3. `npx electron-builder --<platform> --publish always` with `GH_TOKEN` set -- or run a local build
    and upload the installer binary + `latest*.yml` to the published (non-draft) GitHub Release.
@@ -151,6 +179,8 @@ If you must release by hand:
 - Missing `app-update.yml`: affected installed versions can never auto-update; requires manual
   reinstall
 - Version not bumped: electron-updater compares versions and concludes no update available
+- `emberRelease` naming a tag that does not exist: every fresh install fails at the clone. The
+  `check-pinned-tags` job in `release.yml` blocks the release before anything is built.
 - Publish type mismatch: electron-builder defaults to `releaseType: draft`. release-please publishes
   the release immediately (`draft: false`), so electron-builder finds `existingType=release`,
   logs `skipped publishing ... reason=existing type not compatible with publishing type`, attaches
