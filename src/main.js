@@ -16,6 +16,10 @@ const { redactSecrets } = require('./lib/redact')
 const { isAllowedExternalUrl } = require('./lib/external-url')
 const { downloadInstallerUpdate, isManualPlatform, manualResult } = require('./lib/installer-update')
 const { API_PKILL_PATTERN, apiSpawnSpec } = require('./lib/api-launch')
+const { releaseTag } = require('./lib/release-pin')
+
+// The ember-2 / ember-2-ui release tag this installer clones and updates to.
+const EMBER_TAG = releaseTag(require('../package.json'))
 
 const IS_PACKAGED = app.isPackaged
 const HAS_REAL_FLAG = process.argv.includes('--real')
@@ -381,6 +385,7 @@ ipcMain.handle('clone-ember-repo', async (_e, { parentDir }) => {
   }
   const result = await cloneRepo({
     targetDir,
+    tag: EMBER_TAG,
     onData: (text) => sendLog('clone-progress', text),
   })
   if (result.ok) {
@@ -423,6 +428,7 @@ ipcMain.handle('fresh-install-ember', async (_e, { parentDir }) => {
   }
   const result = await cloneRepo({
     targetDir,
+    tag: EMBER_TAG,
     onData: (text) => sendLog('clone-progress', text),
   })
   if (result.ok) {
@@ -741,8 +747,10 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     const targetUiDir = uiTargetDir(emberPath)
 
     if (!fs.existsSync(uiDir)) {
-      const cloneOk = (await run('git', ['clone', '--depth', '1', REPO_UI_URL], {
-        cwd: path.dirname(emberPath),
+      const cloneOk = (await cloneRepo({
+        url: REPO_UI_URL,
+        targetDir: uiDir,
+        tag: EMBER_TAG,
         onData: (chunk) => sendLog('install-log', { step, text: chunk }),
       })).ok
       if (!cloneOk) {
@@ -1077,9 +1085,7 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     log('Updating Ember UI...\n')
     if (!fs.existsSync(uiDir)) {
       log('Cloning ember-2-ui...\n')
-      const cloneOk = (await run('git', ['clone', '--depth', '1', REPO_UI_URL], {
-        cwd: path.dirname(emberPath), onData: log,
-      })).ok
+      const cloneOk = (await cloneRepo({ url: REPO_UI_URL, targetDir: uiDir, tag: EMBER_TAG, onData: log })).ok
       if (!cloneOk) { log('UI clone failed.\n'); return { ok: false, stage: 'ui-clone' } }
     } else {
       // npm install/ci may have rewritten package-lock.json; reset it so git pull doesn't refuse to merge.
@@ -1136,9 +1142,7 @@ ipcMain.handle('run-git-pull', async (_e) => {
 
   if (!fs.existsSync(uiDir)) {
     log('Cloning ember-2-ui...\n')
-    const cloneOk = (await run('git', ['clone', '--depth', '1', REPO_UI_URL], {
-      cwd: path.dirname(emberPath), onData: log,
-    })).ok
+    const cloneOk = (await cloneRepo({ url: REPO_UI_URL, targetDir: uiDir, tag: EMBER_TAG, onData: log })).ok
     if (!cloneOk) { log('Failed to clone ember-2-ui.\n'); return { ok: false } }
   } else {
     log('Pulling ember-2-ui...\n')

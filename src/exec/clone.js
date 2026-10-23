@@ -10,12 +10,15 @@ const { run } = require('./run')
 // the function boundary, never on the IPC payload (which the renderer controls).
 const DEFAULT_BACKEND_REPO_URL = 'https://github.com/niansahc/ember-2.git'
 
-// Run `git clone --depth <depth> <url> <targetDir>`, streaming output to onData.
-// Resolves { ok, code, error? } and never rejects. run() keeps shell:true by
+// Run `git clone --depth <depth> --branch <tag> <url> <targetDir>`, streaming
+// output to onData. tag is required: production clones the pinned release tag
+// (src/lib/release-pin.js), never the default branch. Resolves
+// { ok, code, error? } and never rejects. run() keeps shell:true by
 // default — that, plus the interpolated targetDir (a user-chosen install path),
 // is the command-injection surface tracked in issue #11. Do not "fix" it here.
-function cloneRepo({ url = DEFAULT_BACKEND_REPO_URL, targetDir, depth = 1, onData } = {}) {
-  return run('git', ['clone', '--depth', String(depth), url, targetDir], {
+function cloneRepo({ url = DEFAULT_BACKEND_REPO_URL, targetDir, tag, depth = 1, onData } = {}) {
+  if (!tag) return Promise.resolve({ ok: false, error: 'cloneRepo: no release tag given' })
+  return run('git', ['clone', '--depth', String(depth), '--branch', tag, url, targetDir], {
     onData: (chunk) => { if (onData) onData(chunk) },
   }).then((r) => {
     if (r.error !== null) return { ok: false, error: r.error }

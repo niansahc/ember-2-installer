@@ -3,7 +3,7 @@
   "destinations": [
     {
       "host": "github.com",
-      "purpose": "Clone ember-2 and ember-2-ui; git pull on update; electron-updater release feed; redirect origin for winget Git and Ollama installers",
+      "purpose": "Clone ember-2 and ember-2-ui at the pinned release tag (package.json emberRelease); git pull on update; electron-updater release feed; redirect origin for winget Git and Ollama installers",
       "triggeredBy": "install steps clone and build-ui, update flows, download-installer-update, winget",
       "process": "git, electron main, winget",
       "source": "code:src/exec/clone.js, src/main.js",
