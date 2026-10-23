@@ -27,7 +27,7 @@ function tsharkFields(tshark, pcap, filter, fields) {
 // sent to a resolver other than the NAT proxy shows up as a flow.
 function extractPcap(pcap, guestIp, tshark = findTshark()) {
   const dns = tsharkFields(tshark, pcap, 'dns && (udp.port == 53 || tcp.port == 53)',
-    ['dns.flags.response', 'dns.qry.name', 'dns.a', 'dns.aaaa'])
+    ['dns.qry.name', 'dns.a', 'dns.aaaa'])
   const fromGuest = `(ip.src == ${guestIp} || (ipv6 && !(ipv6.dst == ff00::/8) && !(ipv6.dst == fe80::/10)))`
   const flows = tsharkFields(tshark, pcap,
     `${fromGuest} && ((tcp.flags.syn == 1 && tcp.flags.ack == 0) || udp)`,
@@ -43,13 +43,9 @@ function extractPcap(pcap, guestIp, tshark = findTshark()) {
   }
 }
 
-// Accepts the guest's exported .evtx (converted with the host's wevtutil) or
-// an already-converted .xml.
+// The guest's exported .evtx, converted with the host's wevtutil.
 function extractSysmon(file) {
-  const xml = file.endsWith('.xml')
-    ? fs.readFileSync(file, 'utf8')
-    : execFileSync('wevtutil', ['qe', file, '/lf:true', '/f:xml', '/e:Events'], { encoding: 'utf8', maxBuffer: MAX_BUFFER })
-  return parseSysmonXml(xml)
+  return parseSysmonXml(execFileSync('wevtutil', ['qe', file, '/lf:true', '/f:xml', '/e:Events'], { encoding: 'utf8', maxBuffer: MAX_BUFFER }))
 }
 
-module.exports = { findTshark, extractPcap, extractSysmon }
+module.exports = { extractPcap, extractSysmon }

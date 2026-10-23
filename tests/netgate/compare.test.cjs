@@ -45,9 +45,9 @@ const ev = (id, data) => `<Event xmlns='http://schemas.microsoft.com/win/2004/08
 function cleanRun() {
   return {
     dns: [
-      { response: true, name: 'pkg.example.test', ips: ['203.0.113.10'] },
-      { response: true, name: 'cdn.example.test', ips: ['203.0.113.20'] },
-      { response: true, name: 'update.os.example.test', ips: ['203.0.113.30'] },
+      { name: 'pkg.example.test', ips: ['203.0.113.10'] },
+      { name: 'cdn.example.test', ips: ['203.0.113.20'] },
+      { name: 'update.os.example.test', ips: ['203.0.113.30'] },
     ],
     flows: [
       { ip: '203.0.113.10', proto: 'tcp', port: 443 },
@@ -104,7 +104,7 @@ test('clean run passes with no failures', () => {
 
 test('control: an undeclared host fails the clean run', () => {
   const res = run((r) => {
-    r.dns.push({ response: true, name: 'rogue.example.test', ips: ['203.0.113.40'] })
+    r.dns.push({ name: 'rogue.example.test', ips: ['203.0.113.40'] })
     r.flows.push({ ip: '203.0.113.40', proto: 'tcp', port: 443 })
     r.sysmonEvents.push(ev(22, { ProcessGuid: '{C}', Image: 'C:\\tools\\worker.exe', QueryName: 'rogue.example.test', QueryResults: '::ffff:203.0.113.40;' }))
     return r
@@ -117,7 +117,7 @@ test('control: an undeclared host fails the clean run', () => {
 
 test('control: a query with no answer and no connection still counts', () => {
   const res = run((r) => {
-    r.dns.push({ response: false, name: 'unanswered.example.test', ips: [] })
+    r.dns.push({ name: 'unanswered.example.test', ips: [] })
     return r
   })
   assert.deepEqual(kinds(res), ['undeclared:unanswered.example.test'])
@@ -179,8 +179,8 @@ test('harness NAT flows pass; control: any other NAT-subnet flow fails', () => {
 
 test('reverse lookups and single-label names are informational', () => {
   const res = run((r) => {
-    r.dns.push({ response: false, name: '10.113.0.203.in-addr.arpa', ips: [] })
-    r.dns.push({ response: false, name: 'wpad', ips: [] })
+    r.dns.push({ name: '10.113.0.203.in-addr.arpa', ips: [] })
+    r.dns.push({ name: 'wpad', ips: [] })
     return r
   })
   assert.equal(res.status, 'pass')
@@ -233,7 +233,7 @@ test('invalid: empty pcap DNS, empty Sysmon, compose not collected', () => {
 test('invalid outranks fail', () => {
   const res = run((r) => {
     r.dns = r.dns.filter((q) => q.name !== 'pkg.example.test')
-    r.dns.push({ response: true, name: 'rogue.example.test', ips: [] })
+    r.dns.push({ name: 'rogue.example.test', ips: [] })
     return r
   }, { compose: null })
   assert.equal(res.status, 'invalid')
@@ -241,7 +241,7 @@ test('invalid outranks fail', () => {
 
 test('baseline lists undeclared names but never fails', () => {
   const res = run((r) => {
-    r.dns.push({ response: true, name: 'rogue.example.test', ips: [] })
+    r.dns.push({ name: 'rogue.example.test', ips: [] })
     return r
   }, { baseline: true, compose: null })
   assert.equal(res.status, 'baseline')
@@ -261,9 +261,9 @@ test('report and result never carry command lines or full paths', () => {
 })
 
 test('parsers: tshark field rows and Sysmon XML', () => {
-  assert.deepEqual(parseDnsTsv('0\tPkg.Example.Test.\t\t\n1\tpkg.example.test\t203.0.113.10,203.0.113.11\t2001:db8::1\n'), [
-    { response: false, name: 'pkg.example.test', ips: [] },
-    { response: true, name: 'pkg.example.test', ips: ['203.0.113.10', '203.0.113.11', '2001:db8::1'] },
+  assert.deepEqual(parseDnsTsv('Pkg.Example.Test.\t\t\npkg.example.test\t203.0.113.10,203.0.113.11\t2001:db8::1\n'), [
+    { name: 'pkg.example.test', ips: [] },
+    { name: 'pkg.example.test', ips: ['203.0.113.10', '203.0.113.11', '2001:db8::1'] },
   ])
   assert.deepEqual(parseFlowsTsv('203.0.113.10\t\t6\t\t443\t\n10.0.2.3\t\t17\t\t\t53\n'), [
     { ip: '203.0.113.10', proto: 'tcp', port: 443 },

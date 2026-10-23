@@ -56,10 +56,9 @@ const splitList = (s) => String(s || '').split(',').map((x) => x.trim()).filter(
 // tshark -T fields rows: tab-separated, multi-value fields joined with ','.
 const rows = (text) => String(text || '').split(/\r?\n/).filter((l) => l.trim()).map((l) => l.split('\t'))
 
-// Fields: dns.flags.response, dns.qry.name, dns.a, dns.aaaa
+// Fields: dns.qry.name, dns.a, dns.aaaa
 function parseDnsTsv(text) {
-  return rows(text).map(([response, name, a, aaaa]) => ({
-    response: response === '1' || response === 'True',
+  return rows(text).map(([name, a, aaaa]) => ({
     name: normName(splitList(name)[0]),
     ips: [...splitList(a), ...splitList(aaaa)],
   })).filter((r) => r.name)
@@ -81,7 +80,7 @@ function parseNamedTsv(text) {
   })).filter((r) => r.ip && r.name)
 }
 
-const decodeXml = (s) => s
+const decodeXml = (s) => !s.includes('&') ? s : s
   .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
   .replace(/&apos;/g, "'").replace(/&amp;/g, '&')
 
@@ -148,13 +147,19 @@ function installerMembership(procs, harness) {
   }
   const tree = new Set()
   const queue = [...procs].filter(([, p]) => rootRe.some((r) => r.test(p.image))).map(([g]) => g)
-  while (queue.length) {
-    const g = queue.shift()
+  for (let i = 0; i < queue.length; i++) {
+    const g = queue[i]
     if (tree.has(g)) continue
     tree.add(g)
     for (const c of children.get(g) || []) queue.push(c)
   }
-  return (guid, image) => tree.has(guid) || toolRe.some((r) => r.test(image))
+  // The same (guid, image) pair recurs across thousands of Sysmon events.
+  const memo = new Map()
+  return (guid, image) => {
+    const key = `${guid}|${image}`
+    if (!memo.has(key)) memo.set(key, tree.has(guid) || toolRe.some((r) => r.test(image)))
+    return memo.get(key)
+  }
 }
 
 const isReverseLookup = (n) => n.endsWith('.in-addr.arpa') || n.endsWith('.ip6.arpa')
@@ -183,6 +188,8 @@ function evaluate({ declared, osNoise, harness, pcap, sysmon, compose, baseline 
     if (!ipNames.has(ip)) ipNames.set(ip, new Set())
     ipNames.get(ip).add(normName(name))
   }
+  // A name is from the installer if any installer-set process touched it.
+  const attribute = (e, guid, image) => e.processes.set(image, e.processes.get(image) || inInstaller(guid, image))
 
   for (const q of pcap.dns) {
     const e = note(q.name, 'dns')
@@ -191,16 +198,11 @@ function evaluate({ declared, osNoise, harness, pcap, sysmon, compose, baseline 
   for (const s of pcap.sni) { note(s.name, 'sni').ips.add(s.ip); mapIp(s.ip, s.name) }
   for (const q of sysmon.dns) {
     const e = note(q.name, 'sysmon')
-    const prev = e.processes.get(q.image) || false
-    e.processes.set(q.image, prev || inInstaller(q.guid, q.image))
+    attribute(e, q.guid, q.image)
     for (const ip of q.ips) { mapIp(ip, q.name); e.ips.add(ip) }
   }
   for (const c of sysmon.conns) {
-    for (const n of ipNames.get(c.ip) || []) {
-      const e = names.get(n)
-      const prev = e.processes.get(c.image) || false
-      e.processes.set(c.image, prev || inInstaller(c.guid, c.image))
-    }
+    for (const n of ipNames.get(c.ip) || []) attribute(names.get(n), c.guid, c.image)
   }
 
   // Flows: anything in the NAT subnet must be a harness flow (the guest must
@@ -250,15 +252,16 @@ function evaluate({ declared, osNoise, harness, pcap, sysmon, compose, baseline 
   }
 
   const observed = (host) => classified.some((c) => matchHost(host, c.name))
-  const notObserved = destinations.filter((d) => d.gateRun !== 'not-exercised' && !observed(d.host)).map((d) => d.host)
+  const unseen = destinations.filter((d) => d.gateRun !== 'not-exercised' && !observed(d.host))
+  const notObserved = unseen.map((d) => d.host)
   const notCaptured = destinations.filter((d) => d.gateRun === 'not-exercised').map((d) => ({ host: d.host, purpose: d.purpose }))
 
   if (!pcap.dns.length) invalid.push('pcap has no DNS traffic: trace was off or the guest had no network')
   if (!sysmon.procs.size && !sysmon.dns.length) invalid.push('Sysmon log is empty: process attribution is missing')
   if (!baseline) {
     if (compose === null || compose === undefined) invalid.push('docker-compose.yml was not collected from the guest')
-    for (const d of destinations.filter((x) => x.gateRun === 'required')) {
-      if (!observed(d.host)) invalid.push(`required host ${d.host} never observed: the install did not complete`)
+    for (const d of unseen.filter((x) => x.gateRun === 'required')) {
+      invalid.push(`required host ${d.host} never observed: the install did not complete`)
     }
   }
 

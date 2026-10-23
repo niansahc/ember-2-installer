@@ -73,8 +73,12 @@ $runDir = Join-Path $CaptureRoot $runId
 if ((Get-VmState) -eq 'running') {
   Invoke-VBox controlvm $VmName acpipowerbutton
   $deadline = (Get-Date).AddSeconds(180)
-  while ((Get-VmState) -ne 'poweroff' -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 5 }
-  if ((Get-VmState) -ne 'poweroff') {
+  $state = Get-VmState
+  while ($state -ne 'poweroff' -and (Get-Date) -lt $deadline) {
+    Start-Sleep -Seconds 2
+    $state = Get-VmState
+  }
+  if ($state -ne 'poweroff') {
     Invoke-VBox controlvm $VmName poweroff
     Start-Sleep -Seconds 3
   }

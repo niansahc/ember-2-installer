@@ -1,12 +1,12 @@
 {
-  "$comment": "Declared download list: every network destination the installer or a tool it drives contacts. The fresh-install capture gate (docs/NETWORK_GATE.md) fails on any destination not listed here. host is an exact name or a *.suffix pattern. gateRun: required = the guest run must observe it or the capture is invalid; expected = exercised by a default guest run; not-exercised = declared but the guest run cannot reach it (reported as declared-but-not-captured). source: code:<file:line> when the code names it, inferred when it comes from how the driven tool works. Add hosts only in a reviewed commit, never from a capture automatically.",
+  "$comment": "Declared download list: every network destination the installer or a tool it drives contacts. The fresh-install capture gate (docs/NETWORK_GATE.md) fails on any destination not listed here. host is an exact name or a *.suffix pattern. gateRun: required = the guest run must observe it or the capture is invalid; expected = exercised by a default guest run; not-exercised = declared but the guest run cannot reach it (reported as declared-but-not-captured). source: code:<file>[, <file>] when the code names it (files, not line numbers, which go stale; the drift test checks each file exists), inferred when it comes from how the driven tool works. Add hosts only in a reviewed commit, never from a capture automatically.",
   "destinations": [
     {
       "host": "github.com",
       "purpose": "Clone ember-2 and ember-2-ui; git pull on update; electron-updater release feed; redirect origin for winget Git and Ollama installers",
       "triggeredBy": "install steps clone and build-ui, update flows, download-installer-update, winget",
       "process": "git, electron main, winget",
-      "source": "code:src/exec/clone.js:11, src/main.js:57, src/main.js:280,283",
+      "source": "code:src/exec/clone.js, src/main.js",
       "wingetPackages": ["Git.Git", "Ollama.Ollama"],
       "gateRun": "required"
     },
@@ -15,7 +15,7 @@
       "purpose": "Latest-release checks for installer, backend and UI",
       "triggeredBy": "check-all-updates, check-ember-update, check-for-update",
       "process": "electron main",
-      "source": "code:src/main.js:813",
+      "source": "code:src/main.js",
       "gateRun": "expected"
     },
     {
@@ -55,7 +55,7 @@
       "purpose": "Python 3.12 installer",
       "triggeredBy": "install-prerequisite python",
       "process": "winget",
-      "source": "code:src/main.js:281",
+      "source": "code:src/main.js",
       "wingetPackages": ["Python.Python.3.12"],
       "gateRun": "expected"
     },
@@ -64,7 +64,7 @@
       "purpose": "Node.js LTS installer",
       "triggeredBy": "install-prerequisite node",
       "process": "winget",
-      "source": "code:src/main.js:282",
+      "source": "code:src/main.js",
       "wingetPackages": ["OpenJS.NodeJS.LTS"],
       "gateRun": "expected"
     },
@@ -73,7 +73,7 @@
       "purpose": "Docker Desktop installer",
       "triggeredBy": "install-prerequisite docker",
       "process": "winget",
-      "source": "code:src/main.js:284",
+      "source": "code:src/main.js",
       "wingetPackages": ["Docker.DockerDesktop"],
       "gateRun": "not-exercised"
     },
@@ -82,7 +82,7 @@
       "purpose": "Backend Python dependencies (index)",
       "triggeredBy": "install step pip, backend update",
       "process": "python -m pip",
-      "source": "code:src/main.js:635",
+      "source": "code:src/main.js",
       "gateRun": "required"
     },
     {
@@ -90,7 +90,7 @@
       "purpose": "Backend Python dependencies (wheels)",
       "triggeredBy": "install step pip, backend update",
       "process": "python -m pip",
-      "source": "code:src/main.js:635",
+      "source": "code:src/main.js",
       "gateRun": "expected"
     },
     {
@@ -98,7 +98,7 @@
       "purpose": "UI dependencies for npm ci",
       "triggeredBy": "install step build-ui, UI update",
       "process": "npm",
-      "source": "code:src/main.js:706",
+      "source": "code:src/main.js",
       "gateRun": "required"
     },
     {
@@ -106,7 +106,7 @@
       "purpose": "Ollama model registry: manifests for the chat, vision and nomic-embed-text models",
       "triggeredBy": "pull-ollama-model, update flows",
       "process": "ollama",
-      "source": "code:src/main.js:529",
+      "source": "code:src/main.js",
       "gateRun": "required"
     },
     {
@@ -122,7 +122,7 @@
       "purpose": "Docker Hub registry for searxng/searxng (ember-2 docker-compose.yml)",
       "triggeredBy": "install step docker, update flows",
       "process": "docker",
-      "source": "code:src/main.js:669",
+      "source": "code:src/main.js",
       "gateRun": "not-exercised"
     },
     {
@@ -146,7 +146,7 @@
       "purpose": "Tailscale serve setup when the Tailscale host option is chosen",
       "triggeredBy": "run-tailscale-serve",
       "process": "tailscale",
-      "source": "code:src/main.js:1550",
+      "source": "code:src/main.js",
       "gateRun": "not-exercised"
     }
   ],

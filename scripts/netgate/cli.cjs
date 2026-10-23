@@ -33,7 +33,7 @@ function main(argv) {
     console.error(`invalid: ${pcapFile} missing or empty`)
     return 2
   }
-  const sysmonFile = [at('sysmon.evtx'), at('sysmon.xml')].find((f) => fs.existsSync(f))
+  const sysmonFile = at('sysmon.evtx')
   const composeFile = at('docker-compose.yml')
 
   const result = evaluate({
@@ -41,7 +41,7 @@ function main(argv) {
     osNoise: readJson(path.join(__dirname, 'os-noise.json')),
     harness,
     pcap: extractPcap(pcapFile, harness.guestIp),
-    sysmon: sysmonFile ? extractSysmon(sysmonFile) : { procs: new Map(), dns: [], conns: [] },
+    sysmon: fs.existsSync(sysmonFile) ? extractSysmon(sysmonFile) : { procs: new Map(), dns: [], conns: [] },
     compose: fs.existsSync(composeFile) ? fs.readFileSync(composeFile, 'utf8') : null,
     baseline,
   })

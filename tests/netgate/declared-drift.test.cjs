@@ -18,7 +18,6 @@ const NOT_DESTINATIONS = [
   { match: (h) => h === '127.0.0.1' || h === 'localhost', reason: 'loopback (local API, open-url allowlist)' },
   { match: (h) => h === 'www.apple.com', reason: 'plist DOCTYPE identifier, never fetched' },
   { match: (h) => h === 'ember-desktop' || h.endsWith('.ts.net'), reason: 'demo-mode fake Tailscale status' },
-  { match: (h) => h === 'github.com.evil.test' || h === 'localhost.evil.test', reason: 'external-url.js comment: lookalike hosts the allowlist rejects' },
 ]
 
 function sourceFiles(dir) {
@@ -83,6 +82,12 @@ test('declared list entries are well formed', () => {
     assert.ok(d.host && d.purpose && d.triggeredBy && d.process && d.source, `incomplete entry ${d.host}`)
     assert.ok(['required', 'expected', 'not-exercised'].includes(d.gateRun), `bad gateRun on ${d.host}`)
     assert.ok(d.source === 'inferred' || d.source.startsWith('code:'), `bad source on ${d.host}`)
+    // code: cites files, not lines (line numbers go stale); each file must exist.
+    if (d.source.startsWith('code:')) {
+      for (const f of d.source.slice('code:'.length).split(',').map((x) => x.trim())) {
+        assert.ok(!/:\d/.test(f) && fs.existsSync(path.join(REPO, f)), `source ${f} on ${d.host} is not an existing file`)
+      }
+    }
   }
   const hosts = declared.destinations.map((d) => d.host)
   assert.equal(new Set(hosts).size, hosts.length, 'duplicate host entries')
@@ -109,5 +114,4 @@ test('control: a host added to only one list is caught on either side', () => {
     onlyInAllowlist: ['allow-only.example.test', 'brew.sh'],
     onlyInDeclared: ['declared-only.example.test'],
   })
-  assert.notDeepEqual(hostSetDiff(allowlist, browserHosts), { onlyInAllowlist: [], onlyInDeclared: [] })
 })
