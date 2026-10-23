@@ -1,7 +1,7 @@
 // Shared helpers for Electron Playwright tests
 // Launches the installer in demo mode
 
-const { _electron: electron } = require('@playwright/test')
+const { _electron: electron, expect } = require('@playwright/test')
 const { spawnSync } = require('child_process')
 const fs = require('fs')
 const os = require('os')
@@ -127,4 +127,37 @@ async function launchApp(options = {}) {
   }
 }
 
-module.exports = { launchApp, closeApp, killTree, MAIN_PATH }
+// Replace shell.openExternal in the main process so nothing really opens; the
+// replacement records each URL, read back with openedExternal(app).
+async function stubOpenExternal(app) {
+  await app.evaluate(({ shell }) => {
+    globalThis.__openedExternal = []
+    shell.openExternal = async (url) => { globalThis.__openedExternal.push(url) }
+  })
+}
+
+const openedExternal = (app) => app.evaluate(() => globalThis.__openedExternal)
+
+// Welcome -> prereqs -> clone -> vault -> model selection (demo mode).
+async function walkToModelScreen(window) {
+  await window.locator('button[data-next="screen-prereqs"]').click()
+  await expect(window.locator('#btn-prereqs-next')).toBeEnabled({ timeout: 5000 })
+  await window.locator('#btn-prereqs-next').click()
+  await window.locator('#btn-install-ember').click()
+  await expect(window.locator('.screen.active')).toHaveAttribute('id', 'screen-vault', { timeout: 10000 })
+  await window.locator('button[data-next="screen-model"]').click()
+  await expect(window.locator('.screen.active')).toHaveAttribute('id', 'screen-model')
+}
+
+// On through the default model and vision choices to host selection.
+async function walkToHostScreen(window) {
+  await walkToModelScreen(window)
+  await window.locator('#btn-model-next').click()
+  await window.locator('button[data-next="screen-host"]').click()
+  await expect(window.locator('.screen.active')).toHaveAttribute('id', 'screen-host')
+}
+
+module.exports = {
+  launchApp, closeApp, killTree, MAIN_PATH,
+  stubOpenExternal, openedExternal, walkToModelScreen, walkToHostScreen,
+}

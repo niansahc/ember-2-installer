@@ -13,7 +13,6 @@ const state = {
   model: 'qwen3:8b',
   vision: null,
   host: '127.0.0.1',
-  tailscaleIp: null,
   tailscaleDns: null,
   models: [],
   ollamaModelsPath: null,
@@ -822,7 +821,6 @@ async function tsCheckConnected() {
     icon.textContent = '✅'
     // API always binds to localhost — Tailscale handles external routing
     state.host = '127.0.0.1'
-    state.tailscaleIp = ip
     // hostname/ip come from `tailscale status` output — insert as text, not markup.
     body.innerHTML = ''
     const connectedP = document.createElement('p')
@@ -848,6 +846,8 @@ async function tsCheckConnected() {
   }
 }
 
+const TS_PHONE_NOT_SET_UP = "Phone access isn't set up yet."
+
 document.getElementById('btn-ts-serve').addEventListener('click', () => {
   const btn = document.getElementById('btn-ts-serve')
   const resultEl = document.getElementById('ts-serve-result')
@@ -863,16 +863,17 @@ document.getElementById('btn-ts-serve').addEventListener('click', () => {
       window.ember.getTailscaleDns(),
     ])
 
-    if (serveResult.ok) {
+    // Phone access needs the Serve HTTPS name. There is no tailnet IP fallback:
+    // the API binds 127.0.0.1, so nothing listens on <tailnet IP>:8000.
+    if (serveResult.ok && dnsName) {
       icon.textContent = '✅'
-      if (dnsName) state.tailscaleDns = dnsName
-      const url = dnsName ? `https://${dnsName}` : `http://${state.tailscaleIp || '127.0.0.1'}:8000`
+      state.tailscaleDns = dnsName
       btn.classList.add('hidden')
       resultEl.classList.remove('hidden')
       resultEl.textContent = 'Your Ember URL: '
       const urlSpan = document.createElement('span')
       urlSpan.className = 'ts-url-display'
-      urlSpan.textContent = url
+      urlSpan.textContent = `https://${dnsName}`
       resultEl.appendChild(urlSpan)
 
       document.getElementById('ts-step-phone').classList.remove('hidden')
@@ -881,11 +882,11 @@ document.getElementById('btn-ts-serve').addEventListener('click', () => {
       btn.disabled = false
       btn.textContent = 'Retry'
       resultEl.classList.remove('hidden')
-      resultEl.textContent = 'Failed — you can set this up later. Using IP address instead.'
+      resultEl.textContent = TS_PHONE_NOT_SET_UP
     }
   }, {
     errorEl: resultEl,
-    errorMsg: 'Setup failed — you can set this up later. Using IP address instead.',
+    errorMsg: TS_PHONE_NOT_SET_UP,
     onError: () => { icon.textContent = '❌'; btn.textContent = 'Retry' },
   })
 })
@@ -1475,15 +1476,11 @@ document.getElementById('btn-launch-ember').addEventListener('click', () => {
   })
 })
 
-// Open Ember — use Tailscale DNS if available, otherwise localhost
+// Open Ember — the Tailscale Serve HTTPS name if it was set up, otherwise the
+// local API. Not the bare tailnet IP: the API binds 127.0.0.1 only, so nothing
+// listens on <tailnet IP>:8000, and open-url does not allow that URL.
 document.getElementById('btn-open-ember').addEventListener('click', () => {
-  if (state.tailscaleDns) {
-    window.ember.openUrl(`https://${state.tailscaleDns}`)
-  } else if (state.tailscaleIp) {
-    window.ember.openUrl(`http://${state.tailscaleIp}:8000`)
-  } else {
-    window.ember.openUrl('http://localhost:8000')
-  }
+  window.ember.openUrl(state.tailscaleDns ? `https://${state.tailscaleDns}` : 'http://localhost:8000')
 })
 
 document.getElementById('btn-retry-api').addEventListener('click', () => {
@@ -2124,6 +2121,58 @@ window.ember.onInstallerUpdateAvailable((data) => {
   state.installerUpdateVersion = data.version
 })
 
+// A download that sends no progress for this long has failed. Generous because
+// the updater's own release check runs first and emits no progress.
+const INSTALLER_STALL_MS = 60000
+
+// Fixed notices for failures the main process does not report: no error text
+// from the updater or the IPC layer is shown.
+const INSTALLER_STALLED_MESSAGE = 'The installer update stopped making progress. Download the latest installer from the GitHub Releases page.'
+const INSTALLER_FAILED_MESSAGE = 'The installer update failed. Download the latest installer from the GitHub Releases page.'
+
+// Download the installer update. Resolves { ok: true } once the update is
+// downloaded, or a manual result { ok: false, manual: true, message }.
+function downloadInstallerUpdate(onProgress) {
+  return new Promise((resolve) => {
+    let timer = null
+    const finish = (result) => {
+      clearTimeout(timer)
+      window.ember.removeAllListeners('installer-download-progress')
+      window.ember.removeAllListeners('installer-update-downloaded')
+      resolve(result)
+    }
+    const armStallTimer = () => {
+      clearTimeout(timer)
+      timer = setTimeout(
+        () => finish({ ok: false, manual: true, message: INSTALLER_STALLED_MESSAGE }),
+        INSTALLER_STALL_MS,
+      )
+    }
+    window.ember.onInstallerDownloadProgress((data) => {
+      armStallTimer()
+      onProgress(data.percent)
+    })
+    window.ember.onInstallerUpdateDownloaded(() => finish({ ok: true }))
+    armStallTimer()
+    window.ember.downloadInstallerUpdate().then(
+      finish,
+      () => finish({ ok: false, manual: true, message: INSTALLER_FAILED_MESSAGE }),
+    )
+  })
+}
+
+// Tell the user on the Done screen that the installer has to be updated by
+// hand, with a link to the Releases page (its URL is on the link in index.html).
+function showInstallerUpdateNotice(text) {
+  document.getElementById('done-installer-update-text').textContent = text
+  document.getElementById('done-installer-update-note').classList.remove('hidden')
+}
+
+document.getElementById('btn-open-installer-releases').addEventListener('click', (e) => {
+  e.preventDefault()
+  window.ember.openUrl(e.currentTarget.dataset.url)
+})
+
 document.getElementById('btn-installer-update').addEventListener('click', () => {
   const btn = document.getElementById('btn-installer-update')
   const text = document.getElementById('installer-update-text')
@@ -2131,27 +2180,21 @@ document.getElementById('btn-installer-update').addEventListener('click', () => 
   guardClick(btn, async () => {
     btn.disabled = true
     btn.textContent = 'Downloading...'
-
-    window.ember.onInstallerDownloadProgress((data) => {
-      btn.textContent = `Downloading ${data.percent}%`
+    const result = await downloadInstallerUpdate((percent) => {
+      btn.textContent = `Downloading ${percent}%`
     })
-
-    window.ember.onInstallerUpdateDownloaded(() => {
-      text.textContent = 'Update downloaded. Restarting...'
-      btn.textContent = 'Restarting...'
-      setTimeout(() => {
-        window.ember.installInstallerUpdate()
-      }, 1000)
-    })
-
-    await window.ember.downloadInstallerUpdate()
+    if (!result.ok) {
+      text.textContent = result.message
+      btn.textContent = 'Update & Restart'
+      btn.disabled = false
+      return
+    }
+    text.textContent = 'Update downloaded. Restarting...'
+    btn.textContent = 'Restarting...'
+    setTimeout(() => window.ember.installInstallerUpdate(), 1000)
   }, {
     errorEl: text,
     errorMsg: 'Download failed — please try again.',
-    onError: () => {
-      window.ember.removeAllListeners('installer-download-progress')
-      window.ember.removeAllListeners('installer-update-downloaded')
-    },
   })
 })
 
@@ -2201,7 +2244,6 @@ document.getElementById('btn-run-update-all').addEventListener('click', () => {
       logBox.scrollTop = logBox.scrollHeight
       if (/Updating Ember backend/i.test(text)) advanceTo('backend')
       else if (/Updating Ember UI|Updating UI|Building UI/i.test(text)) advanceTo('ui')
-      else if (/Downloading installer update|Installing installer/i.test(text)) advanceTo('installer')
     })
 
     const result = await window.ember.runAllUpdates(pendingUpdates, state.host)
@@ -2210,9 +2252,11 @@ document.getElementById('btn-run-update-all').addEventListener('click', () => {
     if (result.ok) {
       // Finish the currently in-progress row, and mark any visible rows the
       // log markers never touched as done too (defensive — some stages don't
-      // emit a distinctive marker).
+      // emit a distinctive marker). An installer update still to download is
+      // marked from the download's result below, not here.
       if (currentStage) markUpdateRowDone(currentStage)
-      for (const r of ['backend', 'ui', 'installer']) {
+      const finished = result.needsInstallerUpdate ? ['backend', 'ui'] : ['backend', 'ui', 'installer']
+      for (const r of finished) {
         const row = document.getElementById(`update-row-${r}`)
         if (row && !row.classList.contains('hidden') && !row.classList.contains('done')) {
           markUpdateRowDone(r)
@@ -2224,28 +2268,26 @@ document.getElementById('btn-run-update-all').addEventListener('click', () => {
 
       if (result.needsInstallerUpdate) {
         logBox.textContent += '\nBackend and UI updated. Downloading installer update...\n'
-        btn.textContent = 'Restarting...'
-        const downloadTimeout = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('timeout')), 30000)
-        )
-        try {
-          await Promise.race([
-            window.ember.downloadInstallerUpdate(),
-            downloadTimeout,
-          ])
-          // electron-updater will quit-and-install when download completes
-        } catch {
-          logBox.textContent += '\nInstaller download timed out. Backend and UI are updated — skipping installer update.\n'
-          btn.textContent = 'Done'
-          showScreen('screen-done')
-          loadEmberVersion()
+        btn.textContent = 'Downloading...'
+        markUpdateRowInProgress('installer')
+        const download = await downloadInstallerUpdate((percent) => {
+          btn.textContent = `Downloading ${percent}%`
+        })
+        if (download.ok) {
+          markUpdateRowDone('installer')
+          logBox.textContent += 'Installer update downloaded. Restarting...\n'
+          btn.textContent = 'Restarting...'
+          window.ember.installInstallerUpdate()
+          return
         }
+        logBox.textContent += `\n${download.message}\n`
+        showInstallerUpdateNotice(download.message)
       } else {
         logBox.textContent += '\nAll updates applied. Starting Ember...\n'
-        btn.textContent = 'Done'
-        showScreen('screen-done')
-        loadEmberVersion()
       }
+      btn.textContent = 'Done'
+      showScreen('screen-done')
+      loadEmberVersion()
     } else {
       logBox.textContent += `\nUpdate failed at stage: ${result.stage || 'unknown'}\n`
       btn.textContent = 'Failed'

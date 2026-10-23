@@ -8,9 +8,13 @@ const os = require('os')
 const { isNewer, displayVersion } = require('./lib/version')
 const { releaseSummary } = require('./lib/notes')
 const { buildEnvFile } = require('./lib/env')
-const { uiSourceDir, uiTargetDir, uiIndexFile } = require('./lib/paths')
+const { uiSourceDir, uiTargetDir, uiIndexFile, venvPython } = require('./lib/paths')
 const { cloneRepo } = require('./exec/clone')
 const { run } = require('./exec/run')
+const { readApiKey, uiBuildEnvWithKey } = require('./exec/api-key')
+const { redactSecrets } = require('./lib/redact')
+const { isAllowedExternalUrl } = require('./lib/external-url')
+const { downloadInstallerUpdate, isManualPlatform, manualResult } = require('./lib/installer-update')
 const { API_PKILL_PATTERN, apiSpawnSpec } = require('./lib/api-launch')
 
 const IS_PACKAGED = app.isPackaged
@@ -18,6 +22,11 @@ const HAS_REAL_FLAG = process.argv.includes('--real')
 const DEMO_MODE = !IS_PACKAGED && !HAS_REAL_FLAG
 // Opt-in: demo mode pretends updates exist so the update screen can be inspected.
 const HAS_DEMO_UPDATES_FLAG = process.argv.includes('--demo-updates')
+// Opt-in with --demo-updates: Update All also downloads the installer update.
+// --demo-installer-update=manual makes the download return a manual result.
+const DEMO_INSTALLER_UPDATE = process.argv.includes('--demo-installer-update=manual') ? 'manual'
+  : process.argv.includes('--demo-installer-update') ? 'download'
+  : null
 // Test seam (issue #12): --demo-fail=<channel>[,<channel>] forces the named IPC
 // channels to reject, so the renderer's IPC-failure handling can be exercised.
 const DEMO_FAIL_CHANNELS = (process.argv.find((a) => a.startsWith('--demo-fail=')) || '')
@@ -25,6 +34,35 @@ const DEMO_FAIL_CHANNELS = (process.argv.find((a) => a.startsWith('--demo-fail='
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean)
+// Test seam: --demo-raw-log turns off log redaction in sendLog, so the e2e
+// redaction test has a control that shows the demo key would otherwise render.
+const DEMO_RAW_LOG = DEMO_MODE && process.argv.includes('--demo-raw-log')
+
+// Log channels that carry child-process or status text to the renderer.
+const LOG_CHANNELS = new Set([
+  'install-log', 'update-all-log', 'ember-update-log',
+  'prereq-install-progress', 'clone-progress', 'ollama-pull-progress',
+])
+
+// The only way text reaches a log channel. Payloads are a string or an object
+// with a `text` field; either is redacted before it leaves the main process.
+function sendLog(channel, payload) {
+  if (!LOG_CHANNELS.has(channel)) throw new Error(`sendLog: not a log channel: ${channel}`)
+  let out = payload
+  if (!DEMO_RAW_LOG) {
+    out = typeof payload === 'string'
+      ? redactSecrets(payload)
+      : { ...payload, text: redactSecrets(payload.text) }
+  }
+  mainWindow?.webContents.send(channel, out)
+}
+
+// The venv Python for run(), which goes through a shell: quoted on Windows,
+// where install paths can contain spaces.
+function shellVenvPython(emberPath) {
+  const bin = venvPython(emberPath, process.platform)
+  return process.platform === 'win32' ? `"${bin}"` : bin
+}
 
 // Deferred until app is ready — getPath() is not available at require time.
 let USER_DATA
@@ -91,6 +129,20 @@ function createWindow() {
     },
   })
 
+  // No in-app windows: a target="_blank" link or window.open goes to the default
+  // browser when the URL is allowed and is dropped otherwise.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedExternalUrl(url)) shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  // The app is one local page. Any navigation away from it is cancelled, with
+  // allowed URLs handed to the default browser instead.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url === mainWindow.webContents.getURL()) return
+    event.preventDefault()
+    if (isAllowedExternalUrl(url)) shell.openExternal(url)
+  })
+
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'))
   mainWindow.setMenuBarVisibility(false)
 }
@@ -114,7 +166,9 @@ app.whenReady().then(() => {
     autoUpdater.autoDownload = false
     autoUpdater.autoInstallOnAppQuit = false
 
-    autoUpdater.on('error', () => {})
+    // A listener stops electron-updater showing its own error dialog. The
+    // renderer gets a manual result from download-installer-update instead.
+    autoUpdater.on('error', (err) => console.error('[autoUpdater]', err && err.message))
 
     autoUpdater.on('update-available', (info) => {
       if (mainWindow) {
@@ -149,20 +203,13 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-ipcMain.handle('download-installer-update', async () => {
-  // AppImage self-replacement via electron-updater is untested on real Linux
-  // hardware, so we don't drive it here. Backend/UI update checks still work;
-  // the installer itself is updated by downloading a fresh AppImage manually.
-  if (process.platform === 'linux') {
-    return { ok: false, manual: true, message: 'On Linux, download the latest AppImage from the GitHub Releases page.' }
-  }
-  if (autoUpdater) autoUpdater.downloadUpdate()
-  return true
-})
+// Linux and macOS get a manual result, and so does any updater error (logged
+// here, never sent to the renderer); see src/lib/installer-update.js.
+ipcMain.handle('download-installer-update', () => downloadInstallerUpdate(autoUpdater, process.platform))
 
 ipcMain.handle('install-installer-update', () => {
-  // No-op on Linux — see download-installer-update.
-  if (process.platform === 'linux') return
+  // No-op where the update is manual — see download-installer-update.
+  if (isManualPlatform(process.platform)) return
   if (autoUpdater) autoUpdater.quitAndInstall()
 })
 
@@ -206,7 +253,7 @@ ipcMain.handle('run-ember-update', async () => {
   await run('git', ['checkout', '--', 'version.json'], { cwd: emberPath })
 
   // Step 1: git pull origin main (explicit remote/branch avoids tracking issues)
-  const emberLog = (chunk) => mainWindow.webContents.send('ember-update-log', chunk)
+  const emberLog = (chunk) => sendLog('ember-update-log', chunk)
   const pullOk = (await run('git', ['pull', 'origin', 'main'], { cwd: emberPath, onData: emberLog })).ok
   if (!pullOk) return { ok: false }
 
@@ -295,7 +342,7 @@ ipcMain.handle('install-prerequisite', async (_e, { name }) => {
   // winget returns 0 on success, -1978335189 if the package is already installed.
   const r = await run('winget', ['install', '--id', packageId, '--silent', '--accept-package-agreements', '--accept-source-agreements'], {
     okCodes: [0, -1978335189],
-    onData: (chunk) => mainWindow.webContents.send('prereq-install-progress', { name, text: chunk }),
+    onData: (chunk) => sendLog('prereq-install-progress', { name, text: chunk }),
   })
   if (r.error !== null) return { ok: false, error: r.error }
   return { ok: r.ok, needsRestart: name === 'docker' }
@@ -334,7 +381,7 @@ ipcMain.handle('clone-ember-repo', async (_e, { parentDir }) => {
   }
   const result = await cloneRepo({
     targetDir,
-    onData: (text) => mainWindow.webContents.send('clone-progress', text),
+    onData: (text) => sendLog('clone-progress', text),
   })
   if (result.ok) {
     saveEmberPath(targetDir)
@@ -359,7 +406,7 @@ ipcMain.handle('check-target-path', (_e, { parentDir }) => {
 ipcMain.handle('update-existing-ember', async (_e, { emberPath }) => {
   const r = await run('git', ['pull', 'origin', 'main'], {
     cwd: emberPath,
-    onData: (chunk) => mainWindow.webContents.send('clone-progress', chunk),
+    onData: (chunk) => sendLog('clone-progress', chunk),
   })
   if (r.error !== null) return { ok: false, error: r.error }
   // saveEmberPath fires on any exit (even a failed pull), matching prior behavior.
@@ -376,7 +423,7 @@ ipcMain.handle('fresh-install-ember', async (_e, { parentDir }) => {
   }
   const result = await cloneRepo({
     targetDir,
-    onData: (text) => mainWindow.webContents.send('clone-progress', text),
+    onData: (text) => sendLog('clone-progress', text),
   })
   if (result.ok) {
     saveEmberPath(targetDir)
@@ -527,7 +574,7 @@ ipcMain.handle('get-ollama-models', async () => {
 
 ipcMain.handle('pull-ollama-model', async (_e, model) => {
   const r = await run('ollama', ['pull', model], {
-    onData: (chunk) => mainWindow.webContents.send('ollama-pull-progress', chunk),
+    onData: (chunk) => sendLog('ollama-pull-progress', chunk),
   })
   if (r.error !== null) return { ok: false, error: r.error }
   return { ok: r.ok }
@@ -609,21 +656,23 @@ ipcMain.handle('setup-dev-mode', (_e, { emberPath, demoVault, testVault }) => {
 
 ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
   const isWin = process.platform === 'win32'
-  const pyBin = isWin
-    ? `"${path.join(emberPath, '.venv', 'Scripts', 'python.exe')}"`
-    : path.join(emberPath, '.venv', 'bin', 'python')
+  const pyBin = shellVenvPython(emberPath)
 
   if (step === 'apikey') {
-    const keyExists = (await run(pyBin, ['scripts/set_api_key.py', '--check'], { cwd: emberPath })).ok
-
-    if (keyExists) {
-      mainWindow.webContents.send('install-log', { step, text: 'API key already configured ✓\n' })
-      mainWindow.webContents.send('install-step-done', { step, ok: true })
-      return { ok: true }
-    }
-
-    // No key — generate non-interactively
-    return runSpawn(pyBin, ['scripts/set_api_key.py', '--non-interactive'], emberPath, step)
+    // The script prints the key, so its output is never streamed here: only
+    // fixed status text reaches the log, and the key stays in the main process.
+    const keyResult = await readApiKey({
+      pyBin,
+      emberPath,
+      onLog: (text) => sendLog('install-log', { step, text }),
+    })
+    let text
+    if (!keyResult.ok) text = `Could not set up the API key: ${keyResult.error}\n`
+    else if (keyResult.created) text = 'API key generated and stored in the system credential store ✓\n'
+    else text = 'API key already configured ✓\n'
+    sendLog('install-log', { step, text })
+    mainWindow.webContents.send('install-step-done', { step, ok: keyResult.ok })
+    return keyResult.ok ? { ok: true } : { ok: false, error: keyResult.error }
   }
 
   let cmd, args
@@ -637,53 +686,53 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     const daemonUp = (await run('docker', ['info'])).ok
     if (!daemonUp) {
       if (isWin) {
-        mainWindow.webContents.send('install-log', { step, text: 'Docker daemon not running — starting Docker Desktop...\n' })
+        sendLog('install-log', { step, text: 'Docker daemon not running — starting Docker Desktop...\n' })
         spawn('cmd', ['/c', 'start', '', 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe'], { shell: true })
       } else if (process.platform === 'darwin') {
-        mainWindow.webContents.send('install-log', { step, text: 'Docker daemon not running — starting Docker Desktop...\n' })
+        sendLog('install-log', { step, text: 'Docker daemon not running — starting Docker Desktop...\n' })
         spawn('open', ['-a', 'Docker'], { shell: true })
       } else {
         // Linux: do not auto-start. Docker Engine is a system service requiring
         // root, and Docker Desktop is non-standard here — starting it from a GUI
         // app would silently fail. Guide the user and keep polling so the step
         // recovers if they start Docker during the wait window below.
-        mainWindow.webContents.send('install-log', { step, text: 'Docker daemon not running. On Linux, start it manually — e.g. "sudo systemctl start docker" — and make sure your user is in the "docker" group. Waiting for Docker...\n' })
+        sendLog('install-log', { step, text: 'Docker daemon not running. On Linux, start it manually — e.g. "sudo systemctl start docker" — and make sure your user is in the "docker" group. Waiting for Docker...\n' })
       }
       let ready = false
       for (let i = 0; i < 20; i++) {
         await new Promise((r) => setTimeout(r, 3000))
         ready = (await run('docker', ['info'])).ok
         if (ready) break
-        mainWindow.webContents.send('install-log', { step, text: 'Waiting for Docker daemon...\n' })
+        sendLog('install-log', { step, text: 'Waiting for Docker daemon...\n' })
       }
       if (!ready) {
         const retryHint = process.platform === 'linux'
           ? 'Docker daemon is not available. Start Docker (e.g. "sudo systemctl start docker"), confirm "docker info" works, then retry.'
           : 'Docker daemon did not start in time. Please start Docker Desktop manually and retry.'
-        mainWindow.webContents.send('install-log', { step, text: `${retryHint}\n` })
+        sendLog('install-log', { step, text: `${retryHint}\n` })
         mainWindow.webContents.send('install-step-done', { step, ok: false })
         return { ok: false }
       }
-      mainWindow.webContents.send('install-log', { step, text: 'Docker daemon ready ✓\n' })
+      sendLog('install-log', { step, text: 'Docker daemon ready ✓\n' })
     }
     const composeResult = await runSpawn('docker', ['compose', 'up', '-d'], emberPath, step)
     if (!composeResult.ok) return composeResult
 
-    mainWindow.webContents.send('install-log', { step, text: 'Waiting for search engine to be ready...\n' })
+    sendLog('install-log', { step, text: 'Waiting for search engine to be ready...\n' })
     let healthy = false
     for (let i = 0; i < 20; i++) {
       await new Promise((r) => setTimeout(r, 3000))
       const psResult = await run('docker', ['compose', 'ps', '--status', 'running', '-q'], { cwd: emberPath })
       healthy = psResult.ok && psResult.stdout.trim().length > 0
       if (healthy) break
-      mainWindow.webContents.send('install-log', { step, text: 'Waiting for search engine container...\n' })
+      sendLog('install-log', { step, text: 'Waiting for search engine container...\n' })
     }
     if (!healthy) {
-      mainWindow.webContents.send('install-log', { step, text: 'Search engine container did not become ready in time.\n' })
+      sendLog('install-log', { step, text: 'Search engine container did not become ready in time.\n' })
       mainWindow.webContents.send('install-step-done', { step, ok: false })
       return { ok: false }
     }
-    mainWindow.webContents.send('install-log', { step, text: 'Search engine ready ✓\n' })
+    sendLog('install-log', { step, text: 'Search engine ready ✓\n' })
     mainWindow.webContents.send('install-step-done', { step, ok: true })
     return { ok: true }
   } else if (step === 'build-ui') {
@@ -694,7 +743,7 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     if (!fs.existsSync(uiDir)) {
       const cloneOk = (await run('git', ['clone', '--depth', '1', REPO_UI_URL], {
         cwd: path.dirname(emberPath),
-        onData: (chunk) => mainWindow.webContents.send('install-log', { step, text: chunk }),
+        onData: (chunk) => sendLog('install-log', { step, text: chunk }),
       })).ok
       if (!cloneOk) {
         mainWindow.webContents.send('install-step-done', { step, ok: false })
@@ -702,58 +751,41 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
       }
     }
 
-    mainWindow.webContents.send('install-log', { step, text: 'Installing UI dependencies...\n' })
+    sendLog('install-log', { step, text: 'Installing UI dependencies...\n' })
     const npmOk = (await run('npm', ['ci'], {
       cwd: uiDir,
-      onData: (chunk) => mainWindow.webContents.send('install-log', { step, text: chunk }),
+      onData: (chunk) => sendLog('install-log', { step, text: chunk }),
     })).ok
     if (!npmOk) {
       mainWindow.webContents.send('install-step-done', { step, ok: false })
       return { ok: false }
     }
 
-    // Retrieve API key from credential store and write UI .env so Vite can
-    // bake it into the bundle.  Without this the built frontend ships with an
-    // empty API key and every authenticated request to the backend fails.
-    mainWindow.webContents.send('install-log', { step, text: 'Injecting API key into UI build...\n' })
-    const keyResult = await run(pyBin, ['scripts/set_api_key.py', '--non-interactive'], {
-      cwd: emberPath,
-      // stdout is captured for the key; stderr streams to the install log.
-      onData: (chunk, stream) => {
-        if (stream === 'stderr') mainWindow.webContents.send('install-log', { step, text: chunk })
-      },
+    const env = await uiBuildEnvWithKey({
+      pyBin,
+      emberPath,
+      log: (text) => sendLog('install-log', { step, text }),
     })
-    const keyMatch = keyResult.error === null ? keyResult.stdout.match(/Key:\s*(.+)/) : null
-    const apiKey = keyMatch ? keyMatch[1].trim() : null
-    if (apiKey) {
-      const uiEnvPath = path.join(uiDir, '.env')
-      fs.writeFileSync(uiEnvPath, `VITE_EMBER_API_URL=/v1\nVITE_EMBER_API_KEY=${apiKey}\n`, 'utf-8')
-      mainWindow.webContents.send('install-log', { step, text: 'API key written to UI .env ✓\n' })
-    } else {
-      mainWindow.webContents.send('install-log', { step, text: 'Warning: could not retrieve API key — UI will build without auth\n' })
-    }
 
-    mainWindow.webContents.send('install-log', { step, text: 'Building Ember UI...\n' })
+    sendLog('install-log', { step, text: 'Building Ember UI...\n' })
     const buildOk = (await run('npm', ['run', 'build'], {
       cwd: uiDir,
-      onData: (chunk) => mainWindow.webContents.send('install-log', { step, text: chunk }),
+      env,
+      onData: (chunk) => sendLog('install-log', { step, text: chunk }),
     })).ok
     if (!buildOk) {
       mainWindow.webContents.send('install-step-done', { step, ok: false })
       return { ok: false }
     }
 
-    // Remove .env now that the key is baked into the bundle
-    try { fs.unlinkSync(path.join(uiDir, '.env')) } catch {}
-
     try {
       if (fs.existsSync(targetUiDir)) {
         fs.rmSync(targetUiDir, { recursive: true })
       }
       fs.cpSync(uiDistDir, targetUiDir, { recursive: true })
-      mainWindow.webContents.send('install-log', { step, text: 'UI installed ✓\n' })
+      sendLog('install-log', { step, text: 'UI installed ✓\n' })
     } catch (err) {
-      mainWindow.webContents.send('install-log', { step, text: `Failed to copy UI: ${err.message}\n` })
+      sendLog('install-log', { step, text: `Failed to copy UI: ${err.message}\n` })
       mainWindow.webContents.send('install-step-done', { step, ok: false })
       return { ok: false }
     }
@@ -773,7 +805,7 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
 function runSpawn(cmd, args, cwd, step) {
   return run(cmd, args, {
     cwd,
-    onData: (chunk) => mainWindow.webContents.send('install-log', { step, text: chunk }),
+    onData: (chunk) => sendLog('install-log', { step, text: chunk }),
   }).then((r) => {
     mainWindow.webContents.send('install-step-done', { step, ok: r.ok })
     return r.error !== null ? { ok: false, error: r.error } : { ok: r.ok }
@@ -893,11 +925,12 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
   }
   const uiLatest = displayVersion(uiRelease?.tag_name) || null
 
-  // Linux has no in-app installer self-update (AppImage self-replacement is
-  // untested on hardware), so don't raise the auto-update banner there — its
-  // button would drive a no-op download. Backend/UI checks below are unaffected.
-  // manual=true lets the renderer optionally surface a "download manually" hint.
-  const installerSelfUpdate = process.platform !== 'linux'
+  // Linux and macOS have no in-app installer self-update (isManualPlatform in
+  // src/lib/installer-update.js), so don't offer the installer update there:
+  // Update All would mark it done and then hand back a manual result.
+  // Backend/UI checks below are unaffected. manual=true lets the renderer
+  // optionally surface a "download manually" hint.
+  const installerSelfUpdate = !isManualPlatform(process.platform)
   return {
     reachable: !!(installerRelease || backendRelease || uiRelease),
     installer: {
@@ -928,11 +961,9 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
   if (!emberPath) return { ok: false, error: 'No ember-2 path configured' }
 
   const isWin = process.platform === 'win32'
-  const pyBin = isWin
-    ? `"${path.join(emberPath, '.venv', 'Scripts', 'python.exe')}"`
-    : path.join(emberPath, '.venv', 'bin', 'python')
+  const pyBin = shellVenvPython(emberPath)
   const uiDir = uiSourceDir(emberPath)
-  const log = (text) => mainWindow.webContents.send('update-all-log', text)
+  const log = (text) => sendLog('update-all-log', text)
 
   if (updates.backend) {
     log('Updating Ember backend...\n')
@@ -1064,22 +1095,11 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     const npmOk = (await run('npm', ['ci'], { cwd: uiDir, onData: log })).ok
     if (!npmOk) { log('npm ci failed.\n'); return { ok: false, stage: 'ui-npm' } }
 
-    log('Injecting API key...\n')
-    // Divergence preserved (tracked as a #7 follow-up bug): unlike the build-ui
-    // step, this drops the script's stderr rather than streaming it to the log.
-    const keyResult = await run(pyBin, ['scripts/set_api_key.py', '--non-interactive'], { cwd: emberPath })
-    const keyMatch = keyResult.error === null ? keyResult.stdout.match(/Key:\s*(.+)/) : null
-    const apiKey = keyMatch ? keyMatch[1].trim() : null
-    if (apiKey) {
-      fs.writeFileSync(path.join(uiDir, '.env'), `VITE_EMBER_API_URL=/v1\nVITE_EMBER_API_KEY=${apiKey}\n`, 'utf-8')
-    }
+    const env = await uiBuildEnvWithKey({ pyBin, emberPath, log })
 
     log('Building UI...\n')
-    const buildOk = (await run('npm', ['run', 'build'], { cwd: uiDir, onData: log })).ok
+    const buildOk = (await run('npm', ['run', 'build'], { cwd: uiDir, env, onData: log })).ok
     if (!buildOk) { log('UI build failed.\n'); return { ok: false, stage: 'ui-build' } }
-
-    // Remove .env now that the key is baked into the bundle
-    try { fs.unlinkSync(path.join(uiDir, '.env')) } catch {}
 
     const targetUiDir = uiTargetDir(emberPath)
     try {
@@ -1102,7 +1122,7 @@ ipcMain.handle('run-git-pull', async (_e) => {
   const emberPath = getEmberPath()
   if (!emberPath) return { ok: false }
 
-  const log = (text) => mainWindow.webContents.send('install-log', { step: 'update', text })
+  const log = (text) => sendLog('install-log', { step: 'update', text })
 
   // Reset version.json before pull — modified locally, blocks git pull
   await run('git', ['checkout', '--', 'version.json'], { cwd: emberPath })
@@ -1130,8 +1150,10 @@ ipcMain.handle('run-git-pull', async (_e) => {
   const npmOk = (await run('npm', ['ci'], { cwd: uiDir, onData: log })).ok
   if (!npmOk) { log('npm ci failed.\n'); return { ok: false } }
 
+  const env = await uiBuildEnvWithKey({ pyBin: shellVenvPython(emberPath), emberPath, log })
+
   log('Building Ember UI...\n')
-  const buildOk = (await run('npm', ['run', 'build'], { cwd: uiDir, onData: log })).ok
+  const buildOk = (await run('npm', ['run', 'build'], { cwd: uiDir, env, onData: log })).ok
   if (!buildOk) { log('UI build failed.\n'); return { ok: false } }
 
   try {
@@ -1193,7 +1215,7 @@ ipcMain.handle('get-api-startup-log-tail', () => {
     const content = fs.readFileSync(p, 'utf-8')
     const lines = content.split(/\r?\n/)
     const trimmed = lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines
-    return { tail: trimmed.slice(-50).join('\n') }
+    return { tail: redactSecrets(trimmed.slice(-50).join('\n')) }
   } catch {
     return { tail: '' }
   }
@@ -1450,11 +1472,8 @@ ipcMain.handle('get-startup-task', async () => {
 })
 
 ipcMain.handle('open-url', (_e, url) => {
-  if (typeof url !== 'string') return
-  const isHttps = url.startsWith('https://')
-  const isLocalhost = url.startsWith('http://localhost') || url.startsWith('http://127.0.0.1')
-  if (!isHttps && !isLocalhost) {
-    console.warn(`[open-url] Blocked URL with disallowed scheme: ${url}`)
+  if (!isAllowedExternalUrl(url)) {
+    console.warn(`[open-url] Blocked URL not on the external allowlist: ${url}`)
     return
   }
   shell.openExternal(url)
@@ -1600,7 +1619,7 @@ if (DEMO_MODE) {
   ipcMain.removeHandler('install-prerequisite')
   ipcMain.handle('install-prerequisite', async (_e, { name }) => {
     await sleep(1500)
-    mainWindow.webContents.send('prereq-install-progress', { name, text: `Installing ${name}... done (demo)\n` })
+    sendLog('prereq-install-progress', { name, text: `Installing ${name}... done (demo)\n` })
     return { ok: true, needsRestart: name === 'docker' }
   })
 
@@ -1624,7 +1643,7 @@ if (DEMO_MODE) {
       `success\n`,
     ]
     for (const msg of msgs) {
-      mainWindow.webContents.send('ollama-pull-progress', msg)
+      sendLog('ollama-pull-progress', msg)
       await sleep(400)
     }
     return { ok: true }
@@ -1699,7 +1718,7 @@ if (DEMO_MODE) {
 
     const perLog = sim.delay / sim.logs.length
     for (const text of sim.logs) {
-      mainWindow.webContents.send('install-log', { step, text })
+      sendLog('install-log', { step, text })
       await sleep(perLog)
     }
     mainWindow.webContents.send('install-step-done', { step, ok: true })
@@ -1758,7 +1777,7 @@ if (DEMO_MODE) {
   ipcMain.handle('run-all-updates', async (_e, payload) => {
     if (HAS_DEMO_UPDATES_FLAG) {
       const updates = payload?.updates || { backend: true, ui: true, installer: true }
-      const log = (text) => mainWindow?.webContents.send('update-all-log', text)
+      const log = (text) => sendLog('update-all-log', text)
       const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 
       if (updates.backend) {
@@ -1773,19 +1792,37 @@ if (DEMO_MODE) {
         log('  built dist/\n')
         await wait(900)
       }
-      if (updates.installer) {
+      // With --demo-installer-update the renderer downloads it afterwards, as in real mode.
+      if (updates.installer && !DEMO_INSTALLER_UPDATE) {
         log('Downloading installer update...\n')
         await wait(1600)
         log('  installer ready\n')
         await wait(700)
       }
       log('\nAll updates applied.\n')
-      // needsInstallerUpdate=false so the celebration card has time to play
-      // instead of the app quit-and-installing before we see it.
-      return { ok: true, needsInstallerUpdate: false }
+      // The installer download runs only with --demo-installer-update; the
+      // other update-screen tests end on the Done screen.
+      return { ok: true, needsInstallerUpdate: !!(DEMO_INSTALLER_UPDATE && updates.installer) }
     }
     return { ok: true, needsInstallerUpdate: false }
   })
+
+  // Installer self-update: progress events, then update-downloaded, as
+  // electron-updater emits them. Installing is a no-op so demo never quits.
+  ipcMain.removeHandler('download-installer-update')
+  ipcMain.handle('download-installer-update', async () => {
+    if (DEMO_INSTALLER_UPDATE === 'manual') {
+      return manualResult('On this platform, download the latest installer from the GitHub Releases page. (demo)')
+    }
+    for (const percent of [10, 45, 80, 100]) {
+      mainWindow?.webContents.send('installer-download-progress', { percent })
+      await sleep(300)
+    }
+    mainWindow?.webContents.send('installer-update-downloaded')
+    return { ok: true }
+  })
+  ipcMain.removeHandler('install-installer-update')
+  ipcMain.handle('install-installer-update', () => {})
 
   // Override Tailscale checks — simulate installed + connected
   ipcMain.removeHandler('check-tailscale-installed')
@@ -1808,13 +1845,13 @@ if (DEMO_MODE) {
   ipcMain.removeHandler('run-tailscale-serve')
   ipcMain.handle('run-tailscale-serve', async () => {
     await sleep(1000)
-    return { ok: true, output: 'Available at https://ember-desktop.exocomet-alpha.ts.net' }
+    return { ok: true, output: 'Available at https://ember.example.ts.net' }
   })
 
   ipcMain.removeHandler('get-tailscale-dns')
   ipcMain.handle('get-tailscale-dns', async () => {
     await sleep(300)
-    return 'ember-desktop.exocomet-alpha.ts.net'
+    return 'ember.example.ts.net'
   })
 
   ipcMain.removeHandler('check-ember-update')
@@ -1831,7 +1868,7 @@ if (DEMO_MODE) {
       'Services restarted.\n',
     ]
     for (const text of steps) {
-      mainWindow.webContents.send('ember-update-log', text)
+      sendLog('ember-update-log', text)
       await sleep(800)
     }
     return { ok: true, tag: 'v0.9.3' }
@@ -1884,7 +1921,7 @@ if (DEMO_MODE) {
       'done.\n',
     ]
     for (const msg of msgs) {
-      mainWindow.webContents.send('clone-progress', msg)
+      sendLog('clone-progress', msg)
       await sleep(600)
     }
     return { ok: true, path: parentDir + '/ember-2' }
@@ -1914,7 +1951,7 @@ if (DEMO_MODE) {
   ipcMain.handle('update-existing-ember', async (_e, { emberPath }) => {
     const msgs = ['Already up to date.\n']
     for (const msg of msgs) {
-      mainWindow.webContents.send('clone-progress', msg)
+      sendLog('clone-progress', msg)
       await sleep(600)
     }
     return { ok: true, path: emberPath }
@@ -1924,7 +1961,7 @@ if (DEMO_MODE) {
   ipcMain.handle('fresh-install-ember', async (_e, { parentDir }) => {
     const msgs = ['Cloning into ember-2...\n', 'Receiving objects: 100%\n', 'done.\n']
     for (const msg of msgs) {
-      mainWindow.webContents.send('clone-progress', msg)
+      sendLog('clone-progress', msg)
       await sleep(600)
     }
     return { ok: true, path: parentDir + '/ember-2' }

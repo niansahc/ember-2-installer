@@ -5,7 +5,7 @@
 // comment separators.
 
 const { test, expect } = require('@playwright/test')
-const { buildEnvFile } = require('../../src/lib/env')
+const { buildEnvFile, uiBuildEnv } = require('../../src/lib/env')
 
 const base = {
   vault: 'C:\\EmberVault',
@@ -46,5 +46,40 @@ test.describe('buildEnvFile', () => {
     expect(buildEnvFile({ ...base, platform: 'darwin' })).toContain('macOS Keychain')
     expect(buildEnvFile({ ...base, platform: 'linux' })).toContain('system keyring (SecretService)')
     expect(buildEnvFile({ ...base, platform: 'freebsd' })).toContain('OS credential store')
+  })
+})
+
+test.describe('uiBuildEnv', () => {
+  const parent = { PATH: '/usr/bin', HOME: '/home/demo' }
+
+  test('passes the key to the UI build through the environment', () => {
+    const env = uiBuildEnv(parent, 'synthetic_key_value')
+    expect(env.EMBER_API_KEY).toBe('synthetic_key_value')
+    expect(env.VITE_EMBER_API_KEY).toBe('synthetic_key_value')
+    expect(env.VITE_EMBER_API_URL).toBe('/v1')
+    expect(env.PATH).toBe('/usr/bin')
+  })
+
+  test('sets no key variables when no key was read', () => {
+    const env = uiBuildEnv(parent, null)
+    expect(env).not.toHaveProperty('EMBER_API_KEY')
+    expect(env).not.toHaveProperty('VITE_EMBER_API_KEY')
+    expect(env.VITE_EMBER_API_URL).toBe('/v1')
+  })
+
+  test('control: the same assertion fails when a key is given', () => {
+    expect(uiBuildEnv(parent, 'synthetic_key_value')).toHaveProperty('EMBER_API_KEY')
+  })
+
+  test('does not modify the parent environment', () => {
+    uiBuildEnv(parent, 'synthetic_key_value')
+    expect(parent).toEqual({ PATH: '/usr/bin', HOME: '/home/demo' })
+  })
+
+  test('control: the same assertion fails for a builder that writes into the parent', () => {
+    const mutatingBuildEnv = (base, apiKey) => Object.assign(base, uiBuildEnv(base, apiKey))
+    const copy = { ...parent }
+    mutatingBuildEnv(copy, 'synthetic_key_value')
+    expect(copy).not.toEqual({ PATH: '/usr/bin', HOME: '/home/demo' })
   })
 })
