@@ -273,9 +273,11 @@ ipcMain.handle('check-ember-update', async () => {
     installed = describe.ok ? describe.stdout.trim() : null
   }
 
+  // An unknown installed version counts as an update to the pin, as in
+  // check-all-updates and Update All.
   const release = await releaseP
   return {
-    hasUpdate: !!installed && movesToPin(installed),
+    hasUpdate: movesToPin(installed),
     installed: installed || 'unknown',
     latest: EMBER_VERSION,
     changelog: release?.body || '',
@@ -853,7 +855,7 @@ ipcMain.handle('check-for-update', async () => {
   if (!release) return { hasUpdate: false }
 
   return {
-    hasUpdate: !!installed && movesToPin(installed),
+    hasUpdate: movesToPin(installed),
     installedTag: installed,
     latestTag: EMBER_VERSION,
     changelog: release.body || '',

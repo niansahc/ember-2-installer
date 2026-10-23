@@ -170,6 +170,36 @@ test.describe('source: update checks target the pin', () => {
   })
 })
 
+// hasUpdate lines in the update checks that gate the pin comparison, e.g. an
+// `installed &&` guard that reports no update when the installed version is
+// unknown. An unknown version moves to the pin (updateAction), so every pin
+// hasUpdate is movesToPin(<installed>) alone. A check with no pin hasUpdate
+// line is flagged too, so the scan cannot pass by matching nothing.
+function guardedPinChecks(text) {
+  return UPDATE_CHECKS.flatMap((ch) => {
+    const lines = handlerBody(text, ch).split(/\r?\n/).map((l) => l.trim())
+      .filter((l) => /hasUpdate:.*movesToPin\(/.test(l))
+    if (!lines.length) return [`${ch}: no movesToPin hasUpdate`]
+    return lines.filter((l) => !/^hasUpdate: movesToPin\(\w+\),$/.test(l)).map((l) => `${ch}: ${l}`)
+  })
+}
+
+test.describe('source: an unknown installed version needs the pin', () => {
+  const mainJs = () => fs.readFileSync(path.join(SRC, 'main.js'), 'utf8')
+
+  test('no update check reports "no update" for an unknown installed version', () => {
+    expect(guardedPinChecks(mainJs())).toEqual([])
+  })
+
+  test('control: an `installed &&` guard in check-for-update is flagged', () => {
+    const text = mainJs()
+    const body = handlerBody(text, 'check-for-update')
+    const guarded = text.replace(body, body.replace('hasUpdate: movesToPin(installed),', 'hasUpdate: !!installed && movesToPin(installed),'))
+    expect(guarded).not.toBe(text)
+    expect(guardedPinChecks(guarded)).toEqual(['check-for-update: hasUpdate: !!installed && movesToPin(installed),'])
+  })
+})
+
 test.describe('source: updates never pull a branch', () => {
   test('no git pull in src/', () => {
     expect(gitPulls(srcText())).toEqual([])
