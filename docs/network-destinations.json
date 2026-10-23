@@ -151,7 +151,7 @@
     }
   ],
   "browserLinks": {
-    "$comment": "Opened only when the user clicks, in the system browser (shell.openExternal) or an Electron window (target=_blank). Never contacted by an unattended install. Listed so the drift test can account for every host literal in src/.",
+    "$comment": "Opened only when the user clicks, in the system browser (shell.openExternal). Never contacted by an unattended install. Must equal ALLOWED_EXTERNAL_HOSTS in src/lib/external-url.js; the drift test checks both that and every host literal in src/.",
     "hosts": [
       "git-scm.com",
       "www.python.org",

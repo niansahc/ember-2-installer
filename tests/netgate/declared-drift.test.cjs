@@ -10,6 +10,7 @@ const fs = require('fs')
 const path = require('path')
 
 const REPO = path.resolve(__dirname, '..', '..')
+const { ALLOWED_EXTERNAL_HOSTS } = require('../../src/lib/external-url')
 const declared = JSON.parse(fs.readFileSync(path.join(REPO, 'docs', 'network-destinations.json'), 'utf8'))
 
 // Literals that are not destinations. Each needs a reason.
@@ -17,6 +18,7 @@ const NOT_DESTINATIONS = [
   { match: (h) => h === '127.0.0.1' || h === 'localhost', reason: 'loopback (local API, open-url allowlist)' },
   { match: (h) => h === 'www.apple.com', reason: 'plist DOCTYPE identifier, never fetched' },
   { match: (h) => h === 'ember-desktop' || h.endsWith('.ts.net'), reason: 'demo-mode fake Tailscale status' },
+  { match: (h) => h === 'github.com.evil.test' || h === 'localhost.evil.test', reason: 'external-url.js comment: lookalike hosts the allowlist rejects' },
 ]
 
 function sourceFiles(dir) {
@@ -54,6 +56,16 @@ function undeclared(texts, list) {
 
 const srcTexts = sourceFiles(path.join(REPO, 'src')).map((f) => fs.readFileSync(f, 'utf8'))
 
+// Hosts in one list and not the other. Empty both ways means the lists match.
+function hostSetDiff(allowlist, browserHosts) {
+  const a = new Set(allowlist)
+  const b = new Set(browserHosts)
+  return {
+    onlyInAllowlist: [...a].filter((h) => !b.has(h)).sort(),
+    onlyInDeclared: [...b].filter((h) => !a.has(h)).sort(),
+  }
+}
+
 test('every host literal and winget id in src/ is declared', () => {
   assert.deepEqual(undeclared(srcTexts, declared), { missingHosts: [], missingPkgs: [] })
 })
@@ -80,4 +92,22 @@ test('the Ollama model registry and its blob host are declared and required in t
   const byHost = Object.fromEntries(declared.destinations.map((d) => [d.host, d]))
   assert.equal(byHost['registry.ollama.ai'].gateRun, 'required')
   assert.ok(declared.destinations.some((d) => d.host.endsWith('.r2.cloudflarestorage.com') && d.process === 'ollama'))
+})
+
+// The open-url allowlist and the declared browser links are the same list kept
+// in two places; a host added to one must be added to the other.
+test('ALLOWED_EXTERNAL_HOSTS equals browserLinks.hosts', () => {
+  assert.ok(ALLOWED_EXTERNAL_HOSTS.size > 0 && declared.browserLinks.hosts.length > 0, 'both lists are populated')
+  assert.equal(new Set(declared.browserLinks.hosts).size, declared.browserLinks.hosts.length, 'duplicate browserLinks hosts')
+  assert.deepEqual(hostSetDiff(ALLOWED_EXTERNAL_HOSTS, declared.browserLinks.hosts), { onlyInAllowlist: [], onlyInDeclared: [] })
+})
+
+test('control: a host added to only one list is caught on either side', () => {
+  const allowlist = [...ALLOWED_EXTERNAL_HOSTS, 'allow-only.example.test']
+  const browserHosts = [...declared.browserLinks.hosts.filter((h) => h !== 'brew.sh'), 'declared-only.example.test']
+  assert.deepEqual(hostSetDiff(allowlist, browserHosts), {
+    onlyInAllowlist: ['allow-only.example.test', 'brew.sh'],
+    onlyInDeclared: ['declared-only.example.test'],
+  })
+  assert.notDeepEqual(hostSetDiff(allowlist, browserHosts), { onlyInAllowlist: [], onlyInDeclared: [] })
 })
