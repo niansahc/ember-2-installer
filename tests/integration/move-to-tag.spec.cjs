@@ -6,42 +6,18 @@ const { test, expect } = require('@playwright/test')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { execFileSync } = require('child_process')
-const { pathToFileURL } = require('url')
 const { moveToTag } = require('../../src/exec/move-to-tag')
+const { git, gitOut, seedRepo } = require('./git-fixture.cjs')
 
-const git = (args, cwd) => execFileSync('git', args, { cwd, stdio: 'ignore' })
-const gitOut = (args, cwd) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
-const commitAll = (cwd, msg) => {
-  git(['add', '.'], cwd)
-  git(['-c', 'user.email=t@example.com', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'commit', '-m', msg], cwd)
-}
-
-// Releases v1.0.0 and v1.1.0, then unreleased work on main, as ember-2 has.
-// The URL is file:// so --depth is honoured (a plain path makes a full clone).
-function seedRepo(tmp) {
-  const bare = path.join(tmp, 'src.git')
-  const work = path.join(tmp, 'work')
-  execFileSync('git', ['init', '--bare', '--initial-branch=main', bare], { stdio: 'ignore' })
-  fs.mkdirSync(work)
-  git(['init', '--initial-branch=main'], work)
-  const ids = {}
-  for (const [v, tag] of [['1.0.0', 'v1.0.0'], ['1.1.0', 'v1.1.0'], ['1.2.0-dev', null]]) {
-    fs.writeFileSync(path.join(work, 'version.json'), `{"version":"${v}"}\n`)
-    fs.writeFileSync(path.join(work, 'app.txt'), `app ${v}\n`)
-    commitAll(work, `version ${v}`)
-    if (tag) git(['tag', tag], work)
-    ids[tag || 'main'] = gitOut(['rev-parse', 'HEAD'], work)
-  }
-  git(['remote', 'add', 'origin', bare], work)
-  git(['push', 'origin', 'main', '--tags'], work)
-  git(['symbolic-ref', 'HEAD', 'refs/heads/main'], bare)
-  return { url: pathToFileURL(bare).href, ids }
-}
+// Releases v1.0.0 and v1.1.0, then unreleased work on main.
+const release = (v, tag) => ({ files: { 'version.json': `{"version":"${v}"}\n`, 'app.txt': `app ${v}\n` }, tag })
 
 test.describe('moveToTag', () => {
-  let tmp
+  // One seeded repo for the file (no test writes to it); each test clones
+  // into its own temp dir.
+  let seedDir
   let repo
+  let tmp
   const clone = (name, args) => {
     const dir = path.join(tmp, name)
     git(['clone', ...args, repo.url, dir])
@@ -50,9 +26,15 @@ test.describe('moveToTag', () => {
   const head = (dir) => gitOut(['rev-parse', 'HEAD'], dir)
   const move = (dir, opts = {}) => moveToTag({ cwd: dir, tag: 'v1.1.0', onData: () => {}, ...opts })
 
+  test.beforeAll(() => {
+    seedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ember-move-seed-'))
+    repo = seedRepo(seedDir, [release('1.0.0', 'v1.0.0'), release('1.1.0', 'v1.1.0'), release('1.2.0-dev')])
+  })
+  test.afterAll(() => {
+    try { fs.rmSync(seedDir, { recursive: true, force: true }) } catch {}
+  })
   test.beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ember-move-'))
-    repo = seedRepo(tmp)
   })
   test.afterEach(() => {
     try { fs.rmSync(tmp, { recursive: true, force: true }) } catch {}

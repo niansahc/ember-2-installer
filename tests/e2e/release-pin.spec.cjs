@@ -6,7 +6,7 @@ const { test, expect } = require('@playwright/test')
 const fs = require('fs')
 const path = require('path')
 const yaml = require('js-yaml')
-const { releaseTag, updateAction } = require('../../src/lib/release-pin')
+const { releaseTag, updateAction, SEMVER } = require('../../src/lib/release-pin')
 const { compareVersions } = require('../../src/lib/version')
 
 const SRC = path.resolve(__dirname, '..', '..', 'src')
@@ -19,7 +19,9 @@ function sourceFiles(dir) {
   })
 }
 
-const srcText = () => sourceFiles(SRC).map((f) => fs.readFileSync(f, 'utf8')).join('\n')
+// Read once: several tests scan the same text.
+let srcCache
+const srcText = () => (srcCache ??= sourceFiles(SRC).map((f) => fs.readFileSync(f, 'utf8')).join('\n'))
 
 // Clone calls that do not go to the pinned tag: a raw git clone without
 // --branch, or a cloneRepo call (always awaited) without the pin.
@@ -58,7 +60,7 @@ test.describe('releaseTag', () => {
 // newer than version (equal in a coordinated release; older only in an
 // installer-only patch).
 function pinRuleViolations({ version, emberRelease }) {
-  if (typeof emberRelease !== 'string' || !/^\d+\.\d+\.\d+$/.test(emberRelease)) return ['emberRelease is not x.y.z']
+  if (typeof emberRelease !== 'string' || !SEMVER.test(emberRelease)) return ['emberRelease is not x.y.z']
   const [pin, ver] = [emberRelease, version].map((v) => v.split('.').map(Number))
   const out = []
   if (pin[0] !== ver[0] || pin[1] !== ver[1]) out.push('major.minor differs from version')
@@ -124,7 +126,7 @@ test.describe('source: every clone goes to the pinned tag', () => {
   test('control: the scan sees the real clone calls and flags unpinned ones', () => {
     const text = srcText()
     expect((text.match(/await cloneRepo\(\{/g) || []).length).toBeGreaterThanOrEqual(4)
-    expect(text).toMatch(/'clone', '--depth', String\(depth\), '--branch'/)
+    expect(text).toMatch(/'clone', '--depth', '1', '--branch', tag/)
     const injected = `${text}
       const ok = (await run('git', ['clone', '--depth', '1', REPO_UI_URL], { cwd })).ok
       const r = await cloneRepo({ url: REPO_UI_URL, targetDir: uiDir, onData: log })`
@@ -160,8 +162,9 @@ test.describe('source: update checks target the pin', () => {
 
   test('control: a check that reads GitHub\'s latest tag as the target is flagged', () => {
     const text = mainJs()
-    expect(handlerBody(text, 'check-all-updates')).toMatch(/movesToPin\(backendInstalled\)/)
-    const reverted = text.replace('const backendLatest = EMBER_TAG', 'const backendLatest = backendRelease?.tag_name || null')
+    const body = handlerBody(text, 'check-all-updates')
+    expect(body).toMatch(/movesToPin\(backendInstalled\)/)
+    const reverted = text.replace(body, body.replace('latest: EMBER_TAG,', 'latest: backendRelease?.tag_name || null,'))
     expect(reverted).not.toBe(text)
     expect(checksOffThePin(reverted)).toEqual(['check-all-updates'])
   })
@@ -174,7 +177,7 @@ test.describe('source: updates never pull a branch', () => {
 
   test('control: the scan sees the real moveToTag calls and flags an injected pull', () => {
     const text = srcText()
-    expect((text.match(/await moveToTag\(\{/g) || []).length).toBeGreaterThanOrEqual(4)
+    expect((text.match(/await moveToTag\(\{/g) || []).length).toBeGreaterThanOrEqual(2)
     expect(text).toMatch(/run\('ollama', \['pull'/)
     const injected = `${text}
       const pullOk = (await run('git', ['pull', 'origin', 'main'], { cwd: uiDir })).ok`

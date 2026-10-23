@@ -35,13 +35,13 @@ async function moveToTag({ cwd, tag, onData, resetFiles = [] }) {
   const git = (args, opts = {}) => run('git', args, { cwd, ...opts })
   const fail = (error) => ({ ok: false, error })
 
-  const top = await git(['rev-parse', '--show-toplevel'])
-  if (top.error !== null) return fail(top.error)
-  if (!top.ok || !samePath(top.stdout.trim(), cwd)) return fail(`${cwd} is not a git repository`)
-
-  const shallow = await git(['rev-parse', '--is-shallow-repository'])
-  if (!shallow.ok) return fail(shallow.error || `${cwd} is not a git repository`)
-  if (shallow.stdout.trim() !== 'true') {
+  // One call answers steps 0 and 1: the top of the repository, then whether
+  // it is shallow, one per line.
+  const probe = await git(['rev-parse', '--show-toplevel', '--is-shallow-repository'])
+  if (probe.error !== null) return fail(probe.error)
+  const [top, shallow] = probe.stdout.trim().split(/\r?\n/)
+  if (!probe.ok || !samePath(top, cwd)) return fail(`${cwd} is not a git repository`)
+  if (shallow !== 'true') {
     return fail(`${cwd} is a full git clone, not an installer install; update it with git yourself`)
   }
 

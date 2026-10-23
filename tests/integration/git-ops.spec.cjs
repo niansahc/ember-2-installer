@@ -7,12 +7,8 @@ const { test, expect } = require('@playwright/test')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { execFileSync } = require('child_process')
 const { run } = require('../../src/exec/run')
-
-const git = (args, cwd) => execFileSync('git', args, { cwd, stdio: 'ignore' })
-const commit = (cwd, msg) =>
-  git(['-c', 'user.email=t@example.com', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'commit', '-m', msg], cwd)
+const { git, commitAll } = require('./git-fixture.cjs')
 
 test.describe('run() git-family paths', () => {
   let tmp
@@ -28,8 +24,7 @@ test.describe('run() git-family paths', () => {
     fs.mkdirSync(repo)
     git(['init', '--initial-branch=main'], repo)
     fs.writeFileSync(path.join(repo, 'version.json'), '{"tag":"v9.9.9"}\n')
-    git(['add', '.'], repo)
-    commit(repo, 'init')
+    commitAll(repo, 'init')
     git(['tag', 'v1.2.3'], repo)
 
     const r = await run('git', ['describe', '--tags', '--abbrev=0'], { cwd: repo })
@@ -42,8 +37,7 @@ test.describe('run() git-family paths', () => {
     fs.mkdirSync(untagged)
     git(['init', '--initial-branch=main'], untagged)
     fs.writeFileSync(path.join(untagged, 'f.txt'), 'x')
-    git(['add', '.'], untagged)
-    commit(untagged, 'init')
+    commitAll(untagged, 'init')
 
     // check-ember-update maps this to installed = null.
     const r = await run('git', ['describe', '--tags', '--abbrev=0'], { cwd: untagged })
@@ -57,8 +51,7 @@ test.describe('run() git-family paths', () => {
     git(['init', '--initial-branch=main'], repo)
     const vf = path.join(repo, 'version.json')
     fs.writeFileSync(vf, '{"tag":"v1.0.0"}\n')
-    git(['add', '.'], repo)
-    commit(repo, 'init')
+    commitAll(repo, 'init')
     // Local edit: what moveToTag's reset (resetFiles) clears before the move.
     fs.writeFileSync(vf, '{"tag":"LOCAL-EDIT"}\n')
 

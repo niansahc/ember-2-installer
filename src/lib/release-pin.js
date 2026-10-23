@@ -31,4 +31,4 @@ function updateAction({ installed, pinned }) {
   return c === 0 ? 'current' : 'ahead'
 }
 
-module.exports = { releaseTag, updateAction }
+module.exports = { releaseTag, updateAction, SEMVER }
