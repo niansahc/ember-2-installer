@@ -34,6 +34,8 @@ function installedBackendVersion(emberPath) {
   }
 }
 
+const vPrefixed = (v) => (v && !v.startsWith('v') ? `v${v}` : v)
+
 function installedUiVersion(uiDir) {
   try {
     return JSON.parse(fs.readFileSync(path.join(uiDir, 'package.json'), 'utf-8')).version || null
@@ -251,31 +253,21 @@ ipcMain.handle('check-ember-update', async () => {
   const emberPath = getEmberPath()
   if (!emberPath) return { hasUpdate: false, error: 'No ember-2 path configured' }
 
-  let installed = null
-  const vf = path.join(emberPath, 'version.json')
-  if (fs.existsSync(vf)) {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(vf, 'utf-8'))
-      installed = parsed.version || parsed.tag || null
-      if (installed && !installed.startsWith('v')) installed = `v${installed}`
-    } catch {}
-  }
-
+  let installed = vPrefixed(installedBackendVersion(emberPath))
   if (!installed) {
     const describe = await run('git', ['describe', '--tags', '--abbrev=0'], { cwd: emberPath })
     installed = describe.ok ? describe.stdout.trim() : null
   }
 
-  const latest = await fetchLatestRelease()
-  if (!latest || !latest.tag_name) return { hasUpdate: false, installed }
-
-  const hasUpdate = installed && isNewer(latest.tag_name, installed)
+  // The target is the pinned release, not GitHub's latest; the release is
+  // fetched only for its notes.
+  const release = await fetchRelease(REPO_BACKEND_SLUG, EMBER_TAG)
   return {
-    hasUpdate,
+    hasUpdate: !!installed && updateAction({ installed, pinned: EMBER_TAG }) === 'update',
     installed: installed || 'unknown',
-    latest: displayVersion(latest.tag_name),
-    changelog: latest.body || '',
-    publishedAt: latest.published_at,
+    latest: displayVersion(EMBER_TAG),
+    changelog: release?.body || '',
+    publishedAt: release?.published_at,
   }
 })
 
@@ -851,34 +843,28 @@ ipcMain.handle('check-for-update', async () => {
   const emberPath = getEmberPath()
   if (!emberPath) return { hasUpdate: false }
 
-  let installed = null
-  const vf = path.join(emberPath, 'version.json')
-  if (fs.existsSync(vf)) {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(vf, 'utf-8'))
-      installed = parsed.version || parsed.tag || null
-      if (installed && !installed.startsWith('v')) installed = `v${installed}`
-    } catch {}
-  }
+  const installed = vPrefixed(installedBackendVersion(emberPath))
 
-  const latest = await fetchLatestRelease(REPO_BACKEND_SLUG)
-  if (!latest) return { hasUpdate: false }
+  // The target is the pinned release; the release is fetched for its notes.
+  const release = await fetchRelease(REPO_BACKEND_SLUG, EMBER_TAG)
+  if (!release) return { hasUpdate: false }
 
-  const hasUpdate = installed && isNewer(latest.tag_name, installed)
   return {
-    hasUpdate,
+    hasUpdate: !!installed && updateAction({ installed, pinned: EMBER_TAG }) === 'update',
     installedTag: installed,
-    latestTag: displayVersion(latest.tag_name),
-    changelog: latest.body || '',
-    publishedAt: latest.published_at,
+    latestTag: displayVersion(EMBER_TAG),
+    changelog: release.body || '',
+    publishedAt: release.published_at,
   }
 })
 
-function fetchLatestRelease(repo = REPO_BACKEND_SLUG) {
+// A repo's latest GitHub release, or the release for `tag` when given (the
+// pinned backend/UI release, whose notes the update rows show).
+function fetchRelease(repo = REPO_BACKEND_SLUG, tag = null) {
   return new Promise((resolve) => {
     const options = {
       hostname: 'api.github.com',
-      path: `/repos/${repo}/releases/latest`,
+      path: `/repos/${repo}/releases/${tag ? `tags/${tag}` : 'latest'}`,
       headers: { 'User-Agent': 'ember-2-installer' },
     }
     https.get(options, (res) => {
@@ -895,10 +881,10 @@ function fetchLatestRelease(repo = REPO_BACKEND_SLUG) {
   })
 }
 
-function fetchLatestReleaseWithTimeout(repo, timeoutMs = 4000) {
+function fetchReleaseWithTimeout(repo, tag = null, timeoutMs = 4000) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(null), timeoutMs)
-    fetchLatestRelease(repo).then((result) => {
+    fetchRelease(repo, tag).then((result) => {
       clearTimeout(timer)
       resolve(result)
     }).catch(() => {
@@ -913,9 +899,12 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
   const uiDir = emberPath ? uiSourceDir(emberPath) : null
 
   const [installerRelease, backendRelease, uiRelease, healthData] = await Promise.all([
-    fetchLatestReleaseWithTimeout(REPO_INSTALLER_SLUG),
-    fetchLatestReleaseWithTimeout(REPO_BACKEND_SLUG),
-    fetchLatestReleaseWithTimeout(REPO_UI_SLUG),
+    fetchReleaseWithTimeout(REPO_INSTALLER_SLUG),
+    // Backend and UI: the pinned release, for its notes. Their target is the
+    // pin, never GitHub's latest: a newer backend or UI release reaches users
+    // with the installer release that pins it.
+    fetchReleaseWithTimeout(REPO_BACKEND_SLUG, EMBER_TAG),
+    fetchReleaseWithTimeout(REPO_UI_SLUG, EMBER_TAG),
     // Get backend version from running API, not version.json
     new Promise((resolve) => {
       const targetHost = host || '127.0.0.1'
@@ -936,29 +925,15 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
   const installerLatest = displayVersion(installerRelease?.tag_name) || null
 
   // Backend version: prefer running API, fall back to version.json on disk.
-  // If neither is available, we can't verify — flag as needing update.
+  // If neither is available, we can't verify, so updateAction moves it to the pin.
   let backendInstalled = healthData?.version || null
   const backendApiRunning = !!healthData
-  if (!backendInstalled && emberPath) {
-    try {
-      const vf = path.join(emberPath, 'version.json')
-      if (fs.existsSync(vf)) {
-        const parsed = JSON.parse(fs.readFileSync(vf, 'utf-8'))
-        backendInstalled = parsed.version || parsed.tag || null
-        if (backendInstalled && !backendInstalled.startsWith('v')) backendInstalled = `v${backendInstalled}`
-      }
-    } catch {}
-  }
-  const backendLatest = backendRelease?.tag_name || null
+  if (!backendInstalled && emberPath) backendInstalled = vPrefixed(installedBackendVersion(emberPath))
+  const backendLatest = EMBER_TAG
 
-  let uiInstalled = null
-  if (uiDir) {
-    try {
-      const pkg = JSON.parse(fs.readFileSync(path.join(uiDir, 'package.json'), 'utf-8'))
-      uiInstalled = pkg.version || null
-    } catch {}
-  }
-  const uiLatest = displayVersion(uiRelease?.tag_name) || null
+  const uiInstalled = uiDir ? installedUiVersion(uiDir) : null
+  const uiLatest = displayVersion(EMBER_TAG)
+  const movesToPin = (installed) => updateAction({ installed, pinned: EMBER_TAG }) === 'update'
 
   // Linux and macOS have no in-app installer self-update (isManualPlatform in
   // src/lib/installer-update.js), so don't offer the installer update there:
@@ -976,14 +951,14 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
       notes: releaseSummary(installerRelease?.body),
     },
     backend: {
-      hasUpdate: backendLatest && (!backendInstalled || isNewer(backendLatest, backendInstalled)),
+      hasUpdate: movesToPin(backendInstalled),
       installed: backendInstalled || 'unknown',
       latest: backendLatest,
       apiRunning: backendApiRunning,
       notes: releaseSummary(backendRelease?.body),
     },
     ui: {
-      hasUpdate: uiLatest && (!uiInstalled || isNewer(uiLatest, uiInstalled)),
+      hasUpdate: movesToPin(uiInstalled),
       installed: uiInstalled || 'unknown',
       latest: uiLatest,
       notes: releaseSummary(uiRelease?.body),
@@ -1724,17 +1699,18 @@ if (DEMO_MODE) {
           latest: '0.7.0',
           notes: 'Update screen learned to glow when it works.',
         },
+        // Backend and UI target the pin, as in real mode.
         backend: {
           hasUpdate: true,
-          installed: 'v0.13.1',
-          latest: 'v0.14.0',
+          installed: 'v0.17.0',
+          latest: EMBER_TAG,
           apiRunning: true,
           notes: 'Faster retrieval and a steadier conversation memory.',
         },
         ui: {
           hasUpdate: true,
-          installed: '0.5.3',
-          latest: '0.6.0',
+          installed: '0.17.0',
+          latest: displayVersion(EMBER_TAG),
           notes: 'Citation popovers and a calmer empty state.',
         },
       }
@@ -1742,8 +1718,8 @@ if (DEMO_MODE) {
     return {
       reachable: true,
       installer: { hasUpdate: false, installed: app.getVersion(), latest: app.getVersion() },
-      backend: { hasUpdate: false, installed: 'v0.13.1 (demo)', latest: 'v0.13.1', apiRunning: true },
-      ui: { hasUpdate: false, installed: '0.5.3 (demo)', latest: '0.5.3' },
+      backend: { hasUpdate: false, installed: `${EMBER_TAG} (demo)`, latest: EMBER_TAG, apiRunning: true },
+      ui: { hasUpdate: false, installed: `${displayVersion(EMBER_TAG)} (demo)`, latest: displayVersion(EMBER_TAG) },
     }
   })
 
@@ -1757,7 +1733,7 @@ if (DEMO_MODE) {
       if (updates.backend) {
         log('Updating Ember backend...\n')
         await wait(1500)
-        log('  moved to v0.14.0\n')
+        log(`  moved to ${EMBER_TAG}\n`)
         await wait(900)
       }
       if (updates.ui) {
@@ -1831,13 +1807,13 @@ if (DEMO_MODE) {
   ipcMain.removeHandler('check-ember-update')
   ipcMain.handle('check-ember-update', async () => {
     await sleep(600)
-    return { hasUpdate: false, installed: 'v0.9.3', latest: 'v0.9.3' }
+    return { hasUpdate: false, installed: EMBER_TAG, latest: displayVersion(EMBER_TAG) }
   })
 
   ipcMain.removeHandler('run-ember-update')
   ipcMain.handle('run-ember-update', async () => {
     const steps = [
-      'Already up to date.\n',
+      `ember-2 is already at ${EMBER_TAG}, the release this installer pins.\n`,
       'Requirements already satisfied.\n',
       'Services restarted.\n',
     ]
@@ -1845,7 +1821,7 @@ if (DEMO_MODE) {
       sendLog('ember-update-log', text)
       await sleep(800)
     }
-    return { ok: true, tag: 'v0.9.3' }
+    return { ok: true, tag: EMBER_TAG }
   })
 
   ipcMain.removeHandler('check-docker-daemon')
@@ -1923,7 +1899,7 @@ if (DEMO_MODE) {
   // Override update/fresh install — simulate
   ipcMain.removeHandler('update-existing-ember')
   ipcMain.handle('update-existing-ember', async (_e, { emberPath }) => {
-    const msgs = ['Already up to date.\n']
+    const msgs = [`ember-2 is already at ${EMBER_TAG}, the release this installer pins.\n`]
     for (const msg of msgs) {
       sendLog('clone-progress', msg)
       await sleep(600)

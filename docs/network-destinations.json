@@ -12,7 +12,7 @@
     },
     {
       "host": "api.github.com",
-      "purpose": "Latest-release checks for installer, backend and UI",
+      "purpose": "Latest-release check for the installer; release notes for the pinned backend and UI releases",
       "triggeredBy": "check-all-updates, check-ember-update, check-for-update",
       "process": "electron main",
       "source": "code:src/main.js",

@@ -92,6 +92,38 @@ test.describe('source: every clone goes to the pinned tag', () => {
   })
 })
 
+// The real (non-demo) handler body: registered at column 0, demo overrides are
+// indented inside the DEMO_MODE block.
+const handlerBody = (text, channel) =>
+  (text.match(new RegExp(`^ipcMain\\.handle\\('${channel}'[\\s\\S]*?^\\}\\)`, 'm')) || [''])[0]
+
+const UPDATE_CHECKS = ['check-all-updates', 'check-for-update', 'check-ember-update']
+
+// Update checks whose backend/UI target is not the pin: they read a GitHub
+// release's tag_name as the target, or never mention the pin.
+function checksOffThePin(text) {
+  return UPDATE_CHECKS.filter((ch) => {
+    const body = handlerBody(text, ch)
+    return !body || /(backendRelease|uiRelease|latest)\?*\.tag_name/.test(body) || !/EMBER_TAG/.test(body)
+  })
+}
+
+test.describe('source: update checks target the pin', () => {
+  const mainJs = () => fs.readFileSync(path.join(SRC, 'main.js'), 'utf8')
+
+  test('check-all-updates, check-for-update and check-ember-update compare against the pin', () => {
+    expect(checksOffThePin(mainJs())).toEqual([])
+  })
+
+  test('control: a check that reads GitHub\'s latest tag as the target is flagged', () => {
+    const text = mainJs()
+    expect(handlerBody(text, 'check-all-updates')).toMatch(/movesToPin\(backendInstalled\)/)
+    const reverted = text.replace('const backendLatest = EMBER_TAG', 'const backendLatest = backendRelease?.tag_name || null')
+    expect(reverted).not.toBe(text)
+    expect(checksOffThePin(reverted)).toEqual(['check-all-updates'])
+  })
+})
+
 test.describe('source: updates never pull a branch', () => {
   test('no git pull in src/', () => {
     expect(gitPulls(srcText())).toEqual([])
