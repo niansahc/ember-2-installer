@@ -45,8 +45,7 @@ test.describe('run() git-family paths', () => {
     git(['add', '.'], untagged)
     commit(untagged, 'init')
 
-    // check-ember-update maps this to installed = null; run-ember-update (the
-    // preserved divergence) maps it to the empty printed string instead.
+    // check-ember-update maps this to installed = null.
     const r = await run('git', ['describe', '--tags', '--abbrev=0'], { cwd: untagged })
     expect(r.ok).toBe(false)
     expect(r.error).toBeNull() // it exited non-zero; it did not fail to spawn
@@ -60,7 +59,7 @@ test.describe('run() git-family paths', () => {
     fs.writeFileSync(vf, '{"tag":"v1.0.0"}\n')
     git(['add', '.'], repo)
     commit(repo, 'init')
-    // Local edit — this is what blocks git pull in production before the reset.
+    // Local edit: what moveToTag's reset (resetFiles) clears before the move.
     fs.writeFileSync(vf, '{"tag":"LOCAL-EDIT"}\n')
 
     const r = await run('git', ['checkout', '--', 'version.json'], { cwd: repo })

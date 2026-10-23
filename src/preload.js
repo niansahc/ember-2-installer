@@ -37,7 +37,6 @@ contextBridge.exposeInMainWorld('ember', {
     ipcRenderer.invoke('run-install-step', { step, emberPath }),
 
   checkForUpdate: () => ipcRenderer.invoke('check-for-update'),
-  runGitPull: () => ipcRenderer.invoke('run-git-pull'),
   checkAllUpdates: (host) => ipcRenderer.invoke('check-all-updates', { host }),
   runAllUpdates: (updates, host) => ipcRenderer.invoke('run-all-updates', { updates, host }),
   onUpdateAllLog: (fn) => ipcRenderer.on('update-all-log', (_e, text) => fn(text)),

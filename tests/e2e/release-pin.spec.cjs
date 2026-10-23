@@ -28,6 +28,12 @@ function unpinnedClones(text) {
   return [...rawClones.map((l) => l.trim()), ...cloneRepoCalls]
 }
 
+// git pulls: updates move to the pinned tag (moveToTag), never pull a branch.
+// `ollama pull` is a model download and is not matched.
+const gitPulls = (text) => text.split(/\r?\n/)
+  .filter((l) => /run\('git',\s*\['pull'/.test(l) || /'pull',\s*'origin'/.test(l))
+  .map((l) => l.trim())
+
 test.describe('releaseTag', () => {
   test('returns v<emberRelease>', () => {
     expect(releaseTag({ emberRelease: '0.18.1' })).toBe('v0.18.1')
@@ -82,6 +88,23 @@ test.describe('source: every clone goes to the pinned tag', () => {
     expect(unpinnedClones(injected)).toEqual([
       "const ok = (await run('git', ['clone', '--depth', '1', REPO_UI_URL], { cwd })).ok",
       'cloneRepo({ url: REPO_UI_URL, targetDir: uiDir, onData: log })',
+    ])
+  })
+})
+
+test.describe('source: updates never pull a branch', () => {
+  test('no git pull in src/', () => {
+    expect(gitPulls(srcText())).toEqual([])
+  })
+
+  test('control: the scan sees the real moveToTag calls and flags an injected pull', () => {
+    const text = srcText()
+    expect((text.match(/await moveToTag\(\{/g) || []).length).toBeGreaterThanOrEqual(4)
+    expect(text).toMatch(/run\('ollama', \['pull'/)
+    const injected = `${text}
+      const pullOk = (await run('git', ['pull', 'origin', 'main'], { cwd: uiDir })).ok`
+    expect(gitPulls(injected)).toEqual([
+      "const pullOk = (await run('git', ['pull', 'origin', 'main'], { cwd: uiDir })).ok",
     ])
   })
 })

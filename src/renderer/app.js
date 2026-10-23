@@ -1724,12 +1724,12 @@ document.getElementById('btn-run-ember-update').addEventListener('click', () => 
       loadEmberVersion()
     } else {
       btn.textContent = 'Failed'
-      logBox.textContent += '\nUpdate failed. Try running git pull manually.\n'
+      logBox.textContent += '\nUpdate failed. See the log above.\n'
       btn.disabled = false
     }
   }, {
     errorEl: logBox,
-    errorMsg: 'Update failed. Try running git pull manually.',
+    errorMsg: 'Update failed. See the log above.',
     onError: () => window.ember.removeAllListeners('ember-update-log'),
   })
 })
