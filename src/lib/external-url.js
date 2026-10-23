@@ -2,12 +2,12 @@
 // deps) so it can be unit-tested; main.js uses it for open-url, for links and
 // window.open (setWindowOpenHandler), and for navigation away from the app page.
 //
-// The URL is parsed, not prefix-matched, so https://github.com.evil.test and
-// http://localhost.evil.test do not pass.
+// The URL is parsed, not prefix-matched, so lookalike hosts such as
+// github.com.evil.test and localhost.evil.test do not pass.
 
-// Download pages, docs and app-store links the renderer opens. Keep in step with
-// browserLinks.hosts in docs/network-destinations.json (added by the network-gate
-// PR, #47); a test pinning the two equal follows once both have merged.
+// Download pages, docs and app-store links the renderer opens. Must equal
+// browserLinks.hosts in docs/network-destinations.json; tests/netgate/
+// declared-drift.test.cjs fails when the two differ.
 const ALLOWED_EXTERNAL_HOSTS = new Set([
   'github.com',
   'git-scm.com',

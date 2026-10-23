@@ -1,0 +1,25 @@
+{
+  "$comment": "Gate harness facts for a VirtualBox NAT guest. localFlows are the only NAT-subnet destinations the guest may reach; any other 10.0.2.x flow fails the gate (the guest must not touch host services other than SearXNG). installerRoots and installerTools are image-basename regexes that define the installer set for os-noise attribution.",
+  "guestIp": "10.0.2.15",
+  "natSubnet": "10.0.2.0/24",
+  "natBroadcast": "10.0.2.255",
+  "localFlows": [
+    { "ip": "10.0.2.2", "port": 8888, "proto": "tcp", "purpose": "host SearXNG via guest portproxy 127.0.0.1:8888" },
+    { "ip": "10.0.2.3", "port": 53, "proto": "udp", "purpose": "VirtualBox NAT DNS proxy" },
+    { "ip": "10.0.2.3", "port": 53, "proto": "tcp", "purpose": "VirtualBox NAT DNS proxy" },
+    { "ip": "10.0.2.2", "port": 67, "proto": "udp", "purpose": "VirtualBox NAT DHCP" }
+  ],
+  "installerRoots": ["^Ember Setup"],
+  "installerTools": [
+    "^ollama\\.exe$",
+    "^ollama app\\.exe$",
+    "^winget\\.exe$",
+    "^WindowsPackageManagerServer\\.exe$",
+    "^git\\.exe$",
+    "^git-remote-https\\.exe$",
+    "^python\\.exe$",
+    "^pythonw\\.exe$",
+    "^pip3?\\.exe$",
+    "^node\\.exe$"
+  ]
+}

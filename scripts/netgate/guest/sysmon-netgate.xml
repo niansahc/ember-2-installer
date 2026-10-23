@@ -1,0 +1,16 @@
+<!--
+  Fresh-install network capture gate: Sysmon config for the throwaway guest.
+  Logs every process create (EID 1), network connect (EID 3) and DNS query
+  (EID 22) with no filters, so every destination can be tied to a process.
+  Everything else is off. Install with: Sysmon64.exe -accepteula -i sysmon-netgate.xml
+-->
+<Sysmon schemaversion="4.90">
+  <HashAlgorithms>none</HashAlgorithms>
+  <EventFiltering>
+    <RuleGroup name="netgate" groupRelation="or">
+      <ProcessCreate onmatch="exclude" />
+      <NetworkConnect onmatch="exclude" />
+      <DnsQuery onmatch="exclude" />
+    </RuleGroup>
+  </EventFiltering>
+</Sysmon>

@@ -39,3 +39,6 @@ jobs:
 
       - name: Run hermetic integration tests
         run: npm run test:integration
+
+      - name: Run network gate logic and declared-list drift tests
+        run: npm run test:netgate
