@@ -19,6 +19,7 @@ const { API_PKILL_PATTERN, apiSpawnSpec } = require('./lib/api-launch')
 const { releaseTag, rowInstalled } = require('./lib/release-pin')
 const { releaseFromResponse } = require('./lib/github-release')
 const { moveToTag } = require('./exec/move-to-tag')
+const { replaceWithClone } = require('./exec/aside')
 const { pinAction, uiUpdateAction } = require('./exec/pin-action')
 const { installedBackendVersion, installedUiVersion, recordBuiltUiTag } = require('./exec/installed')
 
@@ -423,11 +424,7 @@ ipcMain.handle('clone-ember-repo', async (_e, { parentDir }) => {
   if (fs.existsSync(targetDir)) {
     return { ok: true, path: targetDir, message: 'Already exists' }
   }
-  try {
-    fs.mkdirSync(parentDir, { recursive: true })
-  } catch (err) {
-    return { ok: false, error: `Cannot create directory: ${err.message}` }
-  }
+  // cloneRepo creates parentDir.
   const result = await cloneRepo({
     targetDir,
     tag: EMBER_TAG,
@@ -465,22 +462,21 @@ ipcMain.handle('update-existing-ember', async (_e, { emberPath }) => {
   return { ok: true, path: emberPath }
 })
 
+// The existing ember-2 is set aside, not deleted, until the new clone is in
+// place: a failed clone puts it back (src/exec/aside.js).
 ipcMain.handle('fresh-install-ember', async (_e, { parentDir }) => {
   const targetDir = path.join(parentDir, 'ember-2')
-  try {
-    if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true })
-  } catch (err) {
-    return { ok: false, error: `Cannot remove existing directory: ${err.message}` }
-  }
-  const result = await cloneRepo({
-    targetDir,
-    tag: EMBER_TAG,
-    onData: (text) => sendLog('clone-progress', text),
+  const log = (text) => sendLog('clone-progress', text)
+  const result = await replaceWithClone({
+    dir: targetDir,
+    clone: () => cloneRepo({ targetDir, tag: EMBER_TAG, onData: log }),
   })
+  if (result.aside) log(`The previous installation could not be removed and is at ${result.aside}.\n`)
   if (result.ok) {
     saveEmberPath(targetDir)
     return { ok: true, path: targetDir }
   }
+  log(`${result.error}\n`)
   return { ok: false, error: result.error }
 })
 

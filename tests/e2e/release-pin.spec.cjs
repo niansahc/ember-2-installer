@@ -31,12 +31,13 @@ let srcCache
 const srcText = () => (srcCache ??= sourceFiles(SRC).map((f) => fs.readFileSync(f, 'utf8')).join('\n'))
 
 // Clone calls that do not go to the pinned tag: a raw git clone (an argument
-// list starting with 'clone') without --branch, or a cloneRepo call (always
-// awaited) without the pin. The UI action string 'clone' is not a git call.
+// list starting with 'clone') without --branch, or a cloneRepo call, awaited
+// or not, that passes no tag (EMBER_TAG, or `tag` where a helper takes the pin
+// as a parameter). The UI action string 'clone' is not a git call.
 function unpinnedClones(text) {
   const rawClones = text.split(/\r?\n/).filter((l) => /\[\s*'clone',/.test(l) && !/'--branch'/.test(l))
-  const cloneRepoCalls = [...text.matchAll(/(?<=await )cloneRepo\(\{[\s\S]*?\}\)/g)].map((m) => m[0])
-    .filter((call) => !/tag: EMBER_TAG/.test(call))
+  const cloneRepoCalls = [...text.matchAll(/(?<!function )\bcloneRepo\(\{[\s\S]*?\}\)/g)].map((m) => m[0])
+    .filter((call) => !/\btag(: EMBER_TAG)?\s*[,}]/.test(call))
   return [...rawClones.map((l) => l.trim()), ...cloneRepoCalls]
 }
 
@@ -158,14 +159,16 @@ test.describe('source: every clone goes to the pinned tag', () => {
 
   test('control: the scan sees the real clone calls and flags unpinned ones', () => {
     const text = srcText()
-    expect((text.match(/await cloneRepo\(\{/g) || []).length).toBeGreaterThanOrEqual(3)
+    expect((text.match(/(?<!function )\bcloneRepo\(\{/g) || []).length).toBeGreaterThanOrEqual(3)
     expect(text).toMatch(/'clone', '--depth', '1', '--branch', tag/)
     const injected = `${text}
       const ok = (await run('git', ['clone', '--depth', '1', REPO_UI_URL], { cwd })).ok
-      const r = await cloneRepo({ url: REPO_UI_URL, targetDir: uiDir, onData: log })`
+      const r = await cloneRepo({ url: REPO_UI_URL, targetDir: uiDir, onData: log })
+      const later = () => cloneRepo({ targetDir, onData: log })`
     expect(unpinnedClones(injected)).toEqual([
       "const ok = (await run('git', ['clone', '--depth', '1', REPO_UI_URL], { cwd })).ok",
       'cloneRepo({ url: REPO_UI_URL, targetDir: uiDir, onData: log })',
+      'cloneRepo({ targetDir, onData: log })',
     ])
   })
 })
@@ -258,6 +261,10 @@ function unrecordedUiCopies(text) {
   })
 }
 
+// fresh-install-ember deleting the existing install itself. It sets it aside
+// (replaceWithClone), so a failed clone can put it back.
+const deletesBeforeClone = (text) => /rmSync\(/.test(handlerBody(text, 'fresh-install-ember'))
+
 test.describe('source: install and update handlers', () => {
   const mainJs = () => fs.readFileSync(path.join(SRC, 'main.js'), 'utf8')
 
@@ -299,6 +306,23 @@ test.describe('source: install and update handlers', () => {
     const unrecorded = text.replace('      recordBuiltUiTag(targetUiDir, EMBER_TAG)\n', '').replace('      recordBuiltUiTag(targetUiDir, EMBER_TAG)\r\n', '')
     expect(unrecorded).not.toBe(text)
     expect(unrecordedUiCopies(unrecorded)).toEqual(["fs.cpSync(path.join(uiDir, 'dist'), targetUiDir, { recursive: true })"])
+  })
+
+  test('fresh-install-ember sets the old install aside, never deletes it first', () => {
+    const text = mainJs()
+    expect(handlerBody(text, 'fresh-install-ember')).toMatch(/replaceWithClone\(\{/)
+    expect(deletesBeforeClone(text)).toBe(false)
+  })
+
+  test('control: a delete before the clone is flagged', () => {
+    const text = mainJs()
+    const body = handlerBody(text, 'fresh-install-ember')
+    const deleting = text.replace(body, body.replace(
+      "const log = (text) => sendLog('clone-progress', text)",
+      "const log = (text) => sendLog('clone-progress', text)\n  if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true })",
+    ))
+    expect(deleting).not.toBe(text)
+    expect(deletesBeforeClone(deleting)).toBe(true)
   })
 })
 
