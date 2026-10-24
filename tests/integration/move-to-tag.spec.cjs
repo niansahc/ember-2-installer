@@ -158,6 +158,72 @@ test.describe('moveToTag', () => {
     expect(head(dir)).toBe(recut)
   })
 
+  test('a reset file edited before a failed fetch is left as it was', async () => {
+    const dir = clone('install', ['--depth', '1', '--branch', 'v1.0.0'])
+    fs.writeFileSync(path.join(dir, 'version.json'), '{"tag":"v1.0.0"}\n')
+    const r = await move(dir, { tag: 'v9.9.9', resetFiles: ['version.json'] })
+    expect(r.ok).toBe(false)
+    expect(head(dir)).toBe(repo.ids['v1.0.0'])
+    expect(fs.readFileSync(path.join(dir, 'version.json'), 'utf8')).toBe('{"tag":"v1.0.0"}\n')
+  })
+
+  test('control: the same edit is reset when the fetch succeeds', async () => {
+    const dir = clone('install', ['--depth', '1', '--branch', 'v1.0.0'])
+    fs.writeFileSync(path.join(dir, 'version.json'), '{"tag":"v1.0.0"}\n')
+    expect(await move(dir, { resetFiles: ['version.json'] })).toEqual({ ok: true })
+    expect(JSON.parse(fs.readFileSync(path.join(dir, 'version.json'), 'utf8'))).toEqual({ version: '1.1.0' })
+  })
+
+  // A url.<base>.insteadOf rewrite, set through the environment for one call
+  // only: the seed's file:// URL is rewritten to its plain path, which still
+  // fetches, and git remote get-url reports the plain path.
+  const withRewrite = async (fn) => {
+    const env = {
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: `url.${path.join(seedDir, 'src.git')}.insteadOf`,
+      GIT_CONFIG_VALUE_0: repo.url,
+    }
+    const saved = Object.fromEntries(Object.keys(env).map((k) => [k, process.env[k]]))
+    Object.assign(process.env, env)
+    try {
+      return await fn()
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+  }
+
+  test('an insteadOf rewrite of the origin URL does not refuse the move', async () => {
+    const dir = clone('install', ['--depth', '1', '--branch', 'v1.0.0'])
+    expect(await withRewrite(() => move(dir))).toEqual({ ok: true })
+    expect(head(dir)).toBe(repo.ids['v1.1.0'])
+  })
+
+  test('control: under the rewrite, git remote get-url reports another URL', async () => {
+    const dir = clone('install', ['--depth', '1', '--branch', 'v1.0.0'])
+    const rewritten = await withRewrite(() => gitOut(['remote', 'get-url', 'origin'], dir))
+    expect(rewritten).toBe(path.join(seedDir, 'src.git'))
+  })
+
+  const CREDENTIALED = 'https://someone:synthetic-token-123@example.invalid/x/src.git'
+
+  test('the refusal never shows credentials stored in the origin URL', async () => {
+    const dir = clone('install', ['--depth', '1', '--branch', 'v1.0.0'])
+    git(['remote', 'set-url', 'origin', CREDENTIALED], dir)
+    const r = await move(dir)
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('is a clone of https://example.invalid/x/src.git, not ')
+    expect(r.error).not.toContain('synthetic-token-123')
+  })
+
+  test('control: the stored origin URL does carry the credentials', async () => {
+    const dir = clone('install', ['--depth', '1', '--branch', 'v1.0.0'])
+    git(['remote', 'set-url', 'origin', CREDENTIALED], dir)
+    expect(gitOut(['config', '--get', 'remote.origin.url'], dir)).toBe(CREDENTIALED)
+  })
+
   test('a directory that is not a git repository fails', async () => {
     const dir = path.join(tmp, 'plain')
     fs.mkdirSync(dir)
