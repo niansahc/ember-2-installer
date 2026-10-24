@@ -25,11 +25,18 @@ const { installedBackendVersion, installedUiVersion, recordBackendSetup } = requ
 const { runBackendSetup } = require('./exec/backend-setup')
 const { uiToPin, uiNeedsBuild, uiBuildIsPin } = require('./exec/ui-to-pin')
 const { buildAndServeUi } = require('./exec/ui-build')
+const { createExclusive } = require('./lib/exclusive')
 
 // The ember-2 / ember-2-ui release tag this installer clones and updates to,
 // and its version as the update rows show it.
 const EMBER_TAG = releaseTag(require('../package.json'))
 const EMBER_VERSION = displayVersion(EMBER_TAG)
+
+// One clone, move, build or update at a time (src/lib/exclusive.js). A
+// handler wrapped in locked() refuses while another runs, logs why with log,
+// and resolves { ok: false, busy: true, error }.
+const exclusive = createExclusive()
+const locked = (label, log, handler) => (...args) => exclusive(label, () => handler(...args), (error) => log(`${error}\n`))
 
 // Backend actions (backendUpdateAction in src/exec/pin-action.js) that an
 // update acts on: 'update' moves the clone and then runs the setup, 'finish'
@@ -378,7 +385,7 @@ ipcMain.handle('check-ember-update', async () => {
   return { hasUpdate: backendNeedsSetup(action), installed: installed || 'unknown', latest: EMBER_VERSION }
 })
 
-ipcMain.handle('run-ember-update', async () => {
+ipcMain.handle('run-ember-update', locked('An update', (text) => sendLog('ember-update-log', text), async () => {
   const emberPath = getEmberPath()
   if (!emberPath) return { ok: false }
 
@@ -391,7 +398,7 @@ ipcMain.handle('run-ember-update', async () => {
   if (!backendNeedsSetup(backend.action)) return { ok: true, tag: vPrefixed(installedBackendVersion(emberPath)) }
   const setup = await setUpBackend(emberPath, null, backend.action, emberLog)
   return { ok: true, pipOk: setup.pipOk, dockerOk: setup.dockerOk, tag: EMBER_TAG }
-})
+}))
 
 ipcMain.handle('check-prerequisites', async () => {
   const isWin = process.platform === 'win32'
@@ -479,7 +486,7 @@ ipcMain.handle('pick-ember-folder', async () => {
   return result.canceled ? null : result.filePaths[0]
 })
 
-ipcMain.handle('clone-ember-repo', async (_e, { parentDir }) => {
+ipcMain.handle('clone-ember-repo', locked('Downloading Ember-2', (text) => sendLog('clone-progress', text), async (_e, { parentDir }) => {
   const targetDir = path.join(parentDir, 'ember-2')
   if (fs.existsSync(targetDir)) {
     return { ok: true, path: targetDir, message: 'Already exists' }
@@ -495,7 +502,7 @@ ipcMain.handle('clone-ember-repo', async (_e, { parentDir }) => {
     return { ok: true, path: targetDir }
   }
   return { ok: false, error: result.error }
-})
+}))
 
 ipcMain.handle('check-target-path', (_e, { parentDir }) => {
   const targetDir = path.join(parentDir, 'ember-2')
@@ -510,7 +517,7 @@ ipcMain.handle('check-target-path', (_e, { parentDir }) => {
   }
 })
 
-ipcMain.handle('update-existing-ember', async (_e, { emberPath }) => {
+ipcMain.handle('update-existing-ember', locked('An update', (text) => sendLog('clone-progress', text), async (_e, { emberPath }) => {
   const log = (chunk) => sendLog('clone-progress', chunk)
   const r = await moveBackendToPin(emberPath, log)
   if (!r.ok) {
@@ -520,11 +527,11 @@ ipcMain.handle('update-existing-ember', async (_e, { emberPath }) => {
   // The renderer saves the path on success (save-ember-path), so a refused or
   // failed move never replaces the saved install.
   return { ok: true, path: emberPath }
-})
+}))
 
 // The existing ember-2 is set aside, not deleted, until the new clone is in
 // place: a failed clone puts it back (src/exec/aside.js).
-ipcMain.handle('fresh-install-ember', async (_e, { parentDir }) => {
+ipcMain.handle('fresh-install-ember', locked('A fresh install', (text) => sendLog('clone-progress', text), async (_e, { parentDir }) => {
   const targetDir = path.join(parentDir, 'ember-2')
   const log = (text) => sendLog('clone-progress', text)
   const result = await replaceWithClone({
@@ -538,7 +545,7 @@ ipcMain.handle('fresh-install-ember', async (_e, { parentDir }) => {
   }
   log(`${result.error}\n`)
   return { ok: false, error: result.error }
-})
+}))
 
 ipcMain.handle('get-default-install-dir', () => {
   return process.platform === 'win32' ? 'C:\\Ember-2' : path.join(os.homedir(), 'Ember-2')
@@ -763,7 +770,11 @@ ipcMain.handle('setup-dev-mode', (_e, { emberPath, demoVault, testVault }) => {
 
 
 ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
-  const result = await runInstallStep(step, emberPath)
+  // build-ui is the step that touches ember-2-ui and ui/, which Update All
+  // and the Done screen's rebuild also do.
+  const result = step === 'build-ui'
+    ? await exclusive('The interface build', () => runInstallStep(step, emberPath), (error) => sendLog('install-log', { step, text: `${error}\n` }))
+    : await runInstallStep(step, emberPath)
   noteInstallStep(emberPath, step, result.ok)
   return result
 })
@@ -991,7 +1002,7 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
   }
 })
 
-ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
+ipcMain.handle('run-all-updates', locked('An update', (text) => sendLog('update-all-log', text), async (_e, { updates, host }) => {
   const emberPath = getEmberPath()
   if (!emberPath) return { ok: false, error: 'No ember-2 path configured' }
 
@@ -1042,7 +1053,7 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
   // The renderer will trigger this after backend/UI updates complete.
 
   return { ok: true, needsInstallerUpdate: !!updates.installer }
-})
+}))
 
 ipcMain.handle('check-ui-built', () => {
   const emberPath = getEmberPath()
