@@ -45,7 +45,7 @@ Key optimizations and features:
 
 Shipped release: v0.18.1 (2026-08-31). `package.json` `version` is 0.18.1, and `emberRelease` (the ember-2 / ember-2-ui tag the installer pins) is 0.18.1. The jump from 0.8.1 to 0.18.0 was deliberate: it aligned the installer with the ember-2 backend so all three repos share one number.
 
-199 e2e + 33 integration Playwright tests, 25 network-gate tests (`npm run test:netgate`), 349 hook tests. Builds and ships the Windows NSIS installer (primary, verified). The Linux AppImage now builds in CI; Mac DMG is configured but not built or verified. Neither Mac nor Linux is verified on real hardware.
+217 e2e + 53 integration Playwright tests, 25 network-gate tests (`npm run test:netgate`), 349 hook tests. Builds and ships the Windows NSIS installer (primary, verified). The Linux AppImage now builds in CI; Mac DMG is configured but not built or verified. Neither Mac nor Linux is verified on real hardware.
 
 ---
 
