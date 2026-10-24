@@ -99,6 +99,11 @@ test.describe('release gate', () => {
     expect(script).toContain("require('./package.json').emberRelease")
     expect(script).toContain('git ls-remote --exit-code --tags')
     expect(script).toMatch(/for repo in ember-2 ember-2-ui/)
+    // A missing tag (ls-remote exit 2) and an unreachable repo (any other
+    // failure) fail with different messages.
+    expect(script).toContain('|| status=$?')
+    expect(script).toContain('if [ "$status" -eq 2 ]; then')
+    expect(script).toMatch(/has no such tag[\s\S]*elif \[ "\$status" -ne 0 \][\s\S]*could not reach/)
     const publishJobs = Object.keys(wf.jobs).filter((k) => k.startsWith('publish-'))
     expect(publishJobs.sort()).toEqual(['publish-linux', 'publish-mac', 'publish-windows'])
     for (const k of publishJobs) expect([].concat(wf.jobs[k].needs || []), k).toContain('check-pinned-tags')

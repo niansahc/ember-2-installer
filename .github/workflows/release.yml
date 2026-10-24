@@ -47,8 +47,17 @@ jobs:
         run: |
           tag="v$(node -p "require('./package.json').emberRelease")"
           for repo in ember-2 ember-2-ui; do
-            git ls-remote --exit-code --tags "https://github.com/niansahc/$repo.git" "refs/tags/$tag" \
-              || { echo "::error::package.json emberRelease names $tag, but niansahc/$repo has no such tag"; exit 1; }
+            # --exit-code: 2 means the repo answered without the tag; any other
+            # failure means it could not be asked (network, DNS).
+            status=0
+            git ls-remote --exit-code --tags "https://github.com/niansahc/$repo.git" "refs/tags/$tag" || status=$?
+            if [ "$status" -eq 2 ]; then
+              echo "::error::package.json emberRelease names $tag, but niansahc/$repo has no such tag"
+              exit 1
+            elif [ "$status" -ne 0 ]; then
+              echo "::error::could not reach niansahc/$repo to look for $tag (git ls-remote exited $status); re-run the job"
+              exit 1
+            fi
           done
 
   publish-windows:
