@@ -1,6 +1,13 @@
-// Unit tests for the release pin (src/lib/release-pin.js) and a source check
-// that every clone in src/ goes to the pinned tag. Requires the modules
-// directly; no app launch.
+// The release pin, end to end except for real git (tests/integration covers
+// that). Requires the modules directly; no app launch. Covers:
+//   - releaseTag and updateAction (src/lib/release-pin.js)
+//   - the package.json pin rule (emberRelease against version)
+//   - the release.yml gate (check-pinned-tags)
+//   - source checks on src/: every clone goes to the pin, nothing pulls a
+//     branch, the update checks target the pin and never gate it on a known
+//     installed version, update-existing-ember never saves a refused path,
+//     run-ember-update reports a v-prefixed tag, and every UI build comes to
+//     the pin first and records its tag after the copy
 
 const { test, expect } = require('@playwright/test')
 const fs = require('fs')
@@ -23,10 +30,11 @@ function sourceFiles(dir) {
 let srcCache
 const srcText = () => (srcCache ??= sourceFiles(SRC).map((f) => fs.readFileSync(f, 'utf8')).join('\n'))
 
-// Clone calls that do not go to the pinned tag: a raw git clone without
-// --branch, or a cloneRepo call (always awaited) without the pin.
+// Clone calls that do not go to the pinned tag: a raw git clone (an argument
+// list starting with 'clone') without --branch, or a cloneRepo call (always
+// awaited) without the pin. The UI action string 'clone' is not a git call.
 function unpinnedClones(text) {
-  const rawClones = text.split(/\r?\n/).filter((l) => /'clone'/.test(l) && !/'--branch'/.test(l))
+  const rawClones = text.split(/\r?\n/).filter((l) => /\[\s*'clone',/.test(l) && !/'--branch'/.test(l))
   const cloneRepoCalls = [...text.matchAll(/(?<=await )cloneRepo\(\{[\s\S]*?\}\)/g)].map((m) => m[0])
     .filter((call) => !/tag: EMBER_TAG/.test(call))
   return [...rawClones.map((l) => l.trim()), ...cloneRepoCalls]
@@ -125,7 +133,7 @@ test.describe('source: every clone goes to the pinned tag', () => {
 
   test('control: the scan sees the real clone calls and flags unpinned ones', () => {
     const text = srcText()
-    expect((text.match(/await cloneRepo\(\{/g) || []).length).toBeGreaterThanOrEqual(4)
+    expect((text.match(/await cloneRepo\(\{/g) || []).length).toBeGreaterThanOrEqual(3)
     expect(text).toMatch(/'clone', '--depth', '1', '--branch', tag/)
     const injected = `${text}
       const ok = (await run('git', ['clone', '--depth', '1', REPO_UI_URL], { cwd })).ok
@@ -163,24 +171,25 @@ test.describe('source: update checks target the pin', () => {
   test('control: a check that reads GitHub\'s latest tag as the target is flagged', () => {
     const text = mainJs()
     const body = handlerBody(text, 'check-all-updates')
-    expect(body).toMatch(/movesToPin\(backendInstalled\)/)
+    expect(body).toMatch(/pinAction\(\{ cwd: emberPath, installed: backendInstalled/)
     const reverted = text.replace(body, body.replace('latest: EMBER_TAG,', 'latest: backendRelease?.tag_name || null,'))
     expect(reverted).not.toBe(text)
     expect(checksOffThePin(reverted)).toEqual(['check-all-updates'])
   })
 })
 
-// hasUpdate lines in the update checks that gate the pin comparison, e.g. an
-// `installed &&` guard that reports no update when the installed version is
-// unknown. An unknown version moves to the pin (updateAction), so every pin
-// hasUpdate is movesToPin(<installed>) alone. A check with no pin hasUpdate
-// line is flagged too, so the scan cannot pass by matching nothing.
+// Update checks that gate the pin decision, e.g. an `installed &&` guard that
+// reports no update when the installed version is unknown. The decision comes
+// from pinAction (src/exec/pin-action.js), which moves an unknown version to
+// the pin, so no backend or UI hasUpdate combines it with anything (&&); the
+// installer row is not a pin decision. A check that never asks pinAction is
+// flagged too, so the scan cannot pass by matching nothing.
 function guardedPinChecks(text) {
   return UPDATE_CHECKS.flatMap((ch) => {
     const lines = handlerBody(text, ch).split(/\r?\n/).map((l) => l.trim())
-      .filter((l) => /hasUpdate:.*movesToPin\(/.test(l))
-    if (!lines.length) return [`${ch}: no movesToPin hasUpdate`]
-    return lines.filter((l) => !/^hasUpdate: movesToPin\(\w+\),$/.test(l)).map((l) => `${ch}: ${l}`)
+    const asks = lines.some((l) => /movesToPin\(|pinAction\(|uiUpdateAction\(/.test(l))
+    const guarded = lines.filter((l) => /hasUpdate\b.*&&/.test(l) && !/installerSelfUpdate/.test(l))
+    return [...(asks ? [] : [`${ch}: never asks pinAction`]), ...guarded.map((l) => `${ch}: ${l}`)]
   })
 }
 
@@ -194,9 +203,77 @@ test.describe('source: an unknown installed version needs the pin', () => {
   test('control: an `installed &&` guard in check-for-update is flagged', () => {
     const text = mainJs()
     const body = handlerBody(text, 'check-for-update')
-    const guarded = text.replace(body, body.replace('hasUpdate: movesToPin(installed),', 'hasUpdate: !!installed && movesToPin(installed),'))
+    const guarded = text.replace(body, body.replace(
+      'hasUpdate: await movesToPin(emberPath, installed),',
+      'hasUpdate: !!installed && await movesToPin(emberPath, installed),',
+    ))
     expect(guarded).not.toBe(text)
-    expect(guardedPinChecks(guarded)).toEqual(['check-for-update: hasUpdate: !!installed && movesToPin(installed),'])
+    expect(guardedPinChecks(guarded)).toEqual([
+      'check-for-update: hasUpdate: !!installed && await movesToPin(emberPath, installed),',
+    ])
+  })
+})
+
+// update-existing-ember saving the path itself. The renderer saves it on
+// success (save-ember-path), so a save in the handler can only add the case
+// where the move was refused or failed.
+const savesExistingPath = (text) => /saveEmberPath\(/.test(handlerBody(text, 'update-existing-ember'))
+
+// run-ember-update tag values that are not v-prefixed (EMBER_TAG or vPrefixed).
+const bareUpdateTags = (text) => [...handlerBody(text, 'run-ember-update').matchAll(/\btag: (\w+)/g)]
+  .map((m) => m[1]).filter((v) => v !== 'EMBER_TAG' && v !== 'vPrefixed')
+
+// Copies of a UI build into the served directory with no recordBuiltUiTag
+// within the next three lines: the check would not know what was served.
+function unrecordedUiCopies(text) {
+  const lines = text.split(/\r?\n/)
+  return lines.flatMap((l, i) => {
+    const copy = /fs\.cpSync\((uiDistDir|path\.join\(uiDir, 'dist'\))/.test(l)
+    return copy && !lines.slice(i + 1, i + 4).some((n) => /recordBuiltUiTag\(/.test(n)) ? [l.trim()] : []
+  })
+}
+
+test.describe('source: install and update handlers', () => {
+  const mainJs = () => fs.readFileSync(path.join(SRC, 'main.js'), 'utf8')
+
+  test('update-existing-ember never saves the path itself', () => {
+    expect(handlerBody(mainJs(), 'update-existing-ember')).toMatch(/moveBackendToPin/)
+    expect(savesExistingPath(mainJs())).toBe(false)
+  })
+
+  test('control: a save before the return is flagged', () => {
+    const text = mainJs()
+    const body = handlerBody(text, 'update-existing-ember')
+    const saving = text.replace(body, body.replace('return { ok: true, path: emberPath }', 'saveEmberPath(emberPath)\n  return { ok: true, path: emberPath }'))
+    expect(saving).not.toBe(text)
+    expect(savesExistingPath(saving)).toBe(true)
+  })
+
+  test('run-ember-update reports a v-prefixed tag on every path', () => {
+    const text = mainJs()
+    expect([...handlerBody(text, 'run-ember-update').matchAll(/\btag: /g)].length).toBe(2)
+    expect(bareUpdateTags(text)).toEqual([])
+  })
+
+  test('control: the bare version.json value is flagged', () => {
+    const text = mainJs()
+    const bare = text.replace('tag: vPrefixed(installedBackendVersion(emberPath))', 'tag: installedBackendVersion(emberPath)')
+    expect(bare).not.toBe(text)
+    expect(bareUpdateTags(bare)).toEqual(['installedBackendVersion'])
+  })
+
+  test('build-ui and Update All bring ember-2-ui to the pin and record every UI build', () => {
+    const text = mainJs()
+    expect((text.match(/await uiToPin\(/g) || []).length).toBe(2)
+    expect((text.match(/fs\.cpSync\((uiDistDir|path\.join\(uiDir, 'dist'\))/g) || []).length).toBe(2)
+    expect(unrecordedUiCopies(text)).toEqual([])
+  })
+
+  test('control: a UI copy without the record is flagged', () => {
+    const text = mainJs()
+    const unrecorded = text.replace('      recordBuiltUiTag(targetUiDir, EMBER_TAG)\n', '').replace('      recordBuiltUiTag(targetUiDir, EMBER_TAG)\r\n', '')
+    expect(unrecorded).not.toBe(text)
+    expect(unrecordedUiCopies(unrecorded)).toEqual(["fs.cpSync(path.join(uiDir, 'dist'), targetUiDir, { recursive: true })"])
   })
 })
 

@@ -9,7 +9,7 @@ const { isNewer, displayVersion, vPrefixed } = require('./lib/version')
 const { releaseSummary } = require('./lib/notes')
 const { buildEnvFile } = require('./lib/env')
 const { uiSourceDir, uiTargetDir, uiIndexFile, venvPython } = require('./lib/paths')
-const { cloneRepo } = require('./exec/clone')
+const { cloneRepo, DEFAULT_BACKEND_REPO_URL } = require('./exec/clone')
 const { run } = require('./exec/run')
 const { readApiKey, uiBuildEnvWithKey } = require('./exec/api-key')
 const { redactSecrets } = require('./lib/redact')
@@ -17,51 +17,78 @@ const { isAllowedExternalUrl } = require('./lib/external-url')
 const { downloadInstallerUpdate, isManualPlatform, manualResult } = require('./lib/installer-update')
 const { API_PKILL_PATTERN, apiSpawnSpec } = require('./lib/api-launch')
 const { releaseTag, updateAction } = require('./lib/release-pin')
+const { releaseFromResponse } = require('./lib/github-release')
 const { moveToTag } = require('./exec/move-to-tag')
+const { pinAction, uiUpdateAction } = require('./exec/pin-action')
+const { installedBackendVersion, installedUiVersion, recordBuiltUiTag } = require('./exec/installed')
 
 // The ember-2 / ember-2-ui release tag this installer clones and updates to,
 // and its version as the update rows show it.
 const EMBER_TAG = releaseTag(require('../package.json'))
 const EMBER_VERSION = displayVersion(EMBER_TAG)
 
-// Installed versions, as release-please writes them: backend version.json
-// ({ version }, or { tag } from installers that rewrote it), UI package.json.
-// null when missing or unreadable.
-function installedBackendVersion(emberPath) {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(path.join(emberPath, 'version.json'), 'utf-8'))
-    return parsed.version || parsed.tag || null
-  } catch {
-    return null
-  }
-}
+// Whether an update moves the clone in dir to the pin (src/exec/pin-action.js:
+// never a downgrade; an equal version moves unless HEAD is at the tag).
+const movesToPin = async (dir, installed) => (await pinAction({ cwd: dir, installed, tag: EMBER_TAG })) === 'update'
 
-function installedUiVersion(uiDir) {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(uiDir, 'package.json'), 'utf-8')).version || null
-  } catch {
-    return null
-  }
-}
-
-// Whether an update moves this install to the pin (never a downgrade).
-const movesToPin = (installed) => updateAction({ installed, pinned: EMBER_TAG }) === 'update'
-
-// movesToPin, logging why when it does not.
-function shouldMoveToPin(name, installed, log) {
-  const action = updateAction({ installed, pinned: EMBER_TAG })
+// Log why an install does not move to the pin.
+function logStays(name, action, installed, log) {
   if (action === 'current') log(`${name} is already at ${EMBER_TAG}, the release this installer pins.\n`)
   if (action === 'ahead') log(`${name} is at ${installed}, newer than ${EMBER_TAG} (the release this installer pins). Leaving it as is.\n`)
-  return action === 'update'
 }
 
-// Move the backend clone to the pin when the pin is newer. version.json is
-// reset first: older installers rewrote it. Resolves { ok: true, moved } or
+// The installed text on an update row. An equal version that still moves is
+// unreleased work on main; a UI rebuild means the served UI predates the clone.
+function rowInstalled(installed, action) {
+  if (action === 'rebuild') return `${installed || 'unknown'} (served UI not built from it)`
+  if (!installed) return 'unknown'
+  const unreleased = action === 'update' && updateAction({ installed, pinned: EMBER_TAG }) === 'current'
+  return unreleased ? `${installed} (unreleased)` : installed
+}
+
+// Move the backend clone to the pin when it needs it. version.json is reset
+// first: older installers rewrote it. Resolves { ok: true, moved } or
 // moveToTag's { ok: false, error }.
 async function moveBackendToPin(emberPath, log) {
-  if (!shouldMoveToPin('ember-2', installedBackendVersion(emberPath), log)) return { ok: true, moved: false }
-  const r = await moveToTag({ cwd: emberPath, tag: EMBER_TAG, onData: log, resetFiles: ['version.json'] })
+  const installed = installedBackendVersion(emberPath)
+  const action = await pinAction({ cwd: emberPath, installed, tag: EMBER_TAG })
+  logStays('ember-2', action, installed, log)
+  if (action !== 'update') return { ok: true, moved: false }
+  const r = await moveToTag({
+    cwd: emberPath, tag: EMBER_TAG, url: DEFAULT_BACKEND_REPO_URL, onData: log, resetFiles: ['version.json'],
+  })
   return r.ok ? { ok: true, moved: true } : r
+}
+
+// UI actions (uiUpdateAction) after which the UI is built and copied again.
+const uiNeedsBuild = (action) => action === 'clone' || action === 'update' || action === 'rebuild'
+
+// Bring the ember-2-ui clone to the pin: clone it when missing, move it when
+// it needs it (package-lock.json, which npm ci may rewrite, is reset first).
+// Resolves { ok: true, action } or { ok: false, stage, error }; the caller
+// builds when uiNeedsBuild(action).
+async function uiToPin(uiDir, targetUiDir, log) {
+  const action = await uiUpdateAction({ uiDir, targetUiDir, tag: EMBER_TAG })
+  logStays('ember-2-ui', action, installedUiVersion(uiDir), log)
+  if (action === 'clone') {
+    log('Cloning ember-2-ui...\n')
+    const r = await cloneRepo({ url: REPO_UI_URL, targetDir: uiDir, tag: EMBER_TAG, onData: log })
+    return r.ok ? { ok: true, action } : { ok: false, stage: 'ui-clone', error: 'UI clone failed.' }
+  }
+  if (action === 'update') {
+    const r = await moveToTag({
+      cwd: uiDir, tag: EMBER_TAG, url: REPO_UI_URL, onData: log, resetFiles: ['package-lock.json'],
+    })
+    if (!r.ok) {
+      return {
+        ok: false,
+        stage: 'ui-move',
+        error: `UI update failed: ${r.error}\nThe clone in ${uiDir} is unchanged, so retrying the update is safe.`,
+      }
+    }
+  }
+  if (action === 'rebuild') log(`The served UI was not built from ${EMBER_TAG}. Rebuilding it.\n`)
+  return { ok: true, action }
 }
 
 const IS_PACKAGED = app.isPackaged
@@ -275,9 +302,10 @@ ipcMain.handle('check-ember-update', async () => {
 
   // An unknown installed version counts as an update to the pin, as in
   // check-all-updates and Update All.
+  const hasUpdate = await movesToPin(emberPath, installed)
   const release = await releaseP
   return {
-    hasUpdate: movesToPin(installed),
+    hasUpdate,
     installed: installed || 'unknown',
     latest: EMBER_VERSION,
     changelog: release?.body || '',
@@ -295,7 +323,7 @@ ipcMain.handle('run-ember-update', async () => {
     emberLog(`${moved.error}\n`)
     return { ok: false }
   }
-  if (!moved.moved) return { ok: true, pipOk: true, dockerOk: true, tag: installedBackendVersion(emberPath) }
+  if (!moved.moved) return { ok: true, pipOk: true, dockerOk: true, tag: vPrefixed(installedBackendVersion(emberPath)) }
 
   const isWin = process.platform === 'win32'
   const pyBin = isWin
@@ -437,10 +465,13 @@ ipcMain.handle('check-target-path', (_e, { parentDir }) => {
 ipcMain.handle('update-existing-ember', async (_e, { emberPath }) => {
   const log = (chunk) => sendLog('clone-progress', chunk)
   const r = await moveBackendToPin(emberPath, log)
-  if (!r.ok) log(`${r.error}\n`)
-  // saveEmberPath fires on any result (even a failed move), matching prior behavior.
-  saveEmberPath(emberPath)
-  return r.ok ? { ok: true, path: emberPath } : { ok: false, error: r.error, path: emberPath }
+  if (!r.ok) {
+    log(`${r.error}\n`)
+    return { ok: false, error: r.error, path: emberPath }
+  }
+  // The renderer saves the path on success (save-ember-path), so a refused or
+  // failed move never replaces the saved install.
+  return { ok: true, path: emberPath }
 })
 
 ipcMain.handle('fresh-install-ember', async (_e, { parentDir }) => {
@@ -769,18 +800,15 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     const uiDir = uiSourceDir(emberPath)
     const uiDistDir = path.join(uiDir, 'dist')
     const targetUiDir = uiTargetDir(emberPath)
+    const stepLog = (text) => sendLog('install-log', { step, text })
 
-    if (!fs.existsSync(uiDir)) {
-      const cloneOk = (await cloneRepo({
-        url: REPO_UI_URL,
-        targetDir: uiDir,
-        tag: EMBER_TAG,
-        onData: (chunk) => sendLog('install-log', { step, text: chunk }),
-      })).ok
-      if (!cloneOk) {
-        mainWindow.webContents.send('install-step-done', { step, ok: false })
-        return { ok: false }
-      }
+    // An ember-2-ui left by an older installer is moved to the pin too, never
+    // built as it stands.
+    const ui = await uiToPin(uiDir, targetUiDir, stepLog)
+    if (!ui.ok) {
+      stepLog(`${ui.error}\n`)
+      mainWindow.webContents.send('install-step-done', { step, ok: false })
+      return { ok: false }
     }
 
     sendLog('install-log', { step, text: 'Installing UI dependencies...\n' })
@@ -815,6 +843,8 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
         fs.rmSync(targetUiDir, { recursive: true })
       }
       fs.cpSync(uiDistDir, targetUiDir, { recursive: true })
+      // A clone ahead of the pin is not the pinned build, so it is not recorded.
+      if (ui.action !== 'ahead') recordBuiltUiTag(targetUiDir, EMBER_TAG)
       sendLog('install-log', { step, text: 'UI installed ✓\n' })
     } catch (err) {
       sendLog('install-log', { step, text: `Failed to copy UI: ${err.message}\n` })
@@ -855,7 +885,7 @@ ipcMain.handle('check-for-update', async () => {
   if (!release) return { hasUpdate: false }
 
   return {
-    hasUpdate: movesToPin(installed),
+    hasUpdate: await movesToPin(emberPath, installed),
     installedTag: installed,
     latestTag: EMBER_VERSION,
     changelog: release.body || '',
@@ -864,7 +894,8 @@ ipcMain.handle('check-for-update', async () => {
 })
 
 // A repo's latest GitHub release, or the release for `tag` when given (the
-// pinned backend/UI release, whose notes the update rows show).
+// pinned backend/UI release, whose notes the update rows show). null unless
+// GitHub answers 200 (releaseFromResponse).
 function fetchRelease(repo = REPO_BACKEND_SLUG, tag = null) {
   return new Promise((resolve) => {
     const options = {
@@ -875,13 +906,7 @@ function fetchRelease(repo = REPO_BACKEND_SLUG, tag = null) {
     https.get(options, (res) => {
       let data = ''
       res.on('data', (d) => (data += d))
-      res.on('end', () => {
-        try {
-          resolve(JSON.parse(data))
-        } catch {
-          resolve(null)
-        }
-      })
+      res.on('end', () => resolve(releaseFromResponse(res.statusCode, data)))
     }).on('error', () => resolve(null))
   })
 }
@@ -930,12 +955,15 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
   const installerLatest = displayVersion(installerRelease?.tag_name) || null
 
   // Backend version: prefer running API, fall back to version.json on disk.
-  // If neither is available, we can't verify, so updateAction moves it to the pin.
+  // If neither is available, we can't verify, so pinAction moves it to the pin.
   let backendInstalled = healthData?.version || null
   const backendApiRunning = !!healthData
   if (!backendInstalled && emberPath) backendInstalled = vPrefixed(installedBackendVersion(emberPath))
+  const backendAction = await pinAction({ cwd: emberPath, installed: backendInstalled, tag: EMBER_TAG })
 
+  // Without an install there is no clone, so Update All would clone it.
   const uiInstalled = uiDir ? installedUiVersion(uiDir) : null
+  const uiAction = uiDir ? await uiUpdateAction({ uiDir, targetUiDir: uiTargetDir(emberPath), tag: EMBER_TAG }) : 'clone'
 
   // Linux and macOS have no in-app installer self-update (isManualPlatform in
   // src/lib/installer-update.js), so don't offer the installer update there:
@@ -953,15 +981,15 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
       notes: releaseSummary(installerRelease?.body),
     },
     backend: {
-      hasUpdate: movesToPin(backendInstalled),
-      installed: backendInstalled || 'unknown',
+      hasUpdate: backendAction === 'update',
+      installed: rowInstalled(backendInstalled, backendAction),
       latest: EMBER_TAG,
       apiRunning: backendApiRunning,
       notes: releaseSummary(backendRelease?.body),
     },
     ui: {
-      hasUpdate: movesToPin(uiInstalled),
-      installed: uiInstalled || 'unknown',
+      hasUpdate: uiNeedsBuild(uiAction),
+      installed: rowInstalled(uiInstalled, uiAction),
       latest: EMBER_VERSION,
       notes: releaseSummary(uiRelease?.body),
     },
@@ -987,8 +1015,8 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     })).ok
     if (!pipOk) log('Warning: pip install had issues, continuing...\n')
 
-    const pulledVersion = installedBackendVersion(emberPath)
-    if (pulledVersion) log(`Now at version: ${pulledVersion}\n`)
+    const movedVersion = installedBackendVersion(emberPath)
+    if (movedVersion) log(`Now at version: ${movedVersion}\n`)
 
     // Kill the old API BEFORE docker restart so a lingering uvicorn can't win the port-8000 bind race.
     log('Stopping old API process...\n')
@@ -1038,8 +1066,8 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
       if (healthOk) {
         const runningVersion = healthOk.version || 'unknown'
         log(`API running: ${runningVersion}\n`)
-        if (pulledVersion && runningVersion !== pulledVersion && runningVersion !== `v${pulledVersion}`) {
-          log(`Warning: expected ${pulledVersion} but API reports ${runningVersion}\n`)
+        if (movedVersion && runningVersion !== movedVersion && runningVersion !== `v${movedVersion}`) {
+          log(`Warning: expected ${movedVersion} but API reports ${runningVersion}\n`)
         }
         apiReady = true
         break
@@ -1075,21 +1103,9 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
   log('\n')
 
   if (updates.ui) log('Updating Ember UI...\n')
-  const uiCloned = fs.existsSync(uiDir)
-  if (updates.ui && (!uiCloned || shouldMoveToPin('ember-2-ui', installedUiVersion(uiDir), log))) {
-    if (!uiCloned) {
-      log('Cloning ember-2-ui...\n')
-      const cloneOk = (await cloneRepo({ url: REPO_UI_URL, targetDir: uiDir, tag: EMBER_TAG, onData: log })).ok
-      if (!cloneOk) { log('UI clone failed.\n'); return { ok: false, stage: 'ui-clone' } }
-    } else {
-      // npm ci may have rewritten package-lock.json, so it is reset before the move.
-      const moved = await moveToTag({ cwd: uiDir, tag: EMBER_TAG, onData: log, resetFiles: ['package-lock.json'] })
-      if (!moved.ok) {
-        log(`UI update failed: ${moved.error}\nThe clone in ${uiDir} is unchanged, so retrying the update is safe.\n`)
-        return { ok: false, stage: 'ui-move' }
-      }
-    }
-
+  const ui = updates.ui ? await uiToPin(uiDir, uiTargetDir(emberPath), log) : { ok: true, action: 'current' }
+  if (!ui.ok) { log(`${ui.error}\n`); return { ok: false, stage: ui.stage } }
+  if (uiNeedsBuild(ui.action)) {
     log('Installing UI dependencies...\n')
     const npmOk = (await run('npm', ['ci'], { cwd: uiDir, onData: log })).ok
     if (!npmOk) { log('npm ci failed.\n'); return { ok: false, stage: 'ui-npm' } }
@@ -1104,6 +1120,9 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
     try {
       if (fs.existsSync(targetUiDir)) fs.rmSync(targetUiDir, { recursive: true })
       fs.cpSync(path.join(uiDir, 'dist'), targetUiDir, { recursive: true })
+      // Recorded only after the copy: a build that fails before here leaves
+      // the old record, so the next check offers the rebuild again.
+      recordBuiltUiTag(targetUiDir, EMBER_TAG)
       log('UI updated ✓\n\n')
     } catch (err) {
       log(`Failed to copy UI: ${err.message}\n`)

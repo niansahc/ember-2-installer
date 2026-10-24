@@ -60,8 +60,8 @@ function displayVersion(v) {
   return m ? m[1] : v
 }
 
-// The reverse for a bare version: "0.18.1" -> "v0.18.1". A tag, or a falsy
-// value, comes back untouched.
-const vPrefixed = (v) => (v && !v.startsWith('v') ? `v${v}` : v)
+// The reverse for a bare version: "0.18.1" -> "v0.18.1". A tag, or anything
+// that is not a non-empty string, comes back untouched.
+const vPrefixed = (v) => (typeof v === 'string' && v && !v.startsWith('v') ? `v${v}` : v)
 
 module.exports = { compareVersions, isNewer, displayVersion, vPrefixed }
