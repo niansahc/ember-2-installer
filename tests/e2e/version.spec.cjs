@@ -7,7 +7,7 @@
 // vs 0.9.
 
 const { test, expect } = require('@playwright/test')
-const { compareVersions, isNewer, displayVersion } = require('../../src/lib/version')
+const { compareVersions, isNewer, displayVersion, vPrefixed } = require('../../src/lib/version')
 
 test.describe('compareVersions', () => {
   test('orders by major.minor.patch numerically', () => {
@@ -121,5 +121,18 @@ test.describe('displayVersion', () => {
   test('output still compares — display and comparison share one regex', () => {
     expect(isNewer(displayVersion('ember-2-installer-v0.18.0'), '0.8.1')).toBe(true)
     expect(compareVersions(displayVersion('ember-2-ui-v0.8.1'), 'v0.8.1')).toBe(0)
+  })
+})
+
+test.describe('vPrefixed', () => {
+  test('adds a v to a bare version and leaves a tag alone', () => {
+    expect(vPrefixed('0.18.1')).toBe('v0.18.1')
+    expect(vPrefixed('v0.18.1')).toBe('v0.18.1')
+  })
+
+  test('returns anything that is not a non-empty string untouched, without throwing', () => {
+    // A hand-edited version.json { "version": 18 } used to throw here and
+    // reject every update check.
+    for (const v of [18, null, undefined, '', { v: 1 }]) expect(vPrefixed(v)).toBe(v)
   })
 })

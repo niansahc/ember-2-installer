@@ -434,6 +434,16 @@ async function runClone(parentDir, btn) {
   }
 }
 
+// The clone log's last line after a failed update of an existing install. A
+// move that refused (a full clone, local changes, another repository) logged
+// its reason just above and fails the same way however good the connection,
+// so the network hint is only for a failure that gave no reason.
+function existingUpdateFailureText(result) {
+  return result && result.error
+    ? '\nUpdate failed. See the reason above.\n'
+    : '\nUpdate failed. Check your internet connection and try again.\n'
+}
+
 document.getElementById('btn-existing-update').addEventListener('click', () => {
   const parentDir = document.getElementById('ember-path-input').value.trim()
   const btn = document.getElementById('btn-install-ember')
@@ -467,7 +477,7 @@ document.getElementById('btn-existing-update').addEventListener('click', () => {
       btn.textContent = 'Updated ✓'
       setTimeout(() => showScreen('screen-vault'), 800)
     } else {
-      cloneLog.textContent += '\nUpdate failed. Check your internet connection and try again.\n'
+      cloneLog.textContent += existingUpdateFailureText(result)
       btn.disabled = false
       btn.textContent = 'Try Again'
     }
@@ -1653,6 +1663,16 @@ function markUpdateRowDone(name) {
   if (icon) icon.textContent = '✨'
 }
 
+// What an update check shows: 'updates', 'current' or 'unreachable'. The
+// backend and UI rows target the pin, which needs no GitHub API answer (Update
+// All uses git), so an unreachable API never hides an update that was found;
+// it only explains finding none.
+function updateCheckOutcome(updates) {
+  const anyUpdate = updates.installer.hasUpdate || updates.backend.hasUpdate || updates.ui.hasUpdate
+  if (anyUpdate) return 'updates'
+  return updates.reachable ? 'current' : 'unreachable'
+}
+
 document.getElementById('btn-check-ember-update').addEventListener('click', () => {
   const btn = document.getElementById('btn-check-ember-update')
   const info = document.getElementById('ember-update-info')
@@ -1667,16 +1687,15 @@ document.getElementById('btn-check-ember-update').addEventListener('click', () =
     btn.disabled = false
     btn.textContent = 'Check for updates'
 
-    if (!updates.reachable) {
+    const outcome = updateCheckOutcome(updates)
+    if (outcome === 'unreachable') {
       info.classList.remove('hidden')
       msg.textContent = 'Update check unavailable — could not reach GitHub.'
       document.getElementById('btn-run-ember-update').classList.add('hidden')
       return
     }
 
-    const anyUpdate = updates.installer.hasUpdate || updates.backend.hasUpdate || updates.ui.hasUpdate
-
-    if (anyUpdate) {
+    if (outcome === 'updates') {
       prepareUpdateScreen(updates)
       pendingUpdates = {
         backend: updates.backend.hasUpdate,
@@ -1724,12 +1743,12 @@ document.getElementById('btn-run-ember-update').addEventListener('click', () => 
       loadEmberVersion()
     } else {
       btn.textContent = 'Failed'
-      logBox.textContent += '\nUpdate failed. Try running git pull manually.\n'
+      logBox.textContent += '\nUpdate failed. See the log above.\n'
       btn.disabled = false
     }
   }, {
     errorEl: logBox,
-    errorMsg: 'Update failed. Try running git pull manually.',
+    errorMsg: 'Update failed. See the log above.',
     onError: () => window.ember.removeAllListeners('ember-update-log'),
   })
 })
@@ -2334,7 +2353,7 @@ async function init() {
     document.getElementById('demo-badge').classList.remove('hidden')
     // Demo/dev-only test seam: lets e2e drive the render path with crafted input
     // to prove dynamic values are escaped. Never exposed in packaged builds.
-    window.__emberTest = { buildModelCard, addRawInstallLogListener }
+    window.__emberTest = { buildModelCard, addRawInstallLogListener, updateCheckOutcome, existingUpdateFailureText }
   }
 
   const emberPath = await window.ember.getEmberPath()
@@ -2346,15 +2365,11 @@ async function init() {
     try {
       const updates = await window.ember.checkAllUpdates(state.host)
 
-      if (updates.reachable) {
-        const anyUpdate = updates.installer.hasUpdate || updates.backend.hasUpdate || updates.ui.hasUpdate
-
-        if (anyUpdate) {
-          // Stash update info — don't auto-navigate to the update screen.
-          // Instead show a subtle banner on Welcome and let the user decide.
-          cachedBootUpdates = updates
-          document.getElementById('update-available-banner').classList.remove('hidden')
-        }
+      if (updateCheckOutcome(updates) === 'updates') {
+        // Stash update info and don't auto-navigate to the update screen.
+        // Instead show a subtle banner on Welcome and let the user decide.
+        cachedBootUpdates = updates
+        document.getElementById('update-available-banner').classList.remove('hidden')
       }
     } catch {
       // Leave the banner hidden and fall through to the normal Welcome flow.

@@ -4,8 +4,8 @@
 
 The installer is the Electron **setup wizard** only. Its packaged binary contains just the wizard
 (`src/**`, `assets/**`, `release_notes.html`). It does **not** bundle the backend or the frontend:
-at install time it clones ember-2 and ember-2-ui onto the user's machine and builds the UI there
-(the `build-ui` step in `src/main.js`). So releasing the installer is just packaging the wizard —
+at install time it clones ember-2 and ember-2-ui onto the user's machine, at the pinned release tag
+(see Three-Repo Version Coordination), and builds the UI there (the `build-ui` step in `src/main.js`). So releasing the installer is just packaging the wizard —
 there is no frontend build at release time.
 
 ## How electron-updater Works
@@ -28,8 +28,43 @@ macOS (unsigned DMG) the update is manual: the installer points the user to the 
 
 ## Three-Repo Version Coordination
 
-ember-2-installer is the source of truth for what ships together. Document the ember-2 (backend)
-and ember-2-ui (frontend) versions a release expects in that release's notes.
+All three repos share one version number. ember-2-installer is the source of truth for what ships
+together: `emberRelease` in `package.json` names the ember-2 (backend) and ember-2-ui (frontend)
+release, and the installer uses tag `v<emberRelease>` for both.
+
+- **Fresh installs** clone both repos with `git clone --depth 1 --branch v<emberRelease>`
+  (`src/exec/clone.js`).
+- **Updates** move both repos to that same tag (`src/exec/move-to-tag.js`) when they need it
+  (`src/exec/pin-action.js`): the tag is newer than what is installed (backend `version.json`
+  `version`, UI `package.json`), the installed version is unknown, or the version equals the pin but
+  HEAD is not at the tag (`main` between releases carries the last release's number). Nothing is
+  downgraded, and nothing clones or pulls `main`.
+- **A move is refused** for a full (non-shallow) clone such as a developer's working repo, a clone
+  whose `origin` is another repository, and a clone with edited tracked files. The two files the
+  installer itself rewrites, backend `version.json` and UI `package-lock.json`, are reset to the tag
+  instead, so edits to them are discarded.
+- **The UI is rebuilt** whenever the served build was not made from the pin. The tag is recorded in
+  `ui/ember-ui-build.json` after each copy, so a build that failed after the move is offered again.
+- **The update screen** targets the pin for the backend and UI rows, not GitHub's latest release. A
+  newer backend or UI reaches users with the installer release that pins it, and appears after the
+  installer updates itself (on Linux and macOS, after the user downloads the new installer).
+
+Who bumps `emberRelease`:
+
+- **Coordinated release** (all three repos): once the ember-2 and ember-2-ui tags exist, set
+  `emberRelease` to the new version in the installer's release-please PR before merging it. It then
+  equals `version`.
+- **Installer-only patch release:** leave `emberRelease` alone. It stays behind `version`, at the same
+  major.minor, so the tags it names still exist.
+
+Checks:
+
+- `tests/e2e/release-pin.spec.cjs` fails if `emberRelease` is not x.y.z, has a different major.minor
+  from `version`, or is newer than `version`. A release-please PR that bumps the minor therefore stays
+  red until `emberRelease` is bumped with it.
+- The `check-pinned-tags` job in `release.yml` runs before any build and fails the release if
+  `v<emberRelease>` is missing from either repo (`git ls-remote --exit-code --tags`). A repo it
+  cannot reach fails the job too, with its own message, so re-run it rather than checking tags.
 
 ## Automated Release (implemented)
 
@@ -39,8 +74,9 @@ Release is automated via GitHub Actions and stays human-gated:
    auto-generated changelog and version bump. Per CLAUDE.md these PRs are **never** auto-merged.
 2. When the human merges the release PR, release-please creates a **published** GitHub Release
    (`draft: false` in `release-please-config.json`) at tag `vX.Y.Z`.
-3. **`.github/workflows/release.yml`** fires on `release: published` and runs three jobs
-   (windows-latest, macos-latest, ubuntu-latest), each `electron-builder --<platform> --publish
+3. **`.github/workflows/release.yml`** fires on `release: published`. It runs the
+   `check-pinned-tags` gate first (ubuntu-latest), then three build jobs (windows-latest,
+   macos-latest, ubuntu-latest) that each wait for it, each `electron-builder --<platform> --publish
    always`, attaching that platform's installer plus its `latest*.yml` to the release.
 
 Conventional commits (`feat:`, `fix:`, `chore:` ...) drive the semver bump. The workflow never cuts
@@ -137,7 +173,8 @@ Per the testing discipline in CLAUDE.md, this must be fixed or marked skip-with-
 
 If you must release by hand:
 
-1. Bump the version in `package.json` (normally release-please does this).
+1. Bump the version in `package.json` (normally release-please does this), and `emberRelease` too
+   for a coordinated release. Confirm both `v<emberRelease>` tags exist.
 2. `npm ci`
 3. `npx electron-builder --<platform> --publish always` with `GH_TOKEN` set -- or run a local build
    and upload the installer binary + `latest*.yml` to the published (non-draft) GitHub Release.
@@ -151,6 +188,8 @@ If you must release by hand:
 - Missing `app-update.yml`: affected installed versions can never auto-update; requires manual
   reinstall
 - Version not bumped: electron-updater compares versions and concludes no update available
+- `emberRelease` naming a tag that does not exist: every fresh install fails at the clone. The
+  `check-pinned-tags` job in `release.yml` blocks the release before anything is built.
 - Publish type mismatch: electron-builder defaults to `releaseType: draft`. release-please publishes
   the release immediately (`draft: false`), so electron-builder finds `existingType=release`,
   logs `skipped publishing ... reason=existing type not compatible with publishing type`, attaches
