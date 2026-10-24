@@ -42,13 +42,26 @@ test.describe('Update check outcome and failure text', () => {
     expect(await outcome(result({ reachable: false }))).toBe('unreachable')
   })
 
-  test('a refused move does not blame the connection', async () => {
+  test('a refused move shows its reason and does not blame the connection', async () => {
     const text = await failureText({ ok: false, error: 'C:\\x\\ember-2 is a full git clone, not an installer install' })
+    expect(text).toBe('\nUpdate failed: C:\\x\\ember-2 is a full git clone, not an installer install\n')
     expect(text).not.toMatch(/internet connection/)
-    expect(text).toMatch(/See the reason above/)
   })
 
   test('control: a failure with no reason keeps the network hint', async () => {
     expect(await failureText({ ok: false })).toMatch(/Check your internet connection/)
+  })
+
+  const cloneText = (r, failed) => window.evaluate(([u, f]) => window.__emberTest.cloneFailureText(u, f), [r, failed])
+
+  test('a failed clone shows its reason, then the network hint', async () => {
+    expect(await cloneText({ ok: false, error: 'git clone exited with code 128' }, 'Failed to clone'))
+      .toBe('\nFailed to clone: git clone exited with code 128. Check your internet connection and try again.\n')
+    expect(await cloneText({ ok: false }, 'Failed')).toBe('\nFailed. Check your internet connection and try again.\n')
+  })
+
+  test('another operation still running shows that alone, with no network hint', async () => {
+    const error = 'An update is still running. Wait for it to finish, then try again.'
+    expect(await cloneText({ ok: false, busy: true, error }, 'Failed')).toBe(`\n${error}\n`)
   })
 })

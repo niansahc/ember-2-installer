@@ -63,7 +63,7 @@ test.describe('source: mutating handlers run one at a time', () => {
 
   test('control: a handler registered without the lock is flagged', () => {
     const text = mainJs()
-    const unlocked = text.replace(/^ipcMain\.handle\('fresh-install-ember', locked\([^,]+, [^,]+, /m, "ipcMain.handle('fresh-install-ember', ")
+    const unlocked = text.replace(/^ipcMain\.handle\('fresh-install-ember', locked\('[^']+', /m, "ipcMain.handle('fresh-install-ember', ")
     expect(unlocked).not.toBe(text)
     expect(unlockedHandlers(unlocked)).toEqual(['fresh-install-ember'])
   })

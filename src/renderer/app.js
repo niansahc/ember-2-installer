@@ -351,7 +351,8 @@ async function initInstallDir() {
   if (scan.found) {
     const notice = document.getElementById('ember-detected')
     const text = document.getElementById('ember-detected-text')
-    text.textContent = `I found an existing Ember installation at ${scan.path} (v${scan.version}).`
+    const version = scan.version ? ` (v${scan.version})` : ''
+    text.textContent = `I found an existing Ember installation at ${scan.path}${version}.`
     notice.classList.remove('hidden')
 
     document.getElementById('btn-use-detected').addEventListener('click', () => {
@@ -384,7 +385,8 @@ document.getElementById('btn-install-ember').addEventListener('click', () => {
   guardClick(btn, async () => {
     const check = await window.ember.checkTargetPath(parentDir)
     if (check.exists && check.isEmber) {
-      existingText.textContent = `Ember-2 found at this location (${check.version}). What would you like to do?`
+      const version = check.version ? ` (${check.version})` : ''
+      existingText.textContent = `Ember-2 found at this location${version}. What would you like to do?`
       existingNotice.classList.remove('hidden')
       btn.disabled = true
       return
@@ -428,20 +430,31 @@ async function runClone(parentDir, btn) {
     btn.textContent = 'Installed ✓'
     setTimeout(() => showScreen('screen-vault'), 800)
   } else {
-    cloneLog.textContent += '\nFailed to clone. Check your internet connection and try again.\n'
+    cloneLog.textContent += cloneFailureText(result, 'Failed to clone')
     btn.disabled = false
     btn.textContent = 'Try Again'
   }
 }
 
-// The clone log's last line after a failed update of an existing install. A
-// move that refused (a full clone, local changes, another repository) logged
-// its reason just above and fails the same way however good the connection,
-// so the network hint is only for a failure that gave no reason.
+// The clone log's last line after a failed update of an existing install. The
+// reason comes from the result (a line streamed just before the handler
+// returned can arrive after the listener is gone). A move that refused (a
+// full clone, local changes, another repository, another operation still
+// running) fails the same way however good the connection, so the network
+// hint is only for a failure that gave no reason.
 function existingUpdateFailureText(result) {
   return result && result.error
-    ? '\nUpdate failed. See the reason above.\n'
+    ? `\nUpdate failed: ${result.error}\n`
     : '\nUpdate failed. Check your internet connection and try again.\n'
+}
+
+// The clone log's last line after a failed clone or fresh install. A clone
+// that failed may be the connection, so the hint stays, after the reason; a
+// refusal because another operation is running gets the reason alone.
+function cloneFailureText(result, failed) {
+  if (result && result.busy) return `\n${result.error}\n`
+  const reason = result && result.error ? `\n${failed}: ${result.error}.` : `\n${failed}.`
+  return `${reason} Check your internet connection and try again.\n`
 }
 
 document.getElementById('btn-existing-update').addEventListener('click', () => {
@@ -519,7 +532,7 @@ document.getElementById('btn-existing-fresh').addEventListener('click', () => {
       btn.textContent = 'Installed ✓'
       setTimeout(() => showScreen('screen-vault'), 800)
     } else {
-      cloneLog.textContent += '\nFailed. Check your internet connection and try again.\n'
+      cloneLog.textContent += cloneFailureText(result, 'Failed')
       btn.disabled = false
       btn.textContent = 'Try Again'
     }
@@ -1743,7 +1756,7 @@ document.getElementById('btn-run-ember-update').addEventListener('click', () => 
       loadEmberVersion()
     } else {
       btn.textContent = 'Failed'
-      logBox.textContent += '\nUpdate failed. See the log above.\n'
+      logBox.textContent += result.busy ? `\n${result.error}\n` : '\nUpdate failed. See the log above.\n'
       btn.disabled = false
     }
   }, {
@@ -1770,8 +1783,19 @@ async function loadEmberVersion() {
     voice.textContent = '"My interface didn\'t build correctly. Let me try again."'
     status.textContent = "Ember's interface is missing. Rebuilding..."
     const rebuildResult = await window.ember.runInstallStep('build-ui', state.emberPath)
+    // There is no install log on this screen, so the build's own reason (a
+    // refused move, a clone kept aside, a developer clone built as it stands)
+    // is shown here.
+    const uiNote = document.getElementById('done-ui-note')
+    const reason = rebuildResult.ok ? rebuildResult.warning : rebuildResult.error
+    if (reason) {
+      uiNote.textContent = reason
+      uiNote.classList.remove('hidden')
+    }
     if (!rebuildResult.ok) {
-      status.textContent = "Interface build failed. Try reinstalling or check that Node.js is installed."
+      status.textContent = reason
+        ? 'Interface build failed. The reason is below.'
+        : "Interface build failed. Try reinstalling or check that Node.js is installed."
       btn.disabled = false
       document.getElementById('btn-retry-api').style.display = ''
       document.getElementById('done-troubleshooting').classList.remove('hidden')
@@ -2308,7 +2332,10 @@ document.getElementById('btn-run-update-all').addEventListener('click', () => {
       showScreen('screen-done')
       loadEmberVersion()
     } else {
-      logBox.textContent += `\nUpdate failed at stage: ${result.stage || 'unknown'}\n`
+      // The reason comes from the result; each one names what failed.
+      logBox.textContent += result.error
+        ? `\n${result.error}\n`
+        : `\nUpdate failed at stage: ${result.stage || 'unknown'}\n`
       btn.textContent = 'Failed'
       btn.disabled = false
     }
@@ -2343,17 +2370,18 @@ document.getElementById('btn-check-installer-update').addEventListener('click', 
 
 // Boot sequence:
 //   1. If an existing ember-2 install is found, check all three repos for updates.
-//   2. If any updates are available, jump straight to the Update screen.
-//   3. Otherwise (no install, no updates, or GitHub unreachable), show the
-//      Welcome screen and begin preloading data (install dir, vault, models)
-//      in the background so later screens render instantly.
+//   2. If any update was found (updateCheckOutcome, even with GitHub
+//      unreachable: the backend and UI target the pin), show the update
+//      banner on Welcome; the user opens the Update screen from it.
+//   3. Show the Welcome screen and begin preloading data (install dir, vault,
+//      models) in the background so later screens render instantly.
 async function init() {
   const demoMode = await window.ember.getDemoMode()
   if (demoMode) {
     document.getElementById('demo-badge').classList.remove('hidden')
     // Demo/dev-only test seam: lets e2e drive the render path with crafted input
     // to prove dynamic values are escaped. Never exposed in packaged builds.
-    window.__emberTest = { buildModelCard, addRawInstallLogListener, updateCheckOutcome, existingUpdateFailureText }
+    window.__emberTest = { buildModelCard, addRawInstallLogListener, updateCheckOutcome, existingUpdateFailureText, cloneFailureText }
   }
 
   const emberPath = await window.ember.getEmberPath()

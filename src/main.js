@@ -33,10 +33,10 @@ const EMBER_TAG = releaseTag(require('../package.json'))
 const EMBER_VERSION = displayVersion(EMBER_TAG)
 
 // One clone, move, build or update at a time (src/lib/exclusive.js). A
-// handler wrapped in locked() refuses while another runs, logs why with log,
-// and resolves { ok: false, busy: true, error }.
+// handler wrapped in locked() refuses while another runs and resolves
+// { ok: false, busy: true, error }; the renderer shows the error.
 const exclusive = createExclusive()
-const locked = (label, log, handler) => (...args) => exclusive(label, () => handler(...args), (error) => log(`${error}\n`))
+const locked = (label, handler) => (...args) => exclusive(label, () => handler(...args))
 
 // Backend actions (backendUpdateAction in src/exec/pin-action.js) that an
 // update acts on: 'update' moves the clone and then runs the setup, 'finish'
@@ -193,6 +193,18 @@ const DEMO_FAIL_CHANNELS = (process.argv.find((a) => a.startsWith('--demo-fail='
 // Test seam: --demo-raw-log turns off log redaction in sendLog, so the e2e
 // redaction test has a control that shows the demo key would otherwise render.
 const DEMO_RAW_LOG = DEMO_MODE && process.argv.includes('--demo-raw-log')
+// Test seams for the renderer's handling of what real mode can return:
+//   --demo-unreachable: check-all-updates reports GitHub unreachable (the rows
+//     are unchanged, so with --demo-updates updates are still found).
+//   --demo-existing-update=refused|failed: the install-location screen finds
+//     an existing install, and updating it is refused with a reason or fails
+//     with none.
+//   --demo-ui-rebuild=refused|warning: the Done screen finds no served UI, and
+//     its rebuild is refused with a reason or succeeds with a warning.
+const demoArg = (name) => (process.argv.find((a) => a.startsWith(`--${name}=`)) || '').split('=')[1] || null
+const DEMO_UNREACHABLE = process.argv.includes('--demo-unreachable')
+const DEMO_EXISTING_UPDATE = demoArg('demo-existing-update')
+const DEMO_UI_REBUILD = demoArg('demo-ui-rebuild')
 
 // Log channels that carry child-process or status text to the renderer.
 const LOG_CHANNELS = new Set([
@@ -385,7 +397,7 @@ ipcMain.handle('check-ember-update', async () => {
   return { hasUpdate: backendNeedsSetup(action), installed: installed || 'unknown', latest: EMBER_VERSION }
 })
 
-ipcMain.handle('run-ember-update', locked('An update', (text) => sendLog('ember-update-log', text), async () => {
+ipcMain.handle('run-ember-update', locked('An update', async () => {
   const emberPath = getEmberPath()
   if (!emberPath) return { ok: false }
 
@@ -486,7 +498,7 @@ ipcMain.handle('pick-ember-folder', async () => {
   return result.canceled ? null : result.filePaths[0]
 })
 
-ipcMain.handle('clone-ember-repo', locked('Downloading Ember-2', (text) => sendLog('clone-progress', text), async (_e, { parentDir }) => {
+ipcMain.handle('clone-ember-repo', locked('Downloading Ember-2', async (_e, { parentDir }) => {
   const targetDir = path.join(parentDir, 'ember-2')
   if (fs.existsSync(targetDir)) {
     return { ok: true, path: targetDir, message: 'Already exists' }
@@ -507,31 +519,26 @@ ipcMain.handle('clone-ember-repo', locked('Downloading Ember-2', (text) => sendL
 ipcMain.handle('check-target-path', (_e, { parentDir }) => {
   const targetDir = path.join(parentDir, 'ember-2')
   if (!fs.existsSync(targetDir)) return { exists: false }
-  const versionFile = path.join(targetDir, 'version.json')
-  if (!fs.existsSync(versionFile)) return { exists: true, isEmber: false }
-  try {
-    const data = JSON.parse(fs.readFileSync(versionFile, 'utf-8'))
-    return { exists: true, isEmber: true, version: data.version || data.tag || 'unknown', path: targetDir }
-  } catch {
-    return { exists: true, isEmber: false }
-  }
+  // version.json marks an ember-2 install; its version is read as the update
+  // checks read it (installedBackendVersion), null when it has none.
+  if (!fs.existsSync(path.join(targetDir, 'version.json'))) return { exists: true, isEmber: false }
+  return { exists: true, isEmber: true, version: installedBackendVersion(targetDir), path: targetDir }
 })
 
-ipcMain.handle('update-existing-ember', locked('An update', (text) => sendLog('clone-progress', text), async (_e, { emberPath }) => {
+ipcMain.handle('update-existing-ember', locked('An update', async (_e, { emberPath }) => {
   const log = (chunk) => sendLog('clone-progress', chunk)
   const r = await moveBackendToPin(emberPath, log)
-  if (!r.ok) {
-    log(`${r.error}\n`)
-    return { ok: false, error: r.error, path: emberPath }
-  }
-  // The renderer saves the path on success (save-ember-path), so a refused or
-  // failed move never replaces the saved install.
+  // The renderer shows the error from the result: a log line sent just before
+  // returning can arrive after its listener is removed. It saves the path on
+  // success (save-ember-path), so a refused or failed move never replaces the
+  // saved install.
+  if (!r.ok) return { ok: false, error: r.error, path: emberPath }
   return { ok: true, path: emberPath }
 }))
 
 // The existing ember-2 is set aside, not deleted, until the new clone is in
 // place: a failed clone puts it back (src/exec/aside.js).
-ipcMain.handle('fresh-install-ember', locked('A fresh install', (text) => sendLog('clone-progress', text), async (_e, { parentDir }) => {
+ipcMain.handle('fresh-install-ember', locked('A fresh install', async (_e, { parentDir }) => {
   const targetDir = path.join(parentDir, 'ember-2')
   const log = (text) => sendLog('clone-progress', text)
   const result = await replaceWithClone({
@@ -543,7 +550,6 @@ ipcMain.handle('fresh-install-ember', locked('A fresh install', (text) => sendLo
     saveEmberPath(targetDir)
     return { ok: true, path: targetDir }
   }
-  log(`${result.error}\n`)
   return { ok: false, error: result.error }
 }))
 
@@ -579,21 +585,10 @@ ipcMain.handle('scan-for-ember', () => {
     if (saved) candidates.push(saved)
   }
 
-  // Check each candidate for version.json (confirms it's a real ember-2 install)
-  for (const candidate of candidates) {
-    try {
-      const versionFile = path.join(candidate, 'version.json')
-      if (fs.existsSync(versionFile)) {
-        const data = JSON.parse(fs.readFileSync(versionFile, 'utf-8'))
-        return {
-          found: true,
-          path: candidate,
-          version: data.version || data.tag || 'unknown',
-        }
-      }
-    } catch {}
-  }
-  return { found: false }
+  // version.json confirms a real ember-2 install; its version is read as the
+  // update checks read it (installedBackendVersion), null when it has none.
+  const found = candidates.find((c) => fs.existsSync(path.join(c, 'version.json')))
+  return found ? { found: true, path: found, version: installedBackendVersion(found) } : { found: false }
 })
 
 ipcMain.handle('detect-hardware', async () => {
@@ -1002,7 +997,7 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
   }
 })
 
-ipcMain.handle('run-all-updates', locked('An update', (text) => sendLog('update-all-log', text), async (_e, { updates, host }) => {
+ipcMain.handle('run-all-updates', locked('An update', async (_e, { updates, host }) => {
   const emberPath = getEmberPath()
   if (!emberPath) return { ok: false, error: 'No ember-2 path configured' }
 
@@ -1012,7 +1007,9 @@ ipcMain.handle('run-all-updates', locked('An update', (text) => sendLog('update-
   if (updates.backend) {
     log('Updating Ember backend...\n')
     const backend = await moveBackendToPin(emberPath, log)
-    if (!backend.ok) { log(`Backend update failed: ${backend.error}\n`); return { ok: false, stage: 'backend-move' } }
+    // Failures return their reason; the renderer prints it (a log line sent
+    // just before returning can arrive after its listener is removed).
+    if (!backend.ok) return { ok: false, stage: 'backend-move', error: `Backend update failed: ${backend.error}` }
     // A setup that does not finish is not recorded, so the next check offers
     // it again; the other updates still run.
     if (backendNeedsSetup(backend.action) && (await setUpBackend(emberPath, host, backend.action, log)).ok) {
@@ -1045,7 +1042,7 @@ ipcMain.handle('run-all-updates', locked('An update', (text) => sendLog('update-
   if (updates.ui) {
     log('Updating Ember UI...\n')
     const ui = await bringUiToPin({ emberPath, pyBin, log, build: uiNeedsBuild })
-    if (!ui.ok) { log(`${ui.error}\n`); return { ok: false, stage: ui.stage } }
+    if (!ui.ok) return { ok: false, stage: ui.stage, error: ui.error }
     if (ui.built) log('UI updated ✓\n\n')
   }
 
@@ -1481,7 +1478,7 @@ if (DEMO_MODE) {
   console.log('[DEMO MODE] Running with simulated install steps')
 
   ipcMain.removeHandler('check-ui-built')
-  ipcMain.handle('check-ui-built', async () => ({ ok: true }))
+  ipcMain.handle('check-ui-built', async () => ({ ok: !DEMO_UI_REBUILD }))
 
   ipcMain.removeHandler('detect-hardware')
   ipcMain.handle('detect-hardware', async () => ({
@@ -1600,6 +1597,12 @@ if (DEMO_MODE) {
       },
     }
 
+    if (step === 'build-ui' && DEMO_UI_REBUILD === 'refused') {
+      return { ok: false, error: 'UI update failed: C:\\demo\\ember-2-ui has local changes (demo)' }
+    }
+    if (step === 'build-ui' && DEMO_UI_REBUILD === 'warning') {
+      return { ok: true, warning: 'C:\\demo\\ember-2-ui is a full git clone, built as it stands (demo)' }
+    }
     const sim = simulations[step]
     if (!sim) return { ok: false }
 
@@ -1630,7 +1633,7 @@ if (DEMO_MODE) {
   ipcMain.handle('check-all-updates', async () => {
     if (HAS_DEMO_UPDATES_FLAG) {
       return {
-        reachable: true,
+        reachable: !DEMO_UNREACHABLE,
         installer: {
           hasUpdate: true,
           installed: app.getVersion(),
@@ -1654,7 +1657,7 @@ if (DEMO_MODE) {
       }
     }
     return {
-      reachable: true,
+      reachable: !DEMO_UNREACHABLE,
       installer: { hasUpdate: false, installed: app.getVersion(), latest: app.getVersion() },
       backend: { hasUpdate: false, installed: `${EMBER_TAG} (demo)`, latest: EMBER_TAG, apiRunning: true },
       ui: { hasUpdate: false, installed: `${EMBER_VERSION} (demo)`, latest: EMBER_VERSION },
@@ -1832,11 +1835,18 @@ if (DEMO_MODE) {
 
   // Override target path check — no existing install in demo mode
   ipcMain.removeHandler('check-target-path')
-  ipcMain.handle('check-target-path', () => ({ exists: false }))
+  ipcMain.handle('check-target-path', (_e, { parentDir }) => (DEMO_EXISTING_UPDATE
+    ? { exists: true, isEmber: true, version: '0.17.0', path: `${parentDir}/ember-2` }
+    : { exists: false }))
 
   // Override update/fresh install — simulate
   ipcMain.removeHandler('update-existing-ember')
   ipcMain.handle('update-existing-ember', async (_e, { emberPath }) => {
+    if (DEMO_EXISTING_UPDATE === 'refused') {
+      const error = `${emberPath} is a full git clone, not an installer install; update it with git yourself (demo)`
+      return { ok: false, error, path: emberPath }
+    }
+    if (DEMO_EXISTING_UPDATE === 'failed') return { ok: false, path: emberPath }
     const msgs = [`ember-2 is already at ${EMBER_TAG}, the release this installer pins.\n`]
     for (const msg of msgs) {
       sendLog('clone-progress', msg)

@@ -292,6 +292,12 @@ const rawUiBuilds = (text) => text.split(/\r?\n/)
   .filter((l) => /\['run', 'build'\]|fs\.cpSync\(|recordBuiltUiTag\(/.test(l))
   .map((l) => l.trim())
 
+// version.json reads in main.js that bypass installedBackendVersion
+// (src/exec/installed.js), which reads only .version, as /api/health does.
+const rawVersionReads = (text) => text.split(/\r?\n/)
+  .filter((l) => /\bdata\.tag\b|JSON\.parse\(fs\.readFileSync\(versionFile/.test(l))
+  .map((l) => l.trim())
+
 // fresh-install-ember deleting the existing install itself. It sets it aside
 // (replaceWithClone), so a failed clone can put it back.
 const deletesBeforeClone = (text) => /rmSync\(/.test(handlerBody(text, 'fresh-install-ember'))
@@ -341,6 +347,23 @@ test.describe('source: install and update handlers', () => {
     expect(rawUiBuilds(raw)).toEqual([
       "const buildOk = (await run('npm', ['run', 'build'], { cwd: uiDir, env, onData: log })).ok",
       "fs.cpSync(path.join(uiDir, 'dist'), targetUiDir, { recursive: true })",
+    ])
+  })
+
+  test('scan-for-ember and check-target-path read the version as the update checks do', () => {
+    const text = mainJs()
+    expect(handlerBody(text, 'scan-for-ember')).toMatch(/installedBackendVersion\(found\)/)
+    expect(handlerBody(text, 'check-target-path')).toMatch(/installedBackendVersion\(targetDir\)/)
+    expect(rawVersionReads(text)).toEqual([])
+  })
+
+  test('control: a version.json read that falls back to the tag is flagged', () => {
+    const raw = `${mainJs()}
+      const data = JSON.parse(fs.readFileSync(versionFile, 'utf-8'))
+      return { found: true, version: data.version || data.tag || 'unknown' }`
+    expect(rawVersionReads(raw)).toEqual([
+      "const data = JSON.parse(fs.readFileSync(versionFile, 'utf-8'))",
+      "return { found: true, version: data.version || data.tag || 'unknown' }",
     ])
   })
 
