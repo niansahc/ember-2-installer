@@ -4,10 +4,12 @@
 //   - the package.json pin rule (emberRelease against version)
 //   - the release.yml gate (check-pinned-tags)
 //   - source checks on src/: every clone goes to the pin, nothing pulls a
-//     branch, the update checks target the pin and never gate it on a known
-//     installed version, update-existing-ember never saves a refused path,
-//     run-ember-update reports a v-prefixed tag, and every UI build comes to
-//     the pin first and records its tag after the copy
+//     branch, the update checks target the pin, never gate it on a known
+//     installed version or on a GitHub answer, update-existing-ember never
+//     saves a refused path, run-ember-update reports a v-prefixed tag, every
+//     UI build goes through uiToPin and buildAndServeUi, version.json is read
+//     only through installedBackendVersion, the install flow notes its steps
+//     for the backend setup record, and a fresh install sets the old one aside
 
 const { test, expect } = require('@playwright/test')
 const fs = require('fs')

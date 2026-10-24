@@ -40,11 +40,28 @@ release, and the installer uses tag `v<emberRelease>` for both.
   HEAD is not at the tag (`main` between releases carries the last release's number). Nothing is
   downgraded, and nothing clones or pulls `main`.
 - **A move is refused** for a full (non-shallow) clone such as a developer's working repo, a clone
-  whose `origin` is another repository, and a clone with edited tracked files. The two files the
-  installer itself rewrites, backend `version.json` and UI `package-lock.json`, are reset to the tag
-  instead, so edits to them are discarded.
-- **The UI is rebuilt** whenever the served build was not made from the pin. The tag is recorded in
-  `ui/ember-ui-build.json` after each copy, so a build that failed after the move is offered again.
+  whose stored `origin` is another repository (read with `git config`, so a `url.<base>.insteadOf`
+  rewrite does not count), and a clone with edited tracked files. The two files the installer itself
+  rewrites, backend `version.json` and UI `package-lock.json`, are reset to the tag after the fetch
+  succeeds, so edits to them are discarded by a move and kept by a failed one. The reason is shown on
+  the screen that asked for the move.
+- **A full ember-2-ui clone** (installers before `--depth 1` made them) cannot be moved. A packaged
+  install renames it to `ember-2-ui.old-<date>`, keeps it, and clones the pin in its place, putting it
+  back if that clone fails. Unpackaged dev mode (`npm run start:real`) builds the developer's clone as
+  it stands, with a warning, and never moves or renames it (`src/exec/ui-to-pin.js`).
+- **The UI is rebuilt** whenever the served build was not recorded as made from the pin, except for a
+  clone ahead of the pin, which is left as it is. Each build is copied to `ui.new` and swapped in for
+  `ui/` only once complete, with the tag recorded in `ui/ember-ui-build.json`
+  (`src/exec/ui-build.js`). A build that failed after the move, and a build made without the API key,
+  have no record, so the next check offers the rebuild.
+- **The backend setup** (pip install, `docker compose up`, API restart) is recorded in
+  `.venv/ember-backend-setup.json` once all three succeed and the API answers with the version on
+  disk (`src/exec/backend-setup.js`); the install flow records it once its pip and docker steps
+  succeed. A clone at the pin with no record shows "(needs setup)" and Update All runs the setup
+  again, so an update that stopped part way is finished on the next run.
+- **One clone, move, build or update runs at a time** (`src/lib/exclusive.js`); a second one is
+  refused with the name of the running one. "Start fresh" renames the existing ember-2 aside and puts
+  it back if the new clone fails (`src/exec/aside.js`).
 - **The update screen** targets the pin for the backend and UI rows, not GitHub's latest release. A
   newer backend or UI reaches users with the installer release that pins it, and appears after the
   installer updates itself (on Linux and macOS, after the user downloads the new installer).
