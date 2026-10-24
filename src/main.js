@@ -16,7 +16,7 @@ const { redactSecrets } = require('./lib/redact')
 const { isAllowedExternalUrl } = require('./lib/external-url')
 const { downloadInstallerUpdate, isManualPlatform, manualResult } = require('./lib/installer-update')
 const { API_PKILL_PATTERN, apiSpawnSpec } = require('./lib/api-launch')
-const { releaseTag, updateAction } = require('./lib/release-pin')
+const { releaseTag, rowInstalled } = require('./lib/release-pin')
 const { releaseFromResponse } = require('./lib/github-release')
 const { moveToTag } = require('./exec/move-to-tag')
 const { pinAction, uiUpdateAction } = require('./exec/pin-action')
@@ -35,15 +35,6 @@ const movesToPin = async (dir, installed) => (await pinAction({ cwd: dir, instal
 function logStays(name, action, installed, log) {
   if (action === 'current') log(`${name} is already at ${EMBER_TAG}, the release this installer pins.\n`)
   if (action === 'ahead') log(`${name} is at ${installed}, newer than ${EMBER_TAG} (the release this installer pins). Leaving it as is.\n`)
-}
-
-// The installed text on an update row. An equal version that still moves is
-// unreleased work on main; a UI rebuild means the served UI predates the clone.
-function rowInstalled(installed, action) {
-  if (action === 'rebuild') return `${installed || 'unknown'} (served UI not built from it)`
-  if (!installed) return 'unknown'
-  const unreleased = action === 'update' && updateAction({ installed, pinned: EMBER_TAG }) === 'current'
-  return unreleased ? `${installed} (unreleased)` : installed
 }
 
 // Move the backend clone to the pin when it needs it. version.json is reset
@@ -982,14 +973,14 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
     },
     backend: {
       hasUpdate: backendAction === 'update',
-      installed: rowInstalled(backendInstalled, backendAction),
+      installed: rowInstalled({ installed: backendInstalled, action: backendAction, pinned: EMBER_TAG }),
       latest: EMBER_TAG,
       apiRunning: backendApiRunning,
       notes: releaseSummary(backendRelease?.body),
     },
     ui: {
       hasUpdate: uiNeedsBuild(uiAction),
-      installed: rowInstalled(uiInstalled, uiAction),
+      installed: rowInstalled({ installed: uiInstalled, action: uiAction, pinned: EMBER_TAG }),
       latest: EMBER_VERSION,
       notes: releaseSummary(uiRelease?.body),
     },

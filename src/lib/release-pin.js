@@ -31,4 +31,14 @@ function updateAction({ installed, pinned }) {
   return c === 0 ? 'current' : 'ahead'
 }
 
-module.exports = { releaseTag, updateAction, SEMVER }
+// The installed text on an update row, given the action the row's check
+// decided. An equal version that still moves is unreleased work on main; a
+// UI rebuild means the served UI was not built from the clone.
+function rowInstalled({ installed, action, pinned }) {
+  if (action === 'rebuild') return `${installed || 'unknown'} (needs rebuild)`
+  if (!installed) return 'unknown'
+  const unreleased = action === 'update' && updateAction({ installed, pinned }) === 'current'
+  return unreleased ? `${installed} (unreleased)` : installed
+}
+
+module.exports = { releaseTag, updateAction, rowInstalled, SEMVER }

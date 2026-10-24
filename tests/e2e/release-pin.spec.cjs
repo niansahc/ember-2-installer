@@ -1,6 +1,6 @@
 // The release pin, end to end except for real git (tests/integration covers
 // that). Requires the modules directly; no app launch. Covers:
-//   - releaseTag and updateAction (src/lib/release-pin.js)
+//   - releaseTag, updateAction and rowInstalled (src/lib/release-pin.js)
 //   - the package.json pin rule (emberRelease against version)
 //   - the release.yml gate (check-pinned-tags)
 //   - source checks on src/: every clone goes to the pin, nothing pulls a
@@ -13,7 +13,7 @@ const { test, expect } = require('@playwright/test')
 const fs = require('fs')
 const path = require('path')
 const yaml = require('js-yaml')
-const { releaseTag, updateAction, SEMVER } = require('../../src/lib/release-pin')
+const { releaseTag, updateAction, rowInstalled, SEMVER } = require('../../src/lib/release-pin')
 const { compareVersions } = require('../../src/lib/version')
 
 const SRC = path.resolve(__dirname, '..', '..', 'src')
@@ -128,6 +128,26 @@ test.describe('updateAction (never a downgrade)', () => {
   test('installed version unknown: update to the pin', () => {
     expect(updateAction({ installed: null, pinned: '0.18.1' })).toBe('update')
     expect(updateAction({ installed: 'unknown', pinned: '0.18.1' })).toBe('update')
+  })
+})
+
+test.describe('rowInstalled (update row label)', () => {
+  const pinned = 'v0.18.1'
+
+  test('a UI rebuild reads "needs rebuild"', () => {
+    expect(rowInstalled({ installed: '0.18.1', action: 'rebuild', pinned })).toBe('0.18.1 (needs rebuild)')
+    expect(rowInstalled({ installed: null, action: 'rebuild', pinned })).toBe('unknown (needs rebuild)')
+  })
+
+  test('an equal version that still moves reads "unreleased"', () => {
+    expect(rowInstalled({ installed: 'v0.18.1', action: 'update', pinned })).toBe('v0.18.1 (unreleased)')
+  })
+
+  test('every other row shows the version alone', () => {
+    expect(rowInstalled({ installed: 'v0.18.0', action: 'update', pinned })).toBe('v0.18.0')
+    expect(rowInstalled({ installed: 'v0.18.1', action: 'current', pinned })).toBe('v0.18.1')
+    expect(rowInstalled({ installed: 'v0.19.0', action: 'ahead', pinned })).toBe('v0.19.0')
+    expect(rowInstalled({ installed: null, action: 'update', pinned })).toBe('unknown')
   })
 })
 
