@@ -19,6 +19,7 @@ const commitAll = (cwd, msg) => {
 // plain local path, so a clone would not be shallow as a real one is) and each
 // commit id, keyed by its tag or 'main'.
 function seedRepo(dir, steps) {
+  fs.mkdirSync(dir, { recursive: true })
   const bare = path.join(dir, 'src.git')
   const work = path.join(dir, 'work')
   execFileSync('git', ['init', '--bare', '--initial-branch=main', bare], { stdio: 'ignore' })

@@ -8,6 +8,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { cloneRepo } = require('../../src/exec/clone')
+const { run } = require('../../src/exec/run')
 const { git, gitOut, seedRepo } = require('./git-fixture.cjs')
 
 test.describe('cloneRepo', () => {
@@ -42,6 +43,23 @@ test.describe('cloneRepo', () => {
     expect(gitOut(['rev-parse', 'HEAD'], target)).not.toBe(repo.ids.main)
     expect(fs.readFileSync(path.join(target, 'README.md'), 'utf8').trim()).toBe('release')
     expect(gitOut(['rev-parse', '--is-shallow-repository'], target)).toBe('true')
+  })
+
+  test('clones under a parent path with a space (C:\\Users\\Jane Doe\\...)', async () => {
+    const target = path.join(tmp, 'Jane Doe', 'Ember-2', 'ember-2-ui')
+    const result = await cloneRepo({ url: repo.url, targetDir: target, tag: 'v1.0.0', onData: () => {} })
+    expect(result).toEqual({ ok: true, code: 0 })
+    expect(gitOut(['rev-parse', 'HEAD'], target)).toBe(repo.ids['v1.0.0'])
+  })
+
+  test('control: the full path as a git argument splits on the space and fails', async () => {
+    // run() joins arguments unquoted under shell:true, which is why cloneRepo
+    // passes only the folder name.
+    const target = path.join(tmp, 'Jane Doe', 'ember-2-ui')
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    const r = await run('git', ['clone', '--depth', '1', '--branch', 'v1.0.0', repo.url, target])
+    expect(r.ok).toBe(false)
+    expect(fs.existsSync(target)).toBe(false)
   })
 
   test('control: the same repo cloned without a tag lands on main\'s newer commit', () => {
