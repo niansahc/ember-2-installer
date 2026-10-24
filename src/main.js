@@ -20,8 +20,9 @@ const { releaseTag, rowInstalled } = require('./lib/release-pin')
 const { releaseFromResponse } = require('./lib/github-release')
 const { moveToTag } = require('./exec/move-to-tag')
 const { replaceWithClone } = require('./exec/aside')
-const { pinAction, uiUpdateAction, logStays } = require('./exec/pin-action')
-const { installedBackendVersion, installedUiVersion } = require('./exec/installed')
+const { uiUpdateAction, backendUpdateAction, logStays } = require('./exec/pin-action')
+const { installedBackendVersion, installedUiVersion, recordBackendSetup } = require('./exec/installed')
+const { runBackendSetup } = require('./exec/backend-setup')
 const { uiToPin, uiNeedsBuild, uiBuildIsPin } = require('./exec/ui-to-pin')
 const { buildAndServeUi } = require('./exec/ui-build')
 
@@ -30,22 +31,118 @@ const { buildAndServeUi } = require('./exec/ui-build')
 const EMBER_TAG = releaseTag(require('../package.json'))
 const EMBER_VERSION = displayVersion(EMBER_TAG)
 
-// Whether an update moves the clone in dir to the pin (src/exec/pin-action.js:
-// never a downgrade; an equal version moves unless HEAD is at the tag).
-const movesToPin = async (dir, installed) => (await pinAction({ cwd: dir, installed, tag: EMBER_TAG })) === 'update'
+// Backend actions (backendUpdateAction in src/exec/pin-action.js) that an
+// update acts on: 'update' moves the clone and then runs the setup, 'finish'
+// runs a setup that never completed.
+const backendNeedsSetup = (action) => action === 'update' || action === 'finish'
 
-// Move the backend clone to the pin when it needs it. version.json is reset
-// first: older installers rewrote it. Resolves { ok: true, moved } or
-// moveToTag's { ok: false, error }.
+// Move the backend clone to the pin when it needs it. version.json is reset:
+// older installers rewrote it. Resolves { ok: true, action } or moveToTag's
+// { ok: false, error }; the caller runs setUpBackend when backendNeedsSetup.
 async function moveBackendToPin(emberPath, log) {
-  const installed = installedBackendVersion(emberPath)
-  const action = await pinAction({ cwd: emberPath, installed, tag: EMBER_TAG })
-  logStays('ember-2', action, installed, EMBER_TAG, log)
-  if (action !== 'update') return { ok: true, moved: false }
+  const action = await backendUpdateAction({ emberPath, tag: EMBER_TAG })
+  logStays('ember-2', action, installedBackendVersion(emberPath), EMBER_TAG, log)
+  if (action !== 'update') return { ok: true, action }
   const r = await moveToTag({
     cwd: emberPath, tag: EMBER_TAG, url: DEFAULT_BACKEND_REPO_URL, onData: log, resetFiles: ['version.json'],
   })
-  return r.ok ? { ok: true, moved: true } : r
+  return r.ok ? { ok: true, action } : r
+}
+
+// The running API's /api/health answer, or null when it does not answer.
+function apiHealth(host) {
+  return new Promise((resolve) => {
+    const req = http.get(`http://${host || '127.0.0.1'}:8000/api/health`, { timeout: 3000 }, (res) => {
+      let data = ''
+      res.on('data', (d) => (data += d))
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)) } catch { resolve(null) }
+      })
+    })
+    req.on('error', () => resolve(null))
+    req.on('timeout', () => { req.destroy(); resolve(null) })
+  })
+}
+
+// The real commands for runBackendSetup (src/exec/backend-setup.js), each
+// resolving true on success. The old API is stopped before the docker restart
+// so a lingering uvicorn cannot win the port-8000 bind race, and the restart
+// succeeds only when the new API answers with the version on disk.
+function backendSetupSteps(emberPath, host, log) {
+  const isWin = process.platform === 'win32'
+  return {
+    pip: async () => {
+      log('Installing Python dependencies...\n')
+      return (await run(shellVenvPython(emberPath), ['-m', 'pip', 'install', '-r', 'requirements.txt'], {
+        cwd: emberPath, onData: log,
+      })).ok
+    },
+    docker: async () => {
+      log('Stopping old API process...\n')
+      if (isWin) {
+        await run('taskkill', ['/F', '/FI', 'WINDOWTITLE eq start_api*'])
+        await run('cmd', ['/c', 'for /f "tokens=5" %a in (\'netstat -aon ^| findstr :8000 ^| findstr LISTENING\') do taskkill /F /PID %a'])
+      } else {
+        await run('pkill', ['-f', API_PKILL_PATTERN])
+      }
+      await new Promise((r) => setTimeout(r, 2000))
+      log('Restarting Docker services...\n')
+      return (await run('docker', ['compose', 'up', '-d', '--build'], { cwd: emberPath, onData: log })).ok
+    },
+    restart: async () => {
+      log('Starting updated API...\n')
+      const logFd = openApiStartupLogFd()
+      const stdio = logFd === 'ignore' ? 'ignore' : ['ignore', logFd, logFd]
+      const spec = apiSpawnSpec(emberPath, process.platform)
+      spawn(spec.command, spec.args, { cwd: emberPath, shell: spec.shell, detached: true, stdio }).unref()
+      if (typeof logFd === 'number') { try { fs.closeSync(logFd) } catch {} }
+
+      log('Waiting for API to start...\n')
+      const expected = installedBackendVersion(emberPath)
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 3000))
+        const health = await apiHealth(host)
+        if (health) {
+          const running = health.version || 'unknown'
+          log(`API running: ${running}\n`)
+          if (expected && running !== expected && running !== `v${expected}`) {
+            log(`Warning: expected ${expected} but API reports ${running}\n`)
+            return false
+          }
+          return true
+        }
+        log(`Waiting... (${(i + 1) * 3}s)\n`)
+      }
+      log('Warning: API did not start within 60 seconds. You may need to start it manually.\n')
+      return false
+    },
+  }
+}
+
+// Run the backend setup after a move ('update') or again ('finish'), and
+// record it once every step succeeded. Resolves runBackendSetup's result.
+function setUpBackend(emberPath, host, action, log) {
+  if (action === 'finish') log(`The ember-2 setup for ${EMBER_TAG} never finished. Running it again.\n`)
+  const version = installedBackendVersion(emberPath)
+  if (version) log(`Now at version: ${version}\n`)
+  return runBackendSetup({ emberPath, tag: EMBER_TAG, steps: backendSetupSteps(emberPath, host, log), log })
+}
+
+// The install flow's pip and docker steps, per install. Once both have
+// succeeded the backend setup is recorded, so a fresh install is not offered
+// it again; the API's first start is the Done screen's, not a restart.
+const installBackendSteps = new Map()
+function noteInstallStep(emberPath, step, ok) {
+  if (step !== 'pip' && step !== 'docker') return
+  const done = installBackendSteps.get(emberPath) || new Set()
+  if (ok) done.add(step)
+  else done.delete(step)
+  installBackendSteps.set(emberPath, done)
+  if (done.has('pip') && done.has('docker')) {
+    try {
+      recordBackendSetup(emberPath, EMBER_TAG)
+    } catch {}
+  }
 }
 
 // Bring ember-2-ui to the pin (src/exec/ui-to-pin.js), then build and serve
@@ -269,26 +366,16 @@ ipcMain.handle('check-ember-update', async () => {
   const emberPath = getEmberPath()
   if (!emberPath) return { hasUpdate: false, error: 'No ember-2 path configured' }
 
-  // The target is the pinned release, not GitHub's latest; the release is
-  // fetched only for its notes.
-  const releaseP = fetchRelease(REPO_BACKEND_SLUG, EMBER_TAG)
+  // The Done screen shows the installed version; git describe stands in when
+  // version.json has none. The target is the pin, decided as in every check
+  // (backendUpdateAction), so nothing here needs GitHub.
   let installed = vPrefixed(installedBackendVersion(emberPath))
   if (!installed) {
     const describe = await run('git', ['describe', '--tags', '--abbrev=0'], { cwd: emberPath })
     installed = describe.ok ? describe.stdout.trim() : null
   }
-
-  // An unknown installed version counts as an update to the pin, as in
-  // check-all-updates and Update All.
-  const hasUpdate = await movesToPin(emberPath, installed)
-  const release = await releaseP
-  return {
-    hasUpdate,
-    installed: installed || 'unknown',
-    latest: EMBER_VERSION,
-    changelog: release?.body || '',
-    publishedAt: release?.published_at,
-  }
+  const action = await backendUpdateAction({ emberPath, tag: EMBER_TAG })
+  return { hasUpdate: backendNeedsSetup(action), installed: installed || 'unknown', latest: EMBER_VERSION }
 })
 
 ipcMain.handle('run-ember-update', async () => {
@@ -296,27 +383,14 @@ ipcMain.handle('run-ember-update', async () => {
   if (!emberPath) return { ok: false }
 
   const emberLog = (chunk) => sendLog('ember-update-log', chunk)
-  const moved = await moveBackendToPin(emberPath, emberLog)
-  if (!moved.ok) {
-    emberLog(`${moved.error}\n`)
+  const backend = await moveBackendToPin(emberPath, emberLog)
+  if (!backend.ok) {
+    emberLog(`${backend.error}\n`)
     return { ok: false }
   }
-  if (!moved.moved) return { ok: true, pipOk: true, dockerOk: true, tag: vPrefixed(installedBackendVersion(emberPath)) }
-
-  const isWin = process.platform === 'win32'
-  const pyBin = isWin
-    ? path.join(emberPath, '.venv', 'Scripts', 'python.exe')
-    : path.join(emberPath, '.venv', 'bin', 'python')
-
-  const pipOk = (await run(pyBin, ['-m', 'pip', 'install', '-r', 'requirements.txt'], {
-    cwd: emberPath, onData: emberLog,
-  })).ok
-
-  const dockerOk = (await run('docker', ['compose', 'up', '-d', '--build'], {
-    cwd: emberPath, onData: emberLog,
-  })).ok
-
-  return { ok: true, pipOk, dockerOk, tag: EMBER_TAG }
+  if (!backendNeedsSetup(backend.action)) return { ok: true, tag: vPrefixed(installedBackendVersion(emberPath)) }
+  const setup = await setUpBackend(emberPath, null, backend.action, emberLog)
+  return { ok: true, pipOk: setup.pipOk, dockerOk: setup.dockerOk, tag: EMBER_TAG }
 })
 
 ipcMain.handle('check-prerequisites', async () => {
@@ -689,6 +763,12 @@ ipcMain.handle('setup-dev-mode', (_e, { emberPath, demoVault, testVault }) => {
 
 
 ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
+  const result = await runInstallStep(step, emberPath)
+  noteInstallStep(emberPath, step, result.ok)
+  return result
+})
+
+async function runInstallStep(step, emberPath) {
   const isWin = process.platform === 'win32'
   const pyBin = shellVenvPython(emberPath)
 
@@ -784,7 +864,7 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
   // venv, pip, docker all set cmd/args above — run via shared helper
   if (!cmd) return { ok: false, error: `Unknown step: ${step}` }
   return runSpawn(cmd, args, emberPath, step)
-})
+}
 
 // Thin adapter over run(): streams both stdout and stderr to the install-log
 // channel and fires install-step-done on completion. The IPC side-effects live
@@ -803,18 +883,19 @@ ipcMain.handle('check-for-update', async () => {
   const emberPath = getEmberPath()
   if (!emberPath) return { hasUpdate: false }
 
-  const installed = vPrefixed(installedBackendVersion(emberPath))
-
-  // The target is the pinned release; the release is fetched for its notes.
-  const release = await fetchRelease(REPO_BACKEND_SLUG, EMBER_TAG)
-  if (!release) return { hasUpdate: false }
-
+  // The target is the pin, decided from the clone as in every check
+  // (backendUpdateAction). The release is only for its notes, so a rate
+  // limit, a missing release or no network never hides the update.
+  const [action, release] = await Promise.all([
+    backendUpdateAction({ emberPath, tag: EMBER_TAG }),
+    fetchReleaseWithTimeout(REPO_BACKEND_SLUG, EMBER_TAG),
+  ])
   return {
-    hasUpdate: await movesToPin(emberPath, installed),
-    installedTag: installed,
+    hasUpdate: backendNeedsSetup(action),
+    installedTag: vPrefixed(installedBackendVersion(emberPath)),
     latestTag: EMBER_VERSION,
-    changelog: release.body || '',
-    publishedAt: release.published_at,
+    changelog: release?.body || '',
+    publishedAt: release?.published_at,
   }
 })
 
@@ -860,31 +941,20 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
     // with the installer release that pins it.
     fetchReleaseWithTimeout(REPO_BACKEND_SLUG, EMBER_TAG),
     fetchReleaseWithTimeout(REPO_UI_SLUG, EMBER_TAG),
-    // Get backend version from running API, not version.json
-    new Promise((resolve) => {
-      const targetHost = host || '127.0.0.1'
-  
-      const req = http.get(`http://${targetHost}:8000/api/health`, { timeout: 3000 }, (res) => {
-        let data = ''
-        res.on('data', (d) => (data += d))
-        res.on('end', () => {
-          try { resolve(JSON.parse(data)) } catch { resolve(null) }
-        })
-      })
-      req.on('error', () => resolve(null))
-      req.on('timeout', () => { req.destroy(); resolve(null) })
-    }),
+    // The running API's version, which the backend row shows.
+    apiHealth(host),
   ])
 
   const installerInstalled = app.getVersion()
   const installerLatest = displayVersion(installerRelease?.tag_name) || null
 
-  // Backend version: prefer running API, fall back to version.json on disk.
-  // If neither is available, we can't verify, so pinAction moves it to the pin.
-  let backendInstalled = healthData?.version || null
+  // The row shows the running API's version when it answers, else
+  // version.json. The decision reads the clone and version.json, as Update All
+  // does (backendUpdateAction), so the row and the update agree; with no
+  // install there is nothing to read and the pin is the target.
+  const backendInstalled = healthData?.version || (emberPath ? vPrefixed(installedBackendVersion(emberPath)) : null)
   const backendApiRunning = !!healthData
-  if (!backendInstalled && emberPath) backendInstalled = vPrefixed(installedBackendVersion(emberPath))
-  const backendAction = await pinAction({ cwd: emberPath, installed: backendInstalled, tag: EMBER_TAG })
+  const backendAction = emberPath ? await backendUpdateAction({ emberPath, tag: EMBER_TAG }) : 'update'
 
   // Without an install there is no clone, so Update All would clone it.
   const uiInstalled = uiDir ? installedUiVersion(uiDir) : null
@@ -906,7 +976,7 @@ ipcMain.handle('check-all-updates', async (_e, { host }) => {
       notes: releaseSummary(installerRelease?.body),
     },
     backend: {
-      hasUpdate: backendAction === 'update',
+      hasUpdate: backendNeedsSetup(backendAction),
       installed: rowInstalled({ installed: backendInstalled, action: backendAction, pinned: EMBER_TAG }),
       latest: EMBER_TAG,
       apiRunning: backendApiRunning,
@@ -925,83 +995,18 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
   const emberPath = getEmberPath()
   if (!emberPath) return { ok: false, error: 'No ember-2 path configured' }
 
-  const isWin = process.platform === 'win32'
   const pyBin = shellVenvPython(emberPath)
   const log = (text) => sendLog('update-all-log', text)
 
-  if (updates.backend) log('Updating Ember backend...\n')
-  const backend = updates.backend ? await moveBackendToPin(emberPath, log) : { ok: true, moved: false }
-  if (!backend.ok) { log(`Backend update failed: ${backend.error}\n`); return { ok: false, stage: 'backend-move' } }
-  if (backend.moved) {
-    log('Installing Python dependencies...\n')
-    const pipOk = (await run(pyBin, ['-m', 'pip', 'install', '-r', 'requirements.txt'], {
-      cwd: emberPath, onData: log,
-    })).ok
-    if (!pipOk) log('Warning: pip install had issues, continuing...\n')
-
-    const movedVersion = installedBackendVersion(emberPath)
-    if (movedVersion) log(`Now at version: ${movedVersion}\n`)
-
-    // Kill the old API BEFORE docker restart so a lingering uvicorn can't win the port-8000 bind race.
-    log('Stopping old API process...\n')
-    if (isWin) {
-      await run('taskkill', ['/F', '/FI', 'WINDOWTITLE eq start_api*'])
-      await run('cmd', ['/c', 'for /f "tokens=5" %a in (\'netstat -aon ^| findstr :8000 ^| findstr LISTENING\') do taskkill /F /PID %a'])
-    } else {
-      await run('pkill', ['-f', API_PKILL_PATTERN])
+  if (updates.backend) {
+    log('Updating Ember backend...\n')
+    const backend = await moveBackendToPin(emberPath, log)
+    if (!backend.ok) { log(`Backend update failed: ${backend.error}\n`); return { ok: false, stage: 'backend-move' } }
+    // A setup that does not finish is not recorded, so the next check offers
+    // it again; the other updates still run.
+    if (backendNeedsSetup(backend.action) && (await setUpBackend(emberPath, host, backend.action, log)).ok) {
+      log('Backend updated ✓\n\n')
     }
-    await new Promise((r) => setTimeout(r, 2000))
-
-    log('Restarting Docker services...\n')
-    // Divergence preserved (tracked as a #7 follow-up bug): unlike run-ember-update,
-    // this discards the compose exit code — a failed restart is not surfaced.
-    await run('docker', ['compose', 'up', '-d', '--build'], { cwd: emberPath, onData: log })
-
-    log('Starting updated API...\n')
-    const restartLogFd = openApiStartupLogFd()
-    const restartStdio = restartLogFd === 'ignore' ? 'ignore' : ['ignore', restartLogFd, restartLogFd]
-    const restartSpec = apiSpawnSpec(emberPath, process.platform)
-    const apiProc = spawn(restartSpec.command, restartSpec.args, {
-      cwd: emberPath, shell: restartSpec.shell, detached: true, stdio: restartStdio,
-    })
-    apiProc.unref()
-    if (typeof restartLogFd === 'number') { try { fs.closeSync(restartLogFd) } catch {} }
-
-    log('Waiting for API to start...\n')
-
-    const targetHost = host || '127.0.0.1'
-    let apiReady = false
-    for (let i = 0; i < 20; i++) {
-      await new Promise((r) => setTimeout(r, 3000))
-      const healthOk = await new Promise((resolve) => {
-        const req = http.get(`http://${targetHost}:8000/api/health`, { timeout: 3000 }, (res) => {
-          let data = ''
-          res.on('data', (d) => (data += d))
-          res.on('end', () => {
-            try {
-              const health = JSON.parse(data)
-              resolve(health)
-            } catch { resolve(null) }
-          })
-        })
-        req.on('error', () => resolve(null))
-        req.on('timeout', () => { req.destroy(); resolve(null) })
-      })
-      if (healthOk) {
-        const runningVersion = healthOk.version || 'unknown'
-        log(`API running: ${runningVersion}\n`)
-        if (movedVersion && runningVersion !== movedVersion && runningVersion !== `v${movedVersion}`) {
-          log(`Warning: expected ${movedVersion} but API reports ${runningVersion}\n`)
-        }
-        apiReady = true
-        break
-      }
-      log(`Waiting... (${(i + 1) * 3}s)\n`)
-    }
-    if (!apiReady) {
-      log('Warning: API did not start within 60 seconds. You may need to start it manually.\n')
-    }
-    log('Backend updated ✓\n\n')
   }
 
   // 1b. Ensure embedding model is installed (required since v0.13.0).

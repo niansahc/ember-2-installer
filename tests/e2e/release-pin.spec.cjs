@@ -140,6 +140,11 @@ test.describe('rowInstalled (update row label)', () => {
     expect(rowInstalled({ installed: null, action: 'rebuild', pinned })).toBe('unknown (needs rebuild)')
   })
 
+  test('a backend setup that never finished reads "needs setup"', () => {
+    expect(rowInstalled({ installed: 'v0.18.1', action: 'finish', pinned })).toBe('v0.18.1 (needs setup)')
+    expect(rowInstalled({ installed: null, action: 'finish', pinned })).toBe('unknown (needs setup)')
+  })
+
   test('an equal version that still moves reads "unreleased"', () => {
     expect(rowInstalled({ installed: 'v0.18.1', action: 'update', pinned })).toBe('v0.18.1 (unreleased)')
   })
@@ -199,7 +204,7 @@ test.describe('source: update checks target the pin', () => {
   test('control: a check that reads GitHub\'s latest tag as the target is flagged', () => {
     const text = mainJs()
     const body = handlerBody(text, 'check-all-updates')
-    expect(body).toMatch(/pinAction\(\{ cwd: emberPath, installed: backendInstalled/)
+    expect(body).toMatch(/backendUpdateAction\(\{ emberPath, tag: EMBER_TAG \}\)/)
     const reverted = text.replace(body, body.replace('latest: EMBER_TAG,', 'latest: backendRelease?.tag_name || null,'))
     expect(reverted).not.toBe(text)
     expect(checksOffThePin(reverted)).toEqual(['check-all-updates'])
@@ -208,14 +213,15 @@ test.describe('source: update checks target the pin', () => {
 
 // Update checks that gate the pin decision, e.g. an `installed &&` guard that
 // reports no update when the installed version is unknown. The decision comes
-// from pinAction (src/exec/pin-action.js), which moves an unknown version to
-// the pin, so no backend or UI hasUpdate combines it with anything (&&); the
-// installer row is not a pin decision. A check that never asks pinAction is
-// flagged too, so the scan cannot pass by matching nothing.
+// from src/exec/pin-action.js (pinAction and the backend and UI actions built
+// on it), which moves an unknown version to the pin, so no backend or UI
+// hasUpdate combines it with anything (&&); the installer row is not a pin
+// decision. A check that never asks pin-action is flagged too, so the scan
+// cannot pass by matching nothing.
 function guardedPinChecks(text) {
   return UPDATE_CHECKS.flatMap((ch) => {
     const lines = handlerBody(text, ch).split(/\r?\n/).map((l) => l.trim())
-    const asks = lines.some((l) => /movesToPin\(|pinAction\(|uiUpdateAction\(/.test(l))
+    const asks = lines.some((l) => /pinAction\(|uiUpdateAction\(|backendUpdateAction\(/.test(l))
     const guarded = lines.filter((l) => /hasUpdate\b.*&&/.test(l) && !/installerSelfUpdate/.test(l))
     return [...(asks ? [] : [`${ch}: never asks pinAction`]), ...guarded.map((l) => `${ch}: ${l}`)]
   })
@@ -232,13 +238,41 @@ test.describe('source: an unknown installed version needs the pin', () => {
     const text = mainJs()
     const body = handlerBody(text, 'check-for-update')
     const guarded = text.replace(body, body.replace(
-      'hasUpdate: await movesToPin(emberPath, installed),',
-      'hasUpdate: !!installed && await movesToPin(emberPath, installed),',
+      'hasUpdate: backendNeedsSetup(action),',
+      'hasUpdate: !!installed && backendNeedsSetup(action),',
     ))
     expect(guarded).not.toBe(text)
     expect(guardedPinChecks(guarded)).toEqual([
-      'check-for-update: hasUpdate: !!installed && await movesToPin(emberPath, installed),',
+      'check-for-update: hasUpdate: !!installed && backendNeedsSetup(action),',
     ])
+  })
+})
+
+// check-for-update answers from the clone; the GitHub release is only its
+// notes. A check that returns early, or gates hasUpdate, on the release says
+// "latest version" whenever GitHub is rate limited, missing the release, or
+// offline. check-ember-update reads no release at all: nothing uses one.
+const releaseGatedChecks = (text) => [
+  ...(/if \(!release\)|release &&|release \?/.test(handlerBody(text, 'check-for-update')) ? ['check-for-update'] : []),
+  ...(/fetchRelease/.test(handlerBody(text, 'check-ember-update')) ? ['check-ember-update'] : []),
+]
+
+test.describe('source: the pin needs no GitHub answer', () => {
+  const mainJs = () => fs.readFileSync(path.join(SRC, 'main.js'), 'utf8')
+
+  test('check-for-update never gates on the release and check-ember-update never fetches one', () => {
+    expect(handlerBody(mainJs(), 'check-for-update')).toMatch(/changelog: release\?\.body/)
+    expect(releaseGatedChecks(mainJs())).toEqual([])
+  })
+
+  test('control: an early return on a missing release and a fetch for nothing are flagged', () => {
+    const text = mainJs()
+    const forUpdate = handlerBody(text, 'check-for-update')
+    const ember = handlerBody(text, 'check-ember-update')
+    const gated = text
+      .replace(forUpdate, forUpdate.replace('  return {', '  if (!release) return { hasUpdate: false }\n  return {'))
+      .replace(ember, ember.replace('  let installed', '  const releaseP = fetchRelease(REPO_BACKEND_SLUG, EMBER_TAG)\n  let installed'))
+    expect(releaseGatedChecks(gated)).toEqual(['check-for-update', 'check-ember-update'])
   })
 })
 
@@ -293,7 +327,7 @@ test.describe('source: install and update handlers', () => {
 
   test('build-ui and Update All bring ember-2-ui to the pin and build only through buildAndServeUi', () => {
     const text = mainJs()
-    expect(handlerBody(text, 'run-install-step')).toMatch(/await bringUiToPin\(/)
+    expect(text).toMatch(/async function runInstallStep[\s\S]*?await bringUiToPin\(/)
     expect(handlerBody(text, 'run-all-updates')).toMatch(/await bringUiToPin\(/)
     expect(text).toMatch(/record: uiBuildIsPin\(ui\.action\),\s+buildEnv: /)
     expect(rawUiBuilds(text)).toEqual([])
@@ -308,6 +342,10 @@ test.describe('source: install and update handlers', () => {
       "const buildOk = (await run('npm', ['run', 'build'], { cwd: uiDir, env, onData: log })).ok",
       "fs.cpSync(path.join(uiDir, 'dist'), targetUiDir, { recursive: true })",
     ])
+  })
+
+  test('the install flow notes its pip and docker steps for the backend setup record', () => {
+    expect(handlerBody(mainJs(), 'run-install-step')).toMatch(/noteInstallStep\(emberPath, step, result\.ok\)/)
   })
 
   test('fresh-install-ember sets the old install aside, never deletes it first', () => {

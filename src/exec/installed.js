@@ -1,6 +1,7 @@
 // What is installed on disk: the backend and UI versions as release-please
-// writes them, and the tag the served UI was built from. Every read resolves
-// null when the file is missing or unreadable, or the value is not a string.
+// writes them, the tag the served UI was built from, and the tag whose backend
+// setup (pip, docker, API restart) last completed. Every read resolves null
+// when the file is missing or unreadable, or the value is not a string.
 
 const fs = require('fs')
 const path = require('path')
@@ -40,4 +41,28 @@ function recordBuiltUiTag(targetUiDir, tag) {
   fs.writeFileSync(path.join(targetUiDir, BUILT_UI_FILE), `${JSON.stringify({ tag })}\n`, 'utf-8')
 }
 
-module.exports = { installedBackendVersion, installedUiVersion, builtUiTag, recordBuiltUiTag, BUILT_UI_FILE }
+// Written into the backend's venv once pip, docker and the API restart for a
+// release have all succeeded (src/exec/backend-setup.js). It lives in the venv
+// because a new venv needs its packages installed again, so it starts without.
+const BACKEND_SETUP_FILE = path.join('.venv', 'ember-backend-setup.json')
+
+// The tag whose backend setup last completed. null for an install from before
+// the record existed, or a setup that never finished.
+function backendSetupTag(emberPath) {
+  return nonEmptyString(readJson(path.join(emberPath, BACKEND_SETUP_FILE))?.tag)
+}
+
+function recordBackendSetup(emberPath, tag) {
+  fs.writeFileSync(path.join(emberPath, BACKEND_SETUP_FILE), `${JSON.stringify({ tag })}\n`, 'utf-8')
+}
+
+module.exports = {
+  installedBackendVersion,
+  installedUiVersion,
+  builtUiTag,
+  recordBuiltUiTag,
+  backendSetupTag,
+  recordBackendSetup,
+  BUILT_UI_FILE,
+  BACKEND_SETUP_FILE,
+}

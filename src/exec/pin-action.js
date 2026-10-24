@@ -5,7 +5,7 @@
 const fs = require('fs')
 const { run } = require('./run')
 const { updateAction } = require('../lib/release-pin')
-const { installedUiVersion, builtUiTag } = require('./installed')
+const { installedBackendVersion, installedUiVersion, builtUiTag, backendSetupTag } = require('./installed')
 
 // updateAction ('update', 'current' or 'ahead'; never a downgrade), plus where
 // HEAD is. main between releases carries the last release's version number,
@@ -29,10 +29,20 @@ async function uiUpdateAction({ uiDir, targetUiDir, tag }) {
   return action === 'current' && builtUiTag(targetUiDir) !== tag ? 'rebuild' : action
 }
 
+// The backend also has its setup: pip, docker and an API restart after the
+// source changes. Adds 'finish' (the clone is at the pin but no setup for it
+// was recorded as complete: an update that stopped part way, a step that
+// failed, or an install from before the record existed). The installed
+// version is read from version.json, as the update reads it.
+async function backendUpdateAction({ emberPath, tag }) {
+  const action = await pinAction({ cwd: emberPath, installed: installedBackendVersion(emberPath), tag })
+  return action === 'current' && backendSetupTag(emberPath) !== tag ? 'finish' : action
+}
+
 // Log why an install does not move to the pin.
 function logStays(name, action, installed, tag, log) {
   if (action === 'current') log(`${name} is already at ${tag}, the release this installer pins.\n`)
   if (action === 'ahead') log(`${name} is at ${installed}, newer than ${tag} (the release this installer pins). Leaving it as is.\n`)
 }
 
-module.exports = { pinAction, uiUpdateAction, logStays }
+module.exports = { pinAction, uiUpdateAction, backendUpdateAction, logStays }

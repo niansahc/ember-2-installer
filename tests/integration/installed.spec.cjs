@@ -7,6 +7,7 @@ const os = require('os')
 const path = require('path')
 const {
   installedBackendVersion, installedUiVersion, builtUiTag, recordBuiltUiTag, BUILT_UI_FILE,
+  backendSetupTag, recordBackendSetup, BACKEND_SETUP_FILE,
 } = require('../../src/exec/installed')
 
 test.describe('installed versions', () => {
@@ -55,5 +56,21 @@ test.describe('installed versions', () => {
     recordBuiltUiTag(tmp, 'v0.18.1')
     expect(builtUiTag(tmp)).toBe('v0.18.1')
     expect(JSON.parse(fs.readFileSync(path.join(tmp, BUILT_UI_FILE), 'utf8'))).toEqual({ tag: 'v0.18.1' })
+  })
+
+  test('backend setup tag: recorded in the venv, then read back; unknown before any record', () => {
+    fs.mkdirSync(path.join(tmp, '.venv'))
+    expect(backendSetupTag(tmp)).toBeNull()
+    recordBackendSetup(tmp, 'v0.18.1')
+    expect(backendSetupTag(tmp)).toBe('v0.18.1')
+    expect(BACKEND_SETUP_FILE).toBe(path.join('.venv', 'ember-backend-setup.json'))
+  })
+
+  test('backend setup tag: a new venv starts with no record', () => {
+    fs.mkdirSync(path.join(tmp, '.venv'))
+    recordBackendSetup(tmp, 'v0.18.1')
+    fs.rmSync(path.join(tmp, '.venv'), { recursive: true })
+    fs.mkdirSync(path.join(tmp, '.venv'))
+    expect(backendSetupTag(tmp)).toBeNull()
   })
 })

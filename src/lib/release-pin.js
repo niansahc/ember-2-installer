@@ -33,9 +33,11 @@ function updateAction({ installed, pinned }) {
 
 // The installed text on an update row, given the action the row's check
 // decided. An equal version that still moves is unreleased work on main; a
-// UI rebuild means the served UI was not built from the clone.
+// UI rebuild means the served UI was not built from the clone; a backend
+// 'finish' means its setup (pip, docker, API restart) never completed.
 function rowInstalled({ installed, action, pinned }) {
   if (action === 'rebuild') return `${installed || 'unknown'} (needs rebuild)`
+  if (action === 'finish') return `${installed || 'unknown'} (needs setup)`
   if (!installed) return 'unknown'
   const unreleased = action === 'update' && updateAction({ installed, pinned }) === 'current'
   return unreleased ? `${installed} (unreleased)` : installed

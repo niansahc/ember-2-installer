@@ -6,8 +6,8 @@ const { test, expect } = require('@playwright/test')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { pinAction, uiUpdateAction } = require('../../src/exec/pin-action')
-const { recordBuiltUiTag } = require('../../src/exec/installed')
+const { pinAction, uiUpdateAction, backendUpdateAction } = require('../../src/exec/pin-action')
+const { recordBuiltUiTag, recordBackendSetup } = require('../../src/exec/installed')
 const { git, seedRepo } = require('./git-fixture.cjs')
 
 // v1.1.0, then unreleased work on main that still carries 1.1.0, as
@@ -88,5 +88,58 @@ test.describe('pinAction and uiUpdateAction', () => {
     fs.mkdirSync(targetUiDir)
     recordBuiltUiTag(targetUiDir, 'v1.1.0')
     expect(await uiUpdateAction({ uiDir, targetUiDir, tag: 'v1.1.0' })).toBe('update')
+  })
+})
+
+// The backend reads version.json, as ember-2 has it.
+const backendStep = (v, tag) => ({ files: { 'version.json': `{"version":"${v}"}\n` }, tag })
+
+test.describe('backendUpdateAction', () => {
+  let seedDir
+  let repo
+  let tmp
+  const install = (args) => {
+    const dir = path.join(tmp, 'ember-2')
+    git(['clone', ...args, repo.url, dir])
+    fs.mkdirSync(path.join(dir, '.venv'))
+    return dir
+  }
+
+  test.beforeAll(() => {
+    seedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ember-backend-pin-seed-'))
+    repo = seedRepo(seedDir, [backendStep('1.0.0', 'v1.0.0'), backendStep('1.1.0', 'v1.1.0')])
+  })
+  test.afterAll(() => {
+    try { fs.rmSync(seedDir, { recursive: true, force: true }) } catch {}
+  })
+  test.beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ember-backend-pin-'))
+  })
+  test.afterEach(() => {
+    try { fs.rmSync(tmp, { recursive: true, force: true }) } catch {}
+  })
+
+  test('at the pin with its setup recorded: current', async () => {
+    const emberPath = install(['--depth', '1', '--branch', 'v1.1.0'])
+    recordBackendSetup(emberPath, 'v1.1.0')
+    expect(await backendUpdateAction({ emberPath, tag: 'v1.1.0' })).toBe('current')
+  })
+
+  test('control: at the pin with no setup recorded, or an older one, the setup runs again', async () => {
+    const emberPath = install(['--depth', '1', '--branch', 'v1.1.0'])
+    expect(await backendUpdateAction({ emberPath, tag: 'v1.1.0' })).toBe('finish')
+    recordBackendSetup(emberPath, 'v1.0.0')
+    expect(await backendUpdateAction({ emberPath, tag: 'v1.1.0' })).toBe('finish')
+  })
+
+  test('below the pin: update, whatever the record says', async () => {
+    const emberPath = install(['--depth', '1', '--branch', 'v1.0.0'])
+    recordBackendSetup(emberPath, 'v1.1.0')
+    expect(await backendUpdateAction({ emberPath, tag: 'v1.1.0' })).toBe('update')
+  })
+
+  test('above the pin: ahead, with or without a record', async () => {
+    const emberPath = install(['--depth', '1', '--branch', 'v1.1.0'])
+    expect(await backendUpdateAction({ emberPath, tag: 'v1.0.0' })).toBe('ahead')
   })
 })
