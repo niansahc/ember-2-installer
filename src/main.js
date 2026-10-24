@@ -20,8 +20,10 @@ const { releaseTag, rowInstalled } = require('./lib/release-pin')
 const { releaseFromResponse } = require('./lib/github-release')
 const { moveToTag } = require('./exec/move-to-tag')
 const { replaceWithClone } = require('./exec/aside')
-const { pinAction, uiUpdateAction } = require('./exec/pin-action')
-const { installedBackendVersion, installedUiVersion, recordBuiltUiTag } = require('./exec/installed')
+const { pinAction, uiUpdateAction, logStays } = require('./exec/pin-action')
+const { installedBackendVersion, installedUiVersion } = require('./exec/installed')
+const { uiToPin, uiNeedsBuild, uiBuildIsPin } = require('./exec/ui-to-pin')
+const { buildAndServeUi } = require('./exec/ui-build')
 
 // The ember-2 / ember-2-ui release tag this installer clones and updates to,
 // and its version as the update rows show it.
@@ -32,19 +34,13 @@ const EMBER_VERSION = displayVersion(EMBER_TAG)
 // never a downgrade; an equal version moves unless HEAD is at the tag).
 const movesToPin = async (dir, installed) => (await pinAction({ cwd: dir, installed, tag: EMBER_TAG })) === 'update'
 
-// Log why an install does not move to the pin.
-function logStays(name, action, installed, log) {
-  if (action === 'current') log(`${name} is already at ${EMBER_TAG}, the release this installer pins.\n`)
-  if (action === 'ahead') log(`${name} is at ${installed}, newer than ${EMBER_TAG} (the release this installer pins). Leaving it as is.\n`)
-}
-
 // Move the backend clone to the pin when it needs it. version.json is reset
 // first: older installers rewrote it. Resolves { ok: true, moved } or
 // moveToTag's { ok: false, error }.
 async function moveBackendToPin(emberPath, log) {
   const installed = installedBackendVersion(emberPath)
   const action = await pinAction({ cwd: emberPath, installed, tag: EMBER_TAG })
-  logStays('ember-2', action, installed, log)
+  logStays('ember-2', action, installed, EMBER_TAG, log)
   if (action !== 'update') return { ok: true, moved: false }
   const r = await moveToTag({
     cwd: emberPath, tag: EMBER_TAG, url: DEFAULT_BACKEND_REPO_URL, onData: log, resetFiles: ['version.json'],
@@ -52,35 +48,25 @@ async function moveBackendToPin(emberPath, log) {
   return r.ok ? { ok: true, moved: true } : r
 }
 
-// UI actions (uiUpdateAction) after which the UI is built and copied again.
-const uiNeedsBuild = (action) => action === 'clone' || action === 'update' || action === 'rebuild'
-
-// Bring the ember-2-ui clone to the pin: clone it when missing, move it when
-// it needs it (package-lock.json, which npm ci may rewrite, is reset first).
-// Resolves { ok: true, action } or { ok: false, stage, error }; the caller
-// builds when uiNeedsBuild(action).
-async function uiToPin(uiDir, targetUiDir, log) {
-  const action = await uiUpdateAction({ uiDir, targetUiDir, tag: EMBER_TAG })
-  logStays('ember-2-ui', action, installedUiVersion(uiDir), log)
-  if (action === 'clone') {
-    log('Cloning ember-2-ui...\n')
-    const r = await cloneRepo({ url: REPO_UI_URL, targetDir: uiDir, tag: EMBER_TAG, onData: log })
-    return r.ok ? { ok: true, action } : { ok: false, stage: 'ui-clone', error: 'UI clone failed.' }
-  }
-  if (action === 'update') {
-    const r = await moveToTag({
-      cwd: uiDir, tag: EMBER_TAG, url: REPO_UI_URL, onData: log, resetFiles: ['package-lock.json'],
-    })
-    if (!r.ok) {
-      return {
-        ok: false,
-        stage: 'ui-move',
-        error: `UI update failed: ${r.error}\nThe clone in ${uiDir} is unchanged, so retrying the update is safe.`,
-      }
-    }
-  }
-  if (action === 'rebuild') log(`The served UI was not built from ${EMBER_TAG}. Rebuilding it.\n`)
-  return { ok: true, action }
+// Bring ember-2-ui to the pin (src/exec/ui-to-pin.js), then build and serve
+// it (src/exec/ui-build.js) when that action needs a build. A build that is
+// not the pinned release (a clone ahead of it, a developer's clone built as
+// it stands) is not recorded. Resolves { ok: true, action, built, warning? }
+// or { ok: false, stage, error }.
+async function bringUiToPin({ emberPath, pyBin, log, build }) {
+  const uiDir = uiSourceDir(emberPath)
+  const targetUiDir = uiTargetDir(emberPath)
+  const ui = await uiToPin({ uiDir, targetUiDir, tag: EMBER_TAG, url: REPO_UI_URL, log, packaged: IS_PACKAGED })
+  if (!ui.ok || !build(ui.action)) return { ...ui, built: false }
+  const built = await buildAndServeUi({
+    uiDir,
+    targetUiDir,
+    tag: EMBER_TAG,
+    record: uiBuildIsPin(ui.action),
+    buildEnv: () => uiBuildEnvWithKey({ pyBin, emberPath, log }),
+    log,
+  })
+  return built.ok ? { ...ui, built: true } : built
 }
 
 const IS_PACKAGED = app.isPackaged
@@ -784,63 +770,15 @@ ipcMain.handle('run-install-step', async (_e, { step, emberPath }) => {
     mainWindow.webContents.send('install-step-done', { step, ok: true })
     return { ok: true }
   } else if (step === 'build-ui') {
-    const uiDir = uiSourceDir(emberPath)
-    const uiDistDir = path.join(uiDir, 'dist')
-    const targetUiDir = uiTargetDir(emberPath)
     const stepLog = (text) => sendLog('install-log', { step, text })
-
-    // An ember-2-ui left by an older installer is moved to the pin too, never
-    // built as it stands.
-    const ui = await uiToPin(uiDir, targetUiDir, stepLog)
-    if (!ui.ok) {
-      stepLog(`${ui.error}\n`)
-      mainWindow.webContents.send('install-step-done', { step, ok: false })
-      return { ok: false }
-    }
-
-    sendLog('install-log', { step, text: 'Installing UI dependencies...\n' })
-    const npmOk = (await run('npm', ['ci'], {
-      cwd: uiDir,
-      onData: (chunk) => sendLog('install-log', { step, text: chunk }),
-    })).ok
-    if (!npmOk) {
-      mainWindow.webContents.send('install-step-done', { step, ok: false })
-      return { ok: false }
-    }
-
-    const env = await uiBuildEnvWithKey({
-      pyBin,
-      emberPath,
-      log: (text) => sendLog('install-log', { step, text }),
-    })
-
-    sendLog('install-log', { step, text: 'Building Ember UI...\n' })
-    const buildOk = (await run('npm', ['run', 'build'], {
-      cwd: uiDir,
-      env,
-      onData: (chunk) => sendLog('install-log', { step, text: chunk }),
-    })).ok
-    if (!buildOk) {
-      mainWindow.webContents.send('install-step-done', { step, ok: false })
-      return { ok: false }
-    }
-
-    try {
-      if (fs.existsSync(targetUiDir)) {
-        fs.rmSync(targetUiDir, { recursive: true })
-      }
-      fs.cpSync(uiDistDir, targetUiDir, { recursive: true })
-      // A clone ahead of the pin is not the pinned build, so it is not recorded.
-      if (ui.action !== 'ahead') recordBuiltUiTag(targetUiDir, EMBER_TAG)
-      sendLog('install-log', { step, text: 'UI installed ✓\n' })
-    } catch (err) {
-      sendLog('install-log', { step, text: `Failed to copy UI: ${err.message}\n` })
-      mainWindow.webContents.send('install-step-done', { step, ok: false })
-      return { ok: false }
-    }
-
-    mainWindow.webContents.send('install-step-done', { step, ok: true })
-    return { ok: true }
+    // Always builds; an ember-2-ui left by an older installer is brought to
+    // the pin first. The error or warning goes back to the renderer too: the
+    // Done screen's rebuild has no install log to show it in.
+    const ui = await bringUiToPin({ emberPath, pyBin, log: stepLog, build: () => true })
+    if (ui.ok) stepLog('UI installed ✓\n')
+    else stepLog(`${ui.error}\n`)
+    mainWindow.webContents.send('install-step-done', { step, ok: ui.ok })
+    return ui.ok ? { ok: true, warning: ui.warning } : { ok: false, error: ui.error }
   }
 
   // venv, pip, docker all set cmd/args above — run via shared helper
@@ -989,7 +927,6 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
 
   const isWin = process.platform === 'win32'
   const pyBin = shellVenvPython(emberPath)
-  const uiDir = uiSourceDir(emberPath)
   const log = (text) => sendLog('update-all-log', text)
 
   if (updates.backend) log('Updating Ember backend...\n')
@@ -1089,32 +1026,11 @@ ipcMain.handle('run-all-updates', async (_e, { updates, host }) => {
   }
   log('\n')
 
-  if (updates.ui) log('Updating Ember UI...\n')
-  const ui = updates.ui ? await uiToPin(uiDir, uiTargetDir(emberPath), log) : { ok: true, action: 'current' }
-  if (!ui.ok) { log(`${ui.error}\n`); return { ok: false, stage: ui.stage } }
-  if (uiNeedsBuild(ui.action)) {
-    log('Installing UI dependencies...\n')
-    const npmOk = (await run('npm', ['ci'], { cwd: uiDir, onData: log })).ok
-    if (!npmOk) { log('npm ci failed.\n'); return { ok: false, stage: 'ui-npm' } }
-
-    const env = await uiBuildEnvWithKey({ pyBin, emberPath, log })
-
-    log('Building UI...\n')
-    const buildOk = (await run('npm', ['run', 'build'], { cwd: uiDir, env, onData: log })).ok
-    if (!buildOk) { log('UI build failed.\n'); return { ok: false, stage: 'ui-build' } }
-
-    const targetUiDir = uiTargetDir(emberPath)
-    try {
-      if (fs.existsSync(targetUiDir)) fs.rmSync(targetUiDir, { recursive: true })
-      fs.cpSync(path.join(uiDir, 'dist'), targetUiDir, { recursive: true })
-      // Recorded only after the copy: a build that fails before here leaves
-      // the old record, so the next check offers the rebuild again.
-      recordBuiltUiTag(targetUiDir, EMBER_TAG)
-      log('UI updated ✓\n\n')
-    } catch (err) {
-      log(`Failed to copy UI: ${err.message}\n`)
-      return { ok: false, stage: 'ui-copy' }
-    }
+  if (updates.ui) {
+    log('Updating Ember UI...\n')
+    const ui = await bringUiToPin({ emberPath, pyBin, log, build: uiNeedsBuild })
+    if (!ui.ok) { log(`${ui.error}\n`); return { ok: false, stage: ui.stage } }
+    if (ui.built) log('UI updated ✓\n\n')
   }
 
   // 3. Installer update — handled separately via electron-updater (quit-and-install)

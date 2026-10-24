@@ -115,10 +115,15 @@ test.describe('uiBuildEnvWithKey', () => {
 
   const opts = () => ({ pyBin: NODE, emberPath, log: () => {}, parentEnv: { PATH: '/usr/bin' } })
 
+  const builtKey = async () => {
+    const { env } = await uiBuildEnvWithKey(opts())
+    return env.EMBER_API_KEY
+  }
+
   test('reads the key fresh for each build: a rotated key reaches the next build', async () => {
-    expect((await uiBuildEnvWithKey(opts())).EMBER_API_KEY).toBe(KEY)
+    expect(await builtKey()).toBe(KEY)
     fs.writeFileSync(path.join(emberPath, 'stored-key.txt'), ROTATED_KEY)
-    expect((await uiBuildEnvWithKey(opts())).EMBER_API_KEY).toBe(ROTATED_KEY)
+    expect(await builtKey()).toBe(ROTATED_KEY)
   })
 
   test('fresh install (apikey step, then build-ui) starts Python twice', async () => {
@@ -129,9 +134,20 @@ test.describe('uiBuildEnvWithKey', () => {
 
   test('the build log never receives the key', async () => {
     const sink = []
-    const env = await uiBuildEnvWithKey({ ...opts(), log: (t) => sink.push(t) })
+    const { env } = await uiBuildEnvWithKey({ ...opts(), log: (t) => sink.push(t) })
     expect(env.EMBER_API_KEY).toBe(KEY)
     expect(sink.join('')).toContain('Reading API key for the UI build')
     expect(sink.join('')).not.toContain(KEY)
+  })
+
+  test('keyOk is false when the key cannot be read, and the build gets no key', async () => {
+    fs.writeFileSync(path.join(emberPath, 'scripts', 'set_api_key.py'), fakeScript({ keyExists: false, exitCode: 1, printKey: false }))
+    const { env, keyOk } = await uiBuildEnvWithKey(opts())
+    expect(keyOk).toBe(false)
+    expect(env.EMBER_API_KEY).toBeUndefined()
+  })
+
+  test('control: keyOk is true when the key is read', async () => {
+    expect((await uiBuildEnvWithKey(opts())).keyOk).toBe(true)
   })
 })

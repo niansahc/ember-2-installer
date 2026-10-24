@@ -30,12 +30,12 @@ function sourceFiles(dir) {
 let srcCache
 const srcText = () => (srcCache ??= sourceFiles(SRC).map((f) => fs.readFileSync(f, 'utf8')).join('\n'))
 
-// Clone calls that do not go to the pinned tag: a raw git clone (an argument
-// list starting with 'clone') without --branch, or a cloneRepo call, awaited
-// or not, that passes no tag (EMBER_TAG, or `tag` where a helper takes the pin
-// as a parameter). The UI action string 'clone' is not a git call.
+// Clone calls that do not go to the pinned tag: a raw git clone (a 'git'
+// argument list starting with 'clone') without --branch, or a cloneRepo call,
+// awaited or not, that passes no tag (EMBER_TAG, or `tag` where a helper takes
+// the pin as a parameter). The UI action string 'clone' is not a git call.
 function unpinnedClones(text) {
-  const rawClones = text.split(/\r?\n/).filter((l) => /\[\s*'clone',/.test(l) && !/'--branch'/.test(l))
+  const rawClones = text.split(/\r?\n/).filter((l) => /'git',\s*\[\s*'clone',/.test(l) && !/'--branch'/.test(l))
   const cloneRepoCalls = [...text.matchAll(/(?<!function )\bcloneRepo\(\{[\s\S]*?\}\)/g)].map((m) => m[0])
     .filter((call) => !/\btag(: EMBER_TAG)?\s*[,}]/.test(call))
   return [...rawClones.map((l) => l.trim()), ...cloneRepoCalls]
@@ -251,15 +251,12 @@ const savesExistingPath = (text) => /saveEmberPath\(/.test(handlerBody(text, 'up
 const bareUpdateTags = (text) => [...handlerBody(text, 'run-ember-update').matchAll(/\btag: (\w+)/g)]
   .map((m) => m[1]).filter((v) => v !== 'EMBER_TAG' && v !== 'vPrefixed')
 
-// Copies of a UI build into the served directory with no recordBuiltUiTag
-// within the next three lines: the check would not know what was served.
-function unrecordedUiCopies(text) {
-  const lines = text.split(/\r?\n/)
-  return lines.flatMap((l, i) => {
-    const copy = /fs\.cpSync\((uiDistDir|path\.join\(uiDir, 'dist'\))/.test(l)
-    return copy && !lines.slice(i + 1, i + 4).some((n) => /recordBuiltUiTag\(/.test(n)) ? [l.trim()] : []
-  })
-}
+// UI builds or copies in main.js. Every UI build goes through
+// buildAndServeUi (src/exec/ui-build.js), which swaps the served folder only
+// after a complete copy and records the tag; tests/integration covers it.
+const rawUiBuilds = (text) => text.split(/\r?\n/)
+  .filter((l) => /\['run', 'build'\]|fs\.cpSync\(|recordBuiltUiTag\(/.test(l))
+  .map((l) => l.trim())
 
 // fresh-install-ember deleting the existing install itself. It sets it aside
 // (replaceWithClone), so a failed clone can put it back.
@@ -294,18 +291,23 @@ test.describe('source: install and update handlers', () => {
     expect(bareUpdateTags(bare)).toEqual(['installedBackendVersion'])
   })
 
-  test('build-ui and Update All bring ember-2-ui to the pin and record every UI build', () => {
+  test('build-ui and Update All bring ember-2-ui to the pin and build only through buildAndServeUi', () => {
     const text = mainJs()
-    expect((text.match(/await uiToPin\(/g) || []).length).toBe(2)
-    expect((text.match(/fs\.cpSync\((uiDistDir|path\.join\(uiDir, 'dist'\))/g) || []).length).toBe(2)
-    expect(unrecordedUiCopies(text)).toEqual([])
+    expect(handlerBody(text, 'run-install-step')).toMatch(/await bringUiToPin\(/)
+    expect(handlerBody(text, 'run-all-updates')).toMatch(/await bringUiToPin\(/)
+    expect(text).toMatch(/record: uiBuildIsPin\(ui\.action\),\s+buildEnv: /)
+    expect(rawUiBuilds(text)).toEqual([])
   })
 
-  test('control: a UI copy without the record is flagged', () => {
+  test('control: a UI build and copy in main.js is flagged', () => {
     const text = mainJs()
-    const unrecorded = text.replace('      recordBuiltUiTag(targetUiDir, EMBER_TAG)\n', '').replace('      recordBuiltUiTag(targetUiDir, EMBER_TAG)\r\n', '')
-    expect(unrecorded).not.toBe(text)
-    expect(unrecordedUiCopies(unrecorded)).toEqual(["fs.cpSync(path.join(uiDir, 'dist'), targetUiDir, { recursive: true })"])
+    const raw = `${text}
+      const buildOk = (await run('npm', ['run', 'build'], { cwd: uiDir, env, onData: log })).ok
+      fs.cpSync(path.join(uiDir, 'dist'), targetUiDir, { recursive: true })`
+    expect(rawUiBuilds(raw)).toEqual([
+      "const buildOk = (await run('npm', ['run', 'build'], { cwd: uiDir, env, onData: log })).ok",
+      "fs.cpSync(path.join(uiDir, 'dist'), targetUiDir, { recursive: true })",
+    ])
   })
 
   test('fresh-install-ember sets the old install aside, never deletes it first', () => {

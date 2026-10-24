@@ -1,6 +1,6 @@
 // Where an install stands against the pinned release (src/lib/release-pin.js).
-// The update checks and the updates both decide from here, so a row that
-// offers an update and the update that applies it always agree.
+// Each update check decides a row from here, from the same files on disk the
+// update reads, so the row and the update agree.
 
 const fs = require('fs')
 const { run } = require('./run')
@@ -20,12 +20,19 @@ async function pinAction({ cwd, installed, tag }) {
 }
 
 // The UI also has a served build. Adds 'clone' (no clone yet) and 'rebuild'
-// (the clone is at the pin but the served UI was not built from it: a build
-// that failed after the move, or one from before the record existed).
+// (the clone is at the pin but the served UI was not recorded as built from
+// it: a build that failed after the move, one without the API key, or one
+// from before the record existed). A clone ahead of the pin is never rebuilt.
 async function uiUpdateAction({ uiDir, targetUiDir, tag }) {
   if (!fs.existsSync(uiDir)) return 'clone'
   const action = await pinAction({ cwd: uiDir, installed: installedUiVersion(uiDir), tag })
   return action === 'current' && builtUiTag(targetUiDir) !== tag ? 'rebuild' : action
 }
 
-module.exports = { pinAction, uiUpdateAction }
+// Log why an install does not move to the pin.
+function logStays(name, action, installed, tag, log) {
+  if (action === 'current') log(`${name} is already at ${tag}, the release this installer pins.\n`)
+  if (action === 'ahead') log(`${name} is at ${installed}, newer than ${tag} (the release this installer pins). Leaving it as is.\n`)
+}
+
+module.exports = { pinAction, uiUpdateAction, logStays }

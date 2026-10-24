@@ -36,12 +36,13 @@ async function readApiKey({ pyBin, emberPath, onLog } = {}) {
 // key baked in, or every authenticated request to the backend fails. The key is
 // read fresh for each build, so a key rotated while the installer is open is
 // picked up. It reaches the build through the child's environment only; nothing
-// holding it is written to disk.
+// holding it is written to disk. Resolves { env, keyOk }: keyOk is false when
+// the key could not be read and the build goes ahead without it.
 async function uiBuildEnvWithKey({ pyBin, emberPath, log, parentEnv = process.env }) {
   log('Reading API key for the UI build...\n')
   const keyResult = await readApiKey({ pyBin, emberPath, onLog: log })
-  if (!keyResult.ok) log('Warning: could not retrieve API key — UI will build without auth\n')
-  return uiBuildEnv(parentEnv, keyResult.key)
+  if (!keyResult.ok) log('Warning: could not retrieve API key. The UI will build without auth.\n')
+  return { env: uiBuildEnv(parentEnv, keyResult.key), keyOk: keyResult.ok }
 }
 
 module.exports = { readApiKey, uiBuildEnvWithKey }
