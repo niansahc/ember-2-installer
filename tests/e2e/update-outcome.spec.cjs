@@ -65,6 +65,20 @@ test.describe('Update check outcome and failure text', () => {
     expect(await cloneText({ ok: false, busy: true, error }, 'Failed')).toBe(`\n${error}\n`)
   })
 
+  const noteText = (r) => window.evaluate((u) => window.__emberTest.doneUiNoteText(u), r)
+
+  test('Done screen note: a failed npm ci keeps the Node.js hint after its reason', async () => {
+    expect(await noteText({ ok: false, stage: 'ui-npm', error: 'npm ci exited with code 1: no package-lock.json.' }))
+      .toBe('npm ci exited with code 1: no package-lock.json. Check that Node.js is installed, then try again.')
+  })
+
+  test('control: other failures and warnings show their text alone', async () => {
+    expect(await noteText({ ok: false, stage: 'ui-clone', error: 'UI clone failed: git clone exited with code 128.' }))
+      .toBe('UI clone failed: git clone exited with code 128.')
+    expect(await noteText({ ok: true, warning: 'kept at X' })).toBe('kept at X')
+    expect(await noteText({ ok: true })).toBe('')
+  })
+
   test('a refused Start fresh shows the reason alone, with no network hint', async () => {
     const error = 'C:\\x\\ember-2 is a full git clone, not an installer install. Start fresh replaces only an install the installer made, so it was left as is.'
     expect(await cloneText({ ok: false, refused: true, error }, 'Failed')).toBe(`\n${error}\n`)

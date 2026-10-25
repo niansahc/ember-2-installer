@@ -75,6 +75,14 @@ test.describe('uiToPin', () => {
     expect(siblings()).toEqual(['ember-2-ui'])
   })
 
+  test('a failed clone with no ember-2-ui yet names the cause', async () => {
+    const missing = pathToFileURL(path.join(tmp, 'no-such-repo.git')).href
+    const r = await toPin({ packaged: true, url: missing })
+    expect(r.ok).toBe(false)
+    expect(r.stage).toBe('ui-clone')
+    expect(r.error).toMatch(/^UI clone failed: git clone exited with code \d+: .*no-such-repo.*\.$/)
+  })
+
   test('packaged: a failed clone puts the full clone back', async () => {
     cloneUi(['--branch', 'v1.0.0'])
     const missing = pathToFileURL(path.join(tmp, 'no-such-repo.git')).href

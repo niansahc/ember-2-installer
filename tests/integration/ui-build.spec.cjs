@@ -21,10 +21,12 @@ test.describe('serveUi and buildAndServeUi', () => {
   // npm and vite as the build sees them: npm ci succeeds unless told not to,
   // and vite build writes dist/index.html. Every call is kept in calls.
   let calls
-  const fakeNpm = ({ ciOk = true } = {}) => async (cmd, args) => {
+  const failed = (stderr) => ({ ok: false, code: 1, stderr, error: null })
+  const fakeNpm = ({ ciOk = true, buildOk = true } = {}) => async (cmd, args) => {
     calls.push([cmd, ...args].join(' '))
-    if (cmd === 'npm' && args[0] === 'ci') return { ok: ciOk }
+    if (cmd === 'npm' && args[0] === 'ci') return ciOk ? { ok: true } : failed('npm ERR! code EUSAGE\nnpm ERR!\nnpm ERR! no package-lock.json.\n')
     if (cmd !== 'node' || args[0] !== VITE_BIN || args[1] !== 'build') return { ok: false }
+    if (!buildOk) return failed('Could not resolve "./App"\n    at resolve (vite.js:1:1)\n')
     fs.mkdirSync(path.join(uiDir, 'dist'), { recursive: true })
     fs.writeFileSync(path.join(uiDir, 'dist', 'index.html'), 'new build\n')
     return { ok: true }
@@ -97,8 +99,15 @@ test.describe('serveUi and buildAndServeUi', () => {
     expect(builtUiTag(targetUiDir)).toBeNull()
   })
 
-  test('a failed npm ci serves nothing new', async () => {
-    expect(await build({ exec: fakeNpm({ ciOk: false }) })).toEqual({ ok: false, stage: 'ui-npm', error: 'npm ci failed.' })
+  test('a failed npm ci serves nothing new and names the cause', async () => {
+    expect(await build({ exec: fakeNpm({ ciOk: false }) }))
+      .toEqual({ ok: false, stage: 'ui-npm', error: 'npm ci exited with code 1: no package-lock.json.' })
+    expect(served()).toBe('old build\n')
+  })
+
+  test('a failed vite build serves nothing new and names the cause', async () => {
+    expect(await build({ exec: fakeNpm({ buildOk: false }) }))
+      .toEqual({ ok: false, stage: 'ui-build', error: 'The UI build exited with code 1: Could not resolve "./App".' })
     expect(served()).toBe('old build\n')
   })
 })

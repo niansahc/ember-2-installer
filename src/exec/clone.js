@@ -4,7 +4,7 @@
 
 const fs = require('fs')
 const path = require('path')
-const { run } = require('./run')
+const { run, failureReason } = require('./run')
 
 // Production backend repo, the default url. Production passes either this or
 // REPO_UI_URL (src/main.js), both constants; a hermetic test passes a local
@@ -15,7 +15,8 @@ const DEFAULT_BACKEND_REPO_URL = 'https://github.com/niansahc/ember-2.git'
 // Run `git clone --depth 1 --branch <tag> <url> <folder>` in targetDir's
 // parent, streaming output to onData. tag is required: production clones the
 // pinned release tag (src/lib/release-pin.js), never the default branch.
-// Resolves { ok, code, error? } and never rejects.
+// Resolves { ok, code, error? } and never rejects; error carries git's last
+// stderr line (failureReason).
 //
 // The parent is the working directory and only the folder name is an
 // argument: run() keeps shell:true and joins arguments unquoted, so a parent
@@ -36,7 +37,7 @@ function cloneRepo({ url = DEFAULT_BACKEND_REPO_URL, targetDir, tag, onData } = 
   }).then((r) => {
     if (r.error !== null) return { ok: false, error: r.error }
     if (r.ok) return { ok: true, code: r.code }
-    return { ok: false, code: r.code, error: `git clone exited with code ${r.code}` }
+    return { ok: false, code: r.code, error: failureReason(r, 'git clone') }
   })
 }
 

@@ -8,6 +8,7 @@
 // what keeps run() unit-testable without booting Electron.
 
 const { spawn } = require('child_process')
+const { redactSecrets } = require('../lib/redact')
 
 // Kill the whole process tree, not just the direct child. With shell:true the
 // direct child is the shell (cmd.exe / sh) and the real command is its child;
@@ -116,4 +117,40 @@ function run(command, args = [], {
   })
 }
 
-module.exports = { run }
+// The cause a command printed to stderr, in one line of at most 300
+// characters: git's first "fatal:" line, else the last paragraph (npm's
+// closing "A complete log of this run" block and stack frames left out, and
+// npm's "npm ERR!" prefixes dropped). No trailing period.
+function stderrCause(stderr) {
+  const lines = String(stderr || '').split(/\r?\n/).map((l) => l.trim())
+  const end = lines.findIndex((l) => /A complete log of this run/.test(l))
+  const kept = end === -1 ? lines : lines.slice(0, end)
+  const fatal = kept.find((l) => l.startsWith('fatal: '))
+  let cause = fatal
+  if (!cause) {
+    const paragraph = []
+    for (const l of kept.reverse()) {
+      if (!l || /^npm (ERR!|error)$/.test(l)) {
+        if (paragraph.length) break
+        continue
+      }
+      if (!l.startsWith('at ')) paragraph.unshift(l.replace(/^npm (ERR!|error) /, ''))
+    }
+    cause = paragraph.join(' ')
+  }
+  cause = cause.replace(/[.\s]+$/, '')
+  return cause.length > 300 ? `${cause.slice(0, 297)}...` : cause
+}
+
+// Why a failed run() result failed, for the user: run's own error (the command
+// could not start, or timed out), else the exit code and the cause the
+// command printed (stderrCause). The cause is redacted (src/lib/redact.js),
+// since a result's error reaches the renderer without passing through a log
+// channel. No trailing period.
+function failureReason(r, what) {
+  if (r.error) return `${what} failed: ${r.error}`
+  const cause = stderrCause(r.stderr)
+  return `${what} exited with code ${r.code}${cause ? `: ${redactSecrets(cause)}` : ''}`
+}
+
+module.exports = { run, failureReason }

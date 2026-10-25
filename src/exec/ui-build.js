@@ -3,7 +3,7 @@
 
 const fs = require('fs')
 const path = require('path')
-const { run } = require('./run')
+const { run, failureReason } = require('./run')
 const { recordBuiltUiTag } = require('./installed')
 
 const removeIfThere = (dir) => {
@@ -52,8 +52,9 @@ const VITE_BIN = path.join('node_modules', 'vite', 'bin', 'vite.js')
 // why not), npm ci, vite build, then serveUi, the only writer of the served
 // folder. Without the key nothing is built: the bundle would fail every
 // authenticated request, so the served UI is left as it was. The tag is
-// recorded only when record is set (the build is the pinned release). exec is
-// run(), replaceable in tests.
+// recorded only when record is set (the build is the pinned release). A failed
+// step's error names its cause (failureReason). exec is run(), replaceable in
+// tests.
 // Resolves { ok: true, recorded } or { ok: false, stage, error }.
 async function buildAndServeUi({ uiDir, targetUiDir, tag, record, buildEnv, log, exec = run }) {
   const { env, keyOk, error } = await buildEnv()
@@ -66,14 +67,12 @@ async function buildAndServeUi({ uiDir, targetUiDir, tag, record, buildEnv, log,
   }
 
   log('Installing UI dependencies...\n')
-  if (!(await exec('npm', ['ci'], { cwd: uiDir, onData: log })).ok) {
-    return { ok: false, stage: 'ui-npm', error: 'npm ci failed.' }
-  }
+  const ci = await exec('npm', ['ci'], { cwd: uiDir, onData: log })
+  if (!ci.ok) return { ok: false, stage: 'ui-npm', error: `${failureReason(ci, 'npm ci')}.` }
 
   log('Building Ember UI...\n')
-  if (!(await exec('node', [VITE_BIN, 'build'], { cwd: uiDir, env, onData: log })).ok) {
-    return { ok: false, stage: 'ui-build', error: 'UI build failed.' }
-  }
+  const built = await exec('node', [VITE_BIN, 'build'], { cwd: uiDir, env, onData: log })
+  if (!built.ok) return { ok: false, stage: 'ui-build', error: `${failureReason(built, 'The UI build')}.` }
 
   const recorded = Boolean(record)
   try {

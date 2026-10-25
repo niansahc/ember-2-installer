@@ -199,8 +199,9 @@ const DEMO_RAW_LOG = DEMO_MODE && process.argv.includes('--demo-raw-log')
 //   --demo-existing-update=refused|failed: the install-location screen finds
 //     an existing install, and updating it is refused with a reason or fails
 //     with none.
-//   --demo-ui-rebuild=refused|warning: the Done screen finds no served UI, and
-//     its rebuild is refused with a reason or succeeds with a warning.
+//   --demo-ui-rebuild=refused|npm|warning: the Done screen finds no served UI,
+//     and its rebuild is refused with a reason, fails at npm ci, or succeeds
+//     with a warning.
 const demoArg = (name) => (process.argv.find((a) => a.startsWith(`--${name}=`)) || '').split('=')[1] || null
 const DEMO_UNREACHABLE = process.argv.includes('--demo-unreachable')
 const DEMO_EXISTING_UPDATE = demoArg('demo-existing-update')
@@ -862,7 +863,7 @@ async function runInstallStep(step, emberPath) {
     if (ui.ok) stepLog('UI installed ✓\n')
     else stepLog(`${ui.error}\n`)
     mainWindow.webContents.send('install-step-done', { step, ok: ui.ok })
-    return ui.ok ? { ok: true, warning: ui.warning } : { ok: false, error: ui.error }
+    return ui.ok ? { ok: true, warning: ui.warning } : { ok: false, stage: ui.stage, error: ui.error }
   }
 
   // venv, pip, docker all set cmd/args above — run via shared helper
@@ -1596,7 +1597,10 @@ if (DEMO_MODE) {
     }
 
     if (step === 'build-ui' && DEMO_UI_REBUILD === 'refused') {
-      return { ok: false, error: 'UI update failed: C:\\demo\\ember-2-ui has local changes (demo)' }
+      return { ok: false, stage: 'ui-move', error: 'UI update failed: C:\\demo\\ember-2-ui has local changes (demo)' }
+    }
+    if (step === 'build-ui' && DEMO_UI_REBUILD === 'npm') {
+      return { ok: false, stage: 'ui-npm', error: 'npm ci failed: spawn npm ENOENT (demo).' }
     }
     if (step === 'build-ui' && DEMO_UI_REBUILD === 'warning') {
       return { ok: true, warning: 'C:\\demo\\ember-2-ui is a full git clone, built as it stands (demo)' }

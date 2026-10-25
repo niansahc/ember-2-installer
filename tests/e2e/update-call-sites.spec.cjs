@@ -132,6 +132,15 @@ test.describe('update call sites', () => {
     await updateToDone(window)
     await expect(window.locator('#done-ui-note')).toBeVisible({ timeout: 10000 })
     await expect(window.locator('#done-ui-note')).toContainText('has local changes')
+    await expect(window.locator('#done-ui-note')).not.toContainText('Node.js')
+    await expect(window.locator('#done-status')).toHaveText('Interface build failed. The reason is below.')
+  })
+
+  test('Done screen: a failed npm ci shows its reason and the Node.js hint', async () => {
+    const window = await launch(['--demo-updates', '--demo-ui-rebuild=npm'])
+    await updateToDone(window)
+    await expect(window.locator('#done-ui-note'))
+      .toHaveText('npm ci failed: spawn npm ENOENT (demo). Check that Node.js is installed, then try again.', { timeout: 10000 })
     await expect(window.locator('#done-status')).toHaveText('Interface build failed. The reason is below.')
   })
 

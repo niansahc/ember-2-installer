@@ -33,7 +33,7 @@ async function uiToPin({ uiDir, targetUiDir, tag, url, log, packaged, now }) {
   if (action === 'clone') {
     log('Cloning ember-2-ui...\n')
     const r = await clone()
-    return r.ok ? { ok: true, action } : { ok: false, stage: 'ui-clone', error: 'UI clone failed.' }
+    return r.ok ? { ok: true, action } : { ok: false, stage: 'ui-clone', error: `UI clone failed: ${r.error}.` }
   }
   if (action === 'rebuild') log(`The served UI was not built from ${tag}. Rebuilding it.\n`)
   if (action !== 'update') return { ok: true, action }

@@ -1781,6 +1781,15 @@ document.getElementById('btn-run-ember-update').addEventListener('click', () => 
   })
 })
 
+// The note under the Done screen's status after its UI rebuild: a failure's
+// reason, or a successful build's warning. A failed npm ci most often means
+// Node.js is missing, so its reason keeps that hint.
+function doneUiNoteText(result) {
+  if (result.ok) return result.warning || ''
+  if (!result.error) return ''
+  return result.stage === 'ui-npm' ? `${result.error} Check that Node.js is installed, then try again.` : result.error
+}
+
 async function loadEmberVersion() {
   const title = document.getElementById('done-title')
   const voice = document.getElementById('done-voice')
@@ -1802,7 +1811,7 @@ async function loadEmberVersion() {
     // refused move, a clone kept aside, a developer clone built as it stands)
     // is shown here.
     const uiNote = document.getElementById('done-ui-note')
-    const reason = rebuildResult.ok ? rebuildResult.warning : rebuildResult.error
+    const reason = doneUiNoteText(rebuildResult)
     if (reason) {
       uiNote.textContent = reason
       uiNote.classList.remove('hidden')
@@ -2396,7 +2405,7 @@ async function init() {
     document.getElementById('demo-badge').classList.remove('hidden')
     // Demo/dev-only test seam: lets e2e drive the render path with crafted input
     // to prove dynamic values are escaped. Never exposed in packaged builds.
-    window.__emberTest = { buildModelCard, addRawInstallLogListener, updateCheckOutcome, existingUpdateFailureText, cloneFailureText }
+    window.__emberTest = { buildModelCard, addRawInstallLogListener, updateCheckOutcome, existingUpdateFailureText, cloneFailureText, doneUiNoteText }
   }
 
   const emberPath = await window.ember.getEmberPath()
