@@ -19,7 +19,7 @@ const { API_PKILL_PATTERN, apiSpawnSpec } = require('./lib/api-launch')
 const { releaseTag, rowInstalled } = require('./lib/release-pin')
 const { releaseFromResponse } = require('./lib/github-release')
 const { moveToTag } = require('./exec/move-to-tag')
-const { replaceWithClone } = require('./exec/aside')
+const { freshInstall } = require('./exec/fresh-install')
 const { uiUpdateAction, backendUpdateAction, logStays } = require('./exec/pin-action')
 const { installedBackendVersion, installedUiVersion, recordBackendSetup } = require('./exec/installed')
 const { runBackendSetup } = require('./exec/backend-setup')
@@ -536,21 +536,19 @@ ipcMain.handle('update-existing-ember', locked('An update', async (_e, { emberPa
   return { ok: true, path: emberPath }
 }))
 
-// The existing ember-2 is set aside, not deleted, until the new clone is in
-// place: a failed clone puts it back (src/exec/aside.js).
+// Only an installer clone is replaced, and it is set aside, not deleted, until
+// the new clone is in place: a failed clone puts it back
+// (src/exec/fresh-install.js).
 ipcMain.handle('fresh-install-ember', locked('A fresh install', async (_e, { parentDir }) => {
   const targetDir = path.join(parentDir, 'ember-2')
   const log = (text) => sendLog('clone-progress', text)
-  const result = await replaceWithClone({
-    dir: targetDir,
-    clone: () => cloneRepo({ targetDir, tag: EMBER_TAG, onData: log }),
-  })
+  const result = await freshInstall({ dir: targetDir, url: DEFAULT_BACKEND_REPO_URL, tag: EMBER_TAG, onData: log })
   if (result.aside) log(`The previous installation could not be removed and is at ${result.aside}.\n`)
   if (result.ok) {
     saveEmberPath(targetDir)
     return { ok: true, path: targetDir }
   }
-  return { ok: false, error: result.error }
+  return { ok: false, refused: result.refused, error: result.error }
 }))
 
 ipcMain.handle('get-default-install-dir', () => {
@@ -1857,7 +1855,7 @@ if (DEMO_MODE) {
 
   ipcMain.removeHandler('fresh-install-ember')
   ipcMain.handle('fresh-install-ember', async (_e, { parentDir }) => {
-    const msgs = ['Cloning into ember-2...\n', 'Receiving objects: 100%\n', 'done.\n']
+    const msgs = [`Cloning into ${parentDir}/ember-2...\n`, 'Receiving objects: 100%\n', 'done.\n']
     for (const msg of msgs) {
       sendLog('clone-progress', msg)
       await sleep(600)

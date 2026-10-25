@@ -365,11 +365,25 @@ async function initInstallDir() {
   }
 }
 
+// The folder check-target-path found an existing install in. "Update" and
+// "Start fresh" act on this path, never on the input's value at click time,
+// and a new path in the input withdraws the offer until it is checked.
+let checkedParentDir = null
+
+function withdrawExistingOffer() {
+  checkedParentDir = null
+  document.getElementById('existing-install-notice').classList.add('hidden')
+  document.getElementById('btn-install-ember').disabled = false
+}
+
+document.getElementById('ember-path-input').addEventListener('input', withdrawExistingOffer)
+
 document.getElementById('btn-pick-ember').addEventListener('click', () => {
   guardClick(null, async () => {
     const chosen = await window.ember.pickEmberFolder()
     if (chosen) {
       document.getElementById('ember-path-input').value = chosen
+      withdrawExistingOffer()
     }
   })
 })
@@ -389,6 +403,7 @@ document.getElementById('btn-install-ember').addEventListener('click', () => {
       existingText.textContent = `Ember-2 found at this location${version}. What would you like to do?`
       existingNotice.classList.remove('hidden')
       btn.disabled = true
+      checkedParentDir = parentDir
       return
     }
 
@@ -450,15 +465,17 @@ function existingUpdateFailureText(result) {
 
 // The clone log's last line after a failed clone or fresh install. A clone
 // that failed may be the connection, so the hint stays, after the reason; a
-// refusal because another operation is running gets the reason alone.
+// refusal (another operation is running, or Start fresh found a folder the
+// installer did not make) gets the reason alone.
 function cloneFailureText(result, failed) {
-  if (result && result.busy) return `\n${result.error}\n`
+  if (result && (result.busy || result.refused)) return `\n${result.error}\n`
   const reason = result && result.error ? `\n${failed}: ${result.error}.` : `\n${failed}.`
   return `${reason} Check your internet connection and try again.\n`
 }
 
 document.getElementById('btn-existing-update').addEventListener('click', () => {
-  const parentDir = document.getElementById('ember-path-input').value.trim()
+  const parentDir = checkedParentDir
+  if (!parentDir) return
   const btn = document.getElementById('btn-install-ember')
   const cloneLog = document.getElementById('clone-log')
 
@@ -502,7 +519,8 @@ document.getElementById('btn-existing-update').addEventListener('click', () => {
 })
 
 document.getElementById('btn-existing-fresh').addEventListener('click', () => {
-  const parentDir = document.getElementById('ember-path-input').value.trim()
+  const parentDir = checkedParentDir
+  if (!parentDir) return
   const btn = document.getElementById('btn-install-ember')
   const cloneLog = document.getElementById('clone-log')
 
@@ -543,10 +561,7 @@ document.getElementById('btn-existing-fresh').addEventListener('click', () => {
   })
 })
 
-document.getElementById('btn-existing-cancel').addEventListener('click', () => {
-  document.getElementById('existing-install-notice').classList.add('hidden')
-  document.getElementById('btn-install-ember').disabled = false
-})
+document.getElementById('btn-existing-cancel').addEventListener('click', withdrawExistingOffer)
 
 async function initVaultPath() {
   const defaultVault = await window.ember.getDefaultVault()

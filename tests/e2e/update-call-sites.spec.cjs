@@ -73,6 +73,60 @@ test.describe('update call sites', () => {
     await expect(window.locator('#clone-log')).toContainText('Check your internet connection', { timeout: 10000 })
   })
 
+  test('a new path typed after the check withdraws the existing-install offer', async () => {
+    const window = await launch(['--demo-existing-update=refused'])
+    await findExistingInstall(window)
+    await window.locator('#ember-path-input').fill('D:\\elsewhere')
+    await expect(window.locator('#existing-install-notice')).toBeHidden()
+    await expect(window.locator('#btn-install-ember')).toBeEnabled()
+  })
+
+  test('control: the offer stays while the path is unchanged', async () => {
+    const window = await launch(['--demo-existing-update=refused'])
+    await findExistingInstall(window)
+    await window.locator('#existing-install-text').click()
+    await expect(window.locator('#existing-install-notice')).toBeVisible()
+    await expect(window.locator('#btn-install-ember')).toBeDisabled()
+  })
+
+  test('a folder picked with Browse after the check withdraws the offer', async () => {
+    const window = await launch(['--demo-existing-update=refused'])
+    await app.evaluate(({ dialog }) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: ['D:\\picked'] })
+    })
+    await findExistingInstall(window)
+    await window.locator('#btn-pick-ember').click()
+    await expect(window.locator('#ember-path-input')).toHaveValue('D:\\picked')
+    await expect(window.locator('#existing-install-notice')).toBeHidden()
+  })
+
+  // Start fresh's first log line names the folder it was sent.
+  const startFresh = async (window) => {
+    await window.locator('#btn-existing-fresh').click()
+    await expect(window.locator('#clone-log')).toContainText('Cloning into ', { timeout: 10000 })
+    return window.locator('#clone-log').textContent()
+  }
+
+  test('Start fresh acts on the checked path, not a value put in the input later', async () => {
+    const window = await launch(['--demo-existing-update=refused'])
+    await findExistingInstall(window)
+    const checked = await window.locator('#ember-path-input').inputValue()
+    // A value set without an input event, which nothing withdraws.
+    await window.evaluate(() => { document.getElementById('ember-path-input').value = 'D:\\elsewhere' })
+    const log = await startFresh(window)
+    expect(log).toContain(`Cloning into ${checked}/ember-2`)
+    expect(log).not.toContain('elsewhere')
+  })
+
+  test('control: once the new path is checked, Start fresh acts on it', async () => {
+    const window = await launch(['--demo-existing-update=refused'])
+    await findExistingInstall(window)
+    await window.locator('#ember-path-input').fill('D:\\elsewhere')
+    await window.locator('#btn-install-ember').click()
+    await expect(window.locator('#existing-install-notice')).toBeVisible({ timeout: 5000 })
+    expect(await startFresh(window)).toContain('Cloning into D:\\elsewhere/ember-2')
+  })
+
   test('Done screen: a refused UI rebuild shows its reason', async () => {
     const window = await launch(['--demo-updates', '--demo-ui-rebuild=refused'])
     await updateToDone(window)

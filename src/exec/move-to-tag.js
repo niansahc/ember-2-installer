@@ -39,14 +39,37 @@ async function cloneState(cwd) {
   return { state: shallow === 'true' ? 'shallow' : 'full' }
 }
 
+// Whether cwd is an installer clone of url: the top of its own repository
+// (cloneState), shallow, and with url as its stored origin. The stored value
+// is read (git config), not the one after url.<base>.insteadOf rewrites (git
+// remote get-url). Resolves { ok: true } or { ok: false, kind, error }: kind
+// is 'error' (git could not run), 'none', 'full' or 'origin', and error says
+// what cwd is instead.
+async function checkInstallerClone({ cwd, url }) {
+  const fail = (kind, error) => ({ ok: false, kind, error })
+  const clone = await cloneState(cwd)
+  if (clone.error) return fail('error', clone.error)
+  if (clone.state === 'none') return fail('none', `${cwd} is not a git repository`)
+  if (clone.state === 'full') return fail('full', `${cwd} is a full git clone, not an installer install`)
+
+  const origin = await run('git', ['config', '--get', 'remote.origin.url'], { cwd })
+  const originUrl = origin.ok ? origin.stdout.trim() : ''
+  if (!originUrl || !sameRepo(originUrl, url)) {
+    const shown = originUrl ? shownUrl(originUrl) : 'no known repository'
+    return fail('origin', `${cwd} is a clone of ${shown}, not ${url}`)
+  }
+  return { ok: true }
+}
+
+// What moveToTag adds to a checkInstallerClone refusal.
+const MOVE_ADVICE = { full: '; update it with git yourself', origin: '; it was left as is' }
+
 // Steps, each a refusal or a git call, in order:
-//   0. Refuse unless cwd is the top of its own repository (cloneState).
-//   1. Refuse a full clone. getEmberPath falls back to the sibling ember-2 in
-//      unpackaged --real mode, a developer's repo that is never moved.
-//   2. Refuse unless the stored origin is url, the repository this clone
-//      should be, so an unrelated clone that happens to carry the tag is never
-//      reset or moved. The stored value is read (git config), not the one
-//      after url.<base>.insteadOf rewrites (git remote get-url).
+//   0-2. Refuse unless cwd is an installer clone of url (checkInstallerClone):
+//      not a directory that is not a clone, not a full clone (getEmberPath
+//      falls back to the sibling ember-2 in unpackaged --real mode, a
+//      developer's repo that is never moved), and not a clone of another
+//      repository that happens to carry the tag.
 //   3. Refuse if tracked files other than resetFiles are modified: the user
 //      edited them, and a checkout would either fail or carry the edits onto
 //      the tag. Untracked files (.venv, the env file, ui/) are left alone.
@@ -62,19 +85,8 @@ async function moveToTag({ cwd, tag, url, onData, resetFiles = [] }) {
   const fail = (error) => ({ ok: false, error })
   if (!url) return fail('moveToTag: no repository URL given')
 
-  const clone = await cloneState(cwd)
-  if (clone.error) return fail(clone.error)
-  if (clone.state === 'none') return fail(`${cwd} is not a git repository`)
-  if (clone.state === 'full') {
-    return fail(`${cwd} is a full git clone, not an installer install; update it with git yourself`)
-  }
-
-  const origin = await git(['config', '--get', 'remote.origin.url'])
-  const originUrl = origin.ok ? origin.stdout.trim() : ''
-  if (!originUrl || !sameRepo(originUrl, url)) {
-    const shown = originUrl ? shownUrl(originUrl) : 'no known repository'
-    return fail(`${cwd} is a clone of ${shown}, not ${url}; it was left as is`)
-  }
+  const clone = await checkInstallerClone({ cwd, url })
+  if (!clone.ok) return fail(`${clone.error}${MOVE_ADVICE[clone.kind] || ''}`)
 
   const status = await git(['status', '--porcelain', '--untracked-files=no'])
   if (!status.ok) return fail(status.error || 'git status failed')
@@ -93,4 +105,4 @@ async function moveToTag({ cwd, tag, url, onData, resetFiles = [] }) {
   return { ok: true }
 }
 
-module.exports = { moveToTag, cloneState }
+module.exports = { moveToTag, cloneState, checkInstallerClone }

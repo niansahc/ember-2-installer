@@ -64,4 +64,9 @@ test.describe('Update check outcome and failure text', () => {
     const error = 'An update is still running. Wait for it to finish, then try again.'
     expect(await cloneText({ ok: false, busy: true, error }, 'Failed')).toBe(`\n${error}\n`)
   })
+
+  test('a refused Start fresh shows the reason alone, with no network hint', async () => {
+    const error = 'C:\\x\\ember-2 is a full git clone, not an installer install. Start fresh replaces only an install the installer made, so it was left as is.'
+    expect(await cloneText({ ok: false, refused: true, error }, 'Failed')).toBe(`\n${error}\n`)
+  })
 })

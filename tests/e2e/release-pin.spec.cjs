@@ -300,8 +300,9 @@ const rawVersionReads = (text) => text.split(/\r?\n/)
   .filter((l) => /\bdata\.tag\b|JSON\.parse\(fs\.readFileSync\(versionFile/.test(l))
   .map((l) => l.trim())
 
-// fresh-install-ember deleting the existing install itself. It sets it aside
-// (replaceWithClone), so a failed clone can put it back.
+// fresh-install-ember deleting the existing install itself. freshInstall
+// (src/exec/fresh-install.js) replaces only an installer clone and sets it
+// aside, so a failed clone can put it back.
 const deletesBeforeClone = (text) => /rmSync\(/.test(handlerBody(text, 'fresh-install-ember'))
 
 test.describe('source: install and update handlers', () => {
@@ -373,9 +374,9 @@ test.describe('source: install and update handlers', () => {
     expect(handlerBody(mainJs(), 'run-install-step')).toMatch(/noteInstallStep\(emberPath, step, result\.ok\)/)
   })
 
-  test('fresh-install-ember sets the old install aside, never deletes it first', () => {
+  test('fresh-install-ember goes through freshInstall, never deletes the old install first', () => {
     const text = mainJs()
-    expect(handlerBody(text, 'fresh-install-ember')).toMatch(/replaceWithClone\(\{/)
+    expect(handlerBody(text, 'fresh-install-ember')).toMatch(/await freshInstall\(\{ dir: targetDir, url: DEFAULT_BACKEND_REPO_URL,/)
     expect(deletesBeforeClone(text)).toBe(false)
   })
 
