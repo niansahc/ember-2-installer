@@ -201,7 +201,7 @@ const DEMO_RAW_LOG = DEMO_MODE && process.argv.includes('--demo-raw-log')
 //     with none.
 //   --demo-ui-rebuild=refused|npm|warning: the Done screen finds no served UI,
 //     and its rebuild is refused with a reason, fails at npm ci, or succeeds
-//     with a warning.
+//     with a warning. refused-once: only the first visit finds no UI.
 const demoArg = (name) => (process.argv.find((a) => a.startsWith(`--${name}=`)) || '').split('=')[1] || null
 const DEMO_UNREACHABLE = process.argv.includes('--demo-unreachable')
 const DEMO_EXISTING_UPDATE = demoArg('demo-existing-update')
@@ -1476,8 +1476,13 @@ ipcMain.handle('get-tailscale-dns', async () => {
 if (DEMO_MODE) {
   console.log('[DEMO MODE] Running with simulated install steps')
 
+  // With --demo-ui-rebuild=refused-once, only the first check finds no UI.
+  let demoUiChecks = 0
   ipcMain.removeHandler('check-ui-built')
-  ipcMain.handle('check-ui-built', async () => ({ ok: !DEMO_UI_REBUILD }))
+  ipcMain.handle('check-ui-built', async () => {
+    demoUiChecks++
+    return { ok: !DEMO_UI_REBUILD || (DEMO_UI_REBUILD === 'refused-once' && demoUiChecks > 1) }
+  })
 
   ipcMain.removeHandler('detect-hardware')
   ipcMain.handle('detect-hardware', async () => ({
@@ -1596,7 +1601,7 @@ if (DEMO_MODE) {
       },
     }
 
-    if (step === 'build-ui' && DEMO_UI_REBUILD === 'refused') {
+    if (step === 'build-ui' && (DEMO_UI_REBUILD === 'refused' || DEMO_UI_REBUILD === 'refused-once')) {
       return { ok: false, stage: 'ui-move', error: 'UI update failed: C:\\demo\\ember-2-ui has local changes (demo)' }
     }
     if (step === 'build-ui' && DEMO_UI_REBUILD === 'npm') {

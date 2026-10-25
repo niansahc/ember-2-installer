@@ -136,6 +136,32 @@ test.describe('update call sites', () => {
     await expect(window.locator('#done-status')).toHaveText('Interface build failed. The reason is below.')
   })
 
+  // From the Done screen, Check for updates and Update All, back to Done.
+  async function doneToDoneAgain(window) {
+    await window.locator('#btn-check-ember-update').click()
+    await expect(window.locator('.screen.active')).toHaveAttribute('id', 'screen-update', { timeout: 10000 })
+    await window.locator('#btn-run-update-all').click()
+    await expect(window.locator('.screen.active')).toHaveAttribute('id', 'screen-done', { timeout: 40000 })
+    await expect(window.locator('#done-status')).not.toHaveText(/Checking Ember interface|Rebuilding/, { timeout: 10000 })
+  }
+
+  test('Done screen: a refusal note is cleared once a later visit finds the UI', async () => {
+    const window = await launch(['--demo-updates', '--demo-ui-rebuild=refused-once'])
+    await updateToDone(window)
+    await expect(window.locator('#done-ui-note')).toContainText('has local changes', { timeout: 10000 })
+    await doneToDoneAgain(window)
+    await expect(window.locator('#done-ui-note')).toBeHidden()
+    await expect(window.locator('#done-ui-note')).toHaveText('')
+  })
+
+  test('control: the note is shown again while the UI is still missing', async () => {
+    const window = await launch(['--demo-updates', '--demo-ui-rebuild=refused'])
+    await updateToDone(window)
+    await expect(window.locator('#done-ui-note')).toContainText('has local changes', { timeout: 10000 })
+    await doneToDoneAgain(window)
+    await expect(window.locator('#done-ui-note')).toBeVisible()
+  })
+
   test('Done screen: a failed npm ci shows its reason and the Node.js hint', async () => {
     const window = await launch(['--demo-updates', '--demo-ui-rebuild=npm'])
     await updateToDone(window)

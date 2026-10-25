@@ -1601,6 +1601,13 @@ function prepareUpdateScreen(updates) {
     const note = document.getElementById(`update-${r}-note`)
     if (note) note.textContent = ''
   }
+  // An earlier Update All in this session left its button and log behind.
+  const runBtn = document.getElementById('btn-run-update-all')
+  runBtn.disabled = false
+  runBtn.textContent = 'Update All'
+  const runLog = document.getElementById('update-all-log')
+  runLog.textContent = ''
+  runLog.classList.add('hidden')
 
   for (const r of rows) {
     const info = updates[r]
@@ -1800,6 +1807,12 @@ async function loadEmberVersion() {
   // Launch button is always available — the launcher script handles everything
   launchBtn.disabled = false
 
+  // A note from an earlier visit (a refused rebuild since fixed by an update)
+  // no longer applies.
+  const uiNote = document.getElementById('done-ui-note')
+  uiNote.textContent = ''
+  uiNote.classList.add('hidden')
+
   status.textContent = 'Checking Ember interface...'
   const uiCheck = await window.ember.checkUiBuilt()
   if (!uiCheck.ok) {
@@ -1810,7 +1823,6 @@ async function loadEmberVersion() {
     // There is no install log on this screen, so the build's own reason (a
     // refused move, a clone kept aside, a developer clone built as it stands)
     // is shown here.
-    const uiNote = document.getElementById('done-ui-note')
     const reason = doneUiNoteText(rebuildResult)
     if (reason) {
       uiNote.textContent = reason
