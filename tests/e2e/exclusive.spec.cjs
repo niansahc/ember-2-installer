@@ -47,7 +47,7 @@ test.describe('createExclusive', () => {
 
 // The IPC handlers that change an install. run-install-step locks its build-ui
 // step only; the other install steps run in parallel by design.
-const MUTATING = ['clone-ember-repo', 'update-existing-ember', 'fresh-install-ember', 'run-ember-update', 'run-all-updates']
+const MUTATING = ['clone-ember-repo', 'update-existing-ember', 'fresh-install-ember', 'run-all-updates']
 
 // Mutating handlers registered (column 0, the real handlers) without locked().
 const unlockedHandlers = (text) => MUTATING.filter((ch) => !new RegExp(`^ipcMain\\.handle\\('${ch}', locked\\(`, 'm').test(text))

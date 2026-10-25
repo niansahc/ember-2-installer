@@ -199,11 +199,14 @@ const DEMO_RAW_LOG = DEMO_MODE && process.argv.includes('--demo-raw-log')
 //   --demo-existing-update=refused|failed: the install-location screen finds
 //     an existing install, and updating it is refused with a reason or fails
 //     with none.
-//   --demo-ui-rebuild=refused|npm|warning: the Done screen finds no served UI,
-//     and its rebuild is refused with a reason, fails at npm ci, or succeeds
-//     with a warning. refused-once: only the first visit finds no UI.
-//   --demo-update-all=setup-unfinished (with --demo-updates): Update All
-//     succeeds but its backend setup did not finish.
+//   --demo-ui-rebuild=refused|npm|busy|warning: the Done screen finds no
+//     served UI, and its rebuild is refused with a reason, fails at npm ci, is
+//     refused because another operation is running, or succeeds with a
+//     warning. refused-once: only the first visit finds no UI.
+//   --demo-update-all=setup-unfinished|failed|failed-no-reason|busy (with
+//     --demo-updates): Update All succeeds but its backend setup did not
+//     finish, fails with a reason or with only a stage, or is refused because
+//     another operation is running.
 const demoArg = (name) => (process.argv.find((a) => a.startsWith(`--${name}=`)) || '').split('=')[1] || null
 const DEMO_UNREACHABLE = process.argv.includes('--demo-unreachable')
 const DEMO_EXISTING_UPDATE = demoArg('demo-existing-update')
@@ -212,7 +215,7 @@ const DEMO_UPDATE_ALL = demoArg('demo-update-all')
 
 // Log channels that carry child-process or status text to the renderer.
 const LOG_CHANNELS = new Set([
-  'install-log', 'update-all-log', 'ember-update-log',
+  'install-log', 'update-all-log',
   'prereq-install-progress', 'clone-progress', 'ollama-pull-progress',
 ])
 
@@ -400,21 +403,6 @@ ipcMain.handle('check-ember-update', async () => {
   const action = await backendUpdateAction({ emberPath, tag: EMBER_TAG })
   return { hasUpdate: backendNeedsSetup(action), installed: installed || 'unknown', latest: EMBER_VERSION }
 })
-
-ipcMain.handle('run-ember-update', locked('An update', async () => {
-  const emberPath = getEmberPath()
-  if (!emberPath) return { ok: false }
-
-  const emberLog = (chunk) => sendLog('ember-update-log', chunk)
-  const backend = await moveBackendToPin(emberPath, emberLog)
-  if (!backend.ok) {
-    emberLog(`${backend.error}\n`)
-    return { ok: false }
-  }
-  if (!backendNeedsSetup(backend.action)) return { ok: true, tag: vPrefixed(installedBackendVersion(emberPath)) }
-  const setup = await setUpBackend(emberPath, null, backend.action, emberLog)
-  return { ok: true, pipOk: setup.pipOk, dockerOk: setup.dockerOk, tag: EMBER_TAG }
-}))
 
 ipcMain.handle('check-prerequisites', async () => {
   const isWin = process.platform === 'win32'
@@ -1615,6 +1603,9 @@ if (DEMO_MODE) {
     if (step === 'build-ui' && DEMO_UI_REBUILD === 'npm') {
       return { ok: false, stage: 'ui-npm', error: 'npm ci failed: spawn npm ENOENT (demo).' }
     }
+    if (step === 'build-ui' && DEMO_UI_REBUILD === 'busy') {
+      return { ok: false, busy: true, error: 'An update is still running. Wait for it to finish, then try again.' }
+    }
     if (step === 'build-ui' && DEMO_UI_REBUILD === 'warning') {
       return { ok: true, warning: 'C:\\demo\\ember-2-ui is a full git clone, built as it stands (demo)' }
     }
@@ -1685,6 +1676,16 @@ if (DEMO_MODE) {
       const updates = payload?.updates || { backend: true, ui: true, installer: true }
       const log = (text) => sendLog('update-all-log', text)
       const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+
+      if (DEMO_UPDATE_ALL === 'busy') {
+        return { ok: false, busy: true, error: 'A fresh install is still running. Wait for it to finish, then try again.' }
+      }
+      if (DEMO_UPDATE_ALL === 'failed' || DEMO_UPDATE_ALL === 'failed-no-reason') {
+        log('Updating Ember UI...\n')
+        await wait(500)
+        const error = DEMO_UPDATE_ALL === 'failed' ? 'The UI build exited with code 1: Could not resolve "./App" (demo).' : undefined
+        return { ok: false, stage: 'ui-build', error }
+      }
 
       let backendSetup = null
       if (updates.backend) {
@@ -1767,20 +1768,6 @@ if (DEMO_MODE) {
   ipcMain.handle('check-ember-update', async () => {
     await sleep(600)
     return { hasUpdate: false, installed: EMBER_TAG, latest: EMBER_VERSION }
-  })
-
-  ipcMain.removeHandler('run-ember-update')
-  ipcMain.handle('run-ember-update', async () => {
-    const steps = [
-      `ember-2 is already at ${EMBER_TAG}, the release this installer pins.\n`,
-      'Requirements already satisfied.\n',
-      'Services restarted.\n',
-    ]
-    for (const text of steps) {
-      sendLog('ember-update-log', text)
-      await sleep(800)
-    }
-    return { ok: true, tag: EMBER_TAG }
   })
 
   ipcMain.removeHandler('check-docker-daemon')

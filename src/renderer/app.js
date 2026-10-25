@@ -1738,7 +1738,6 @@ document.getElementById('btn-check-ember-update').addEventListener('click', () =
     if (outcome === 'unreachable') {
       info.classList.remove('hidden')
       msg.textContent = 'Update check unavailable — could not reach GitHub.'
-      document.getElementById('btn-run-ember-update').classList.add('hidden')
       return
     }
 
@@ -1753,50 +1752,10 @@ document.getElementById('btn-check-ember-update').addEventListener('click', () =
     } else {
       info.classList.remove('hidden')
       msg.textContent = 'Everything is up to date.'
-      document.getElementById('btn-run-ember-update').classList.add('hidden')
     }
   }, {
     errorEl: msg,
     errorMsg: 'Update check failed — please try again.',
-    // Revealing #ember-update-info (msg's container) would also show the
-    // "Update & Restart" button — hide it, there's nothing to update.
-    onError: () => document.getElementById('btn-run-ember-update').classList.add('hidden'),
-  })
-})
-
-document.getElementById('btn-run-ember-update').addEventListener('click', () => {
-  const btn = document.getElementById('btn-run-ember-update')
-  const logBox = document.getElementById('ember-update-log')
-
-  guardClick(btn, async () => {
-    btn.disabled = true
-    btn.textContent = 'Updating...'
-    logBox.classList.remove('hidden')
-    logBox.textContent = ''
-
-    window.ember.onEmberUpdateLog((text) => {
-      logBox.textContent += text
-      logBox.scrollTop = logBox.scrollHeight
-    })
-
-    const result = await window.ember.runEmberUpdate()
-    window.ember.removeAllListeners('ember-update-log')
-
-    if (result.ok) {
-      btn.textContent = 'Done'
-      logBox.textContent += `\nUpdate complete — now on ${result.tag || 'latest'}\n`
-      document.getElementById('ember-version-label').textContent = result.tag || 'latest'
-      // Re-run the start API + health check flow so the user doesn't have to figure it out
-      loadEmberVersion()
-    } else {
-      btn.textContent = 'Failed'
-      logBox.textContent += result.busy ? `\n${result.error}\n` : '\nUpdate failed. See the log above.\n'
-      btn.disabled = false
-    }
-  }, {
-    errorEl: logBox,
-    errorMsg: 'Update failed. See the log above.',
-    onError: () => window.ember.removeAllListeners('ember-update-log'),
   })
 })
 

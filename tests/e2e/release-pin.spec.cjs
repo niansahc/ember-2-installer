@@ -6,7 +6,7 @@
 //   - source checks on src/: every clone goes to the pin, nothing pulls a
 //     branch, the update checks target the pin, never gate it on a known
 //     installed version or on a GitHub answer, update-existing-ember never
-//     saves a refused path, run-ember-update reports a v-prefixed tag, every
+//     saves a refused path, run-ember-update and its button are gone, every
 //     UI build goes through uiToPin and buildAndServeUi, version.json is read
 //     only through installedBackendVersion, the install flow notes its steps
 //     for the backend setup record, and a fresh install sets the old one aside
@@ -283,9 +283,12 @@ test.describe('source: the pin needs no GitHub answer', () => {
 // where the move was refused or failed.
 const savesExistingPath = (text) => /saveEmberPath\(/.test(handlerBody(text, 'update-existing-ember'))
 
-// run-ember-update tag values that are not v-prefixed (EMBER_TAG or vPrefixed).
-const bareUpdateTags = (text) => [...handlerBody(text, 'run-ember-update').matchAll(/\btag: (\w+)/g)]
-  .map((m) => m[1]).filter((v) => v !== 'EMBER_TAG' && v !== 'vPrefixed')
+// Lines left from run-ember-update, removed with its button: no screen ever
+// showed the button, so the handler had no caller. Update All is the update.
+const RENDERER_HTML = path.join(SRC, 'renderer', 'index.html')
+const removedUpdateRefs = (text) => text.split(/\r?\n/)
+  .filter((l) => /run-ember-update|runEmberUpdate|ember-update-log|EmberUpdateLog/.test(l))
+  .map((l) => l.trim())
 
 // UI builds or copies in main.js. Every UI build goes through
 // buildAndServeUi (src/exec/ui-build.js), which swaps the served folder only
@@ -328,17 +331,18 @@ test.describe('source: install and update handlers', () => {
     expect(savesExistingPath(saving)).toBe(true)
   })
 
-  test('run-ember-update reports a v-prefixed tag on every path', () => {
-    const text = mainJs()
-    expect([...handlerBody(text, 'run-ember-update').matchAll(/\btag: /g)].length).toBe(2)
-    expect(bareUpdateTags(text)).toEqual([])
+  test('run-ember-update, its preload methods and its button are gone', () => {
+    expect(removedUpdateRefs(`${srcText()}\n${fs.readFileSync(RENDERER_HTML, 'utf8')}`)).toEqual([])
   })
 
-  test('control: the bare version.json value is flagged', () => {
-    const text = mainJs()
-    const bare = text.replace('tag: vPrefixed(installedBackendVersion(emberPath))', 'tag: installedBackendVersion(emberPath)')
-    expect(bare).not.toBe(text)
-    expect(bareUpdateTags(bare)).toEqual(['installedBackendVersion'])
+  test('control: a leftover handler or button is flagged', () => {
+    const raw = `${srcText()}
+      runEmberUpdate: () => ipcRenderer.invoke('run-ember-update'),
+      <div id="ember-update-log" class="log-box hidden"></div>`
+    expect(removedUpdateRefs(raw)).toEqual([
+      "runEmberUpdate: () => ipcRenderer.invoke('run-ember-update'),",
+      '<div id="ember-update-log" class="log-box hidden"></div>',
+    ])
   })
 
   test('build-ui and Update All bring ember-2-ui to the pin and build only through buildAndServeUi', () => {
@@ -360,7 +364,7 @@ test.describe('source: install and update handlers', () => {
     ])
   })
 
-  test('Update All returns the backend setup result, which the demo handler mirrors', () => {
+  test('Update All returns the backend setup result', () => {
     const body = handlerBody(mainJs(), 'run-all-updates')
     expect(body).toMatch(/backendSetup = await setUpBackend\(emberPath, host, backend\.action, log\)/)
     expect(body).toMatch(/return \{ ok: true, needsInstallerUpdate: !!updates\.installer, backendSetup \}/)

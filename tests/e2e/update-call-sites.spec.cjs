@@ -1,10 +1,15 @@
 // The renderer's update call sites, driven through the demo seams in main.js
-// (--demo-unreachable, --demo-existing-update, --demo-ui-rebuild):
+// (--demo-unreachable, --demo-existing-update, --demo-ui-rebuild,
+// --demo-update-all):
 //   - the boot banner and the Done screen's "Check for updates" button show an
 //     update found while GitHub was unreachable (updateCheckOutcome)
+//   - Update All shows an unfinished backend setup, a failure's reason, and a
+//     refusal while another operation runs
 //   - a failed update of an existing install shows its reason when it gave one
-//     (existingUpdateFailureText)
-//   - the Done screen's UI rebuild shows its refusal or warning
+//     (existingUpdateFailureText); Start fresh and Update act on the checked
+//     path, and a new path withdraws the offer
+//   - the Done screen's UI rebuild shows its refusal, failure or warning, and
+//     a later visit clears it
 // update-outcome.spec covers the two helpers on their own.
 
 const { test, expect } = require('@playwright/test')
@@ -84,6 +89,38 @@ test.describe('update call sites', () => {
     await expect(window.locator('#update-celebration')).toBeVisible({ timeout: 20000 })
     await expect(window.locator('#update-row-backend')).toHaveClass(/\bdone\b/)
     await expect(window.locator('#update-all-log')).not.toContainText('did not finish')
+  })
+
+  test('a failed Update All shows the reason from the result, not the stage', async () => {
+    const window = await launch(['--demo-updates', '--demo-update-all=failed'])
+    await runUpdateAll(window)
+    const log = window.locator('#update-all-log')
+    await expect(log).toContainText('The UI build exited with code 1: Could not resolve "./App" (demo).', { timeout: 10000 })
+    await expect(log).not.toContainText('Update failed at stage')
+    await expect(window.locator('#btn-run-update-all')).toHaveText('Failed')
+    await expect(window.locator('#btn-run-update-all')).toBeEnabled()
+  })
+
+  test('control: a failed Update All with no reason shows its stage', async () => {
+    const window = await launch(['--demo-updates', '--demo-update-all=failed-no-reason'])
+    await runUpdateAll(window)
+    await expect(window.locator('#update-all-log')).toContainText('Update failed at stage: ui-build', { timeout: 10000 })
+  })
+
+  test('Update All refused while another operation runs shows that reason', async () => {
+    const window = await launch(['--demo-updates', '--demo-update-all=busy'])
+    await runUpdateAll(window)
+    const log = window.locator('#update-all-log')
+    await expect(log).toContainText('A fresh install is still running. Wait for it to finish, then try again.', { timeout: 10000 })
+    await expect(log).not.toContainText('Update failed at stage')
+    await expect(window.locator('#btn-run-update-all')).toBeEnabled()
+  })
+
+  test('Done screen: a rebuild refused while another operation runs shows that reason', async () => {
+    const window = await launch(['--demo-updates', '--demo-ui-rebuild=busy'])
+    await updateToDone(window)
+    await expect(window.locator('#done-ui-note'))
+      .toHaveText('An update is still running. Wait for it to finish, then try again.', { timeout: 10000 })
   })
 
   test('a refused update of an existing install shows its reason, not the connection hint', async () => {
