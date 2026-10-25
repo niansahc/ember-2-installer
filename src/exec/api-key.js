@@ -4,6 +4,7 @@
 // gets no onData hook, so the key is never streamed to a log channel.
 
 const { run } = require('./run')
+const { TIMEOUTS } = require('./limits')
 const { uiBuildEnv } = require('../lib/env')
 const { parseKeyLine, registerSecret, redactSecrets } = require('../lib/redact')
 
@@ -18,7 +19,7 @@ const CREATED_LINE = 'API key stored in system credential store.'
 // onLog receives the script's stderr, redacted.
 // Resolves { ok, created, key, error }; never rejects (run() never does).
 async function readApiKey({ pyBin, emberPath, onLog } = {}) {
-  const r = await run(pyBin, [SCRIPT, '--non-interactive'], { cwd: emberPath })
+  const r = await run(pyBin, [SCRIPT, '--non-interactive'], { cwd: emberPath, timeout: TIMEOUTS.apiKey })
   const key = parseKeyLine(r.stdout)
   if (key) registerSecret(key)
 

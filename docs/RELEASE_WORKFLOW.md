@@ -62,8 +62,13 @@ release, and the installer uses tag `v<emberRelease>` for both.
   succeed. A clone at the pin with no record shows "(needs setup)" and Update All runs the setup
   again, so an update that stopped part way is finished on the next run.
 - **One clone, move, build or update runs at a time** (`src/lib/exclusive.js`); a second one is
-  refused with the name of the running one. "Start fresh" renames the existing ember-2 aside and puts
-  it back if the new clone fails (`src/exec/aside.js`).
+  refused with the name of the running one. Every command run under the lock has a generous time
+  limit, and git clone and fetch also stop after 60 seconds under 1 KB/s (`src/exec/limits.js`), so
+  a command that hangs cannot hold the lock until the app restarts.
+- **"Start fresh"** replaces `<folder>/ember-2` only when it is a shallow clone whose stored origin
+  is the backend repository, and only at the path the existing-install check found; anything else is
+  refused and left as is (`src/exec/fresh-install.js`). It renames the old install aside and puts it
+  back if the new clone fails (`src/exec/aside.js`).
 - **The update screen** targets the pin for the backend and UI rows, not GitHub's latest release. A
   newer backend or UI reaches users with the installer release that pins it, and appears after the
   installer updates itself (on Linux and macOS, after the user downloads the new installer).

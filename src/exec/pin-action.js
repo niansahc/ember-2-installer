@@ -4,6 +4,7 @@
 
 const fs = require('fs')
 const { run } = require('./run')
+const { TIMEOUTS } = require('./limits')
 const { updateAction } = require('../lib/release-pin')
 const { installedBackendVersion, installedUiVersion, builtUiTag, backendSetupTag } = require('./installed')
 
@@ -14,7 +15,7 @@ const { installedBackendVersion, installedUiVersion, builtUiTag, backendSetupTag
 async function pinAction({ cwd, installed, tag }) {
   const action = updateAction({ installed, pinned: tag })
   if (action !== 'current' || !cwd) return action
-  const tags = await run('git', ['tag', '--points-at', 'HEAD'], { cwd })
+  const tags = await run('git', ['tag', '--points-at', 'HEAD'], { cwd, timeout: TIMEOUTS.gitLocal })
   const atTag = tags.ok && tags.stdout.split(/\r?\n/).some((t) => t.trim() === tag)
   return atTag ? 'current' : 'update'
 }

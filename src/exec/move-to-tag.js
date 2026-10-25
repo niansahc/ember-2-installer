@@ -5,6 +5,7 @@
 const fs = require('fs')
 const path = require('path')
 const { run } = require('./run')
+const { TIMEOUTS, gitNetworkEnv } = require('./limits')
 
 // Same directory, after resolving symlinks and Windows 8.3 short names.
 function samePath(a, b) {
@@ -32,7 +33,7 @@ const shownUrl = (u) => u.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, '$1')
 // directory that is not a clone never stands in for an enclosing repository).
 // Resolves { state, error? }; error is set when git itself could not run.
 async function cloneState(cwd) {
-  const probe = await run('git', ['rev-parse', '--show-toplevel', '--is-shallow-repository'], { cwd })
+  const probe = await run('git', ['rev-parse', '--show-toplevel', '--is-shallow-repository'], { cwd, timeout: TIMEOUTS.gitLocal })
   if (probe.error !== null) return { state: 'none', error: probe.error }
   const [top, shallow] = probe.stdout.trim().split(/\r?\n/)
   if (!probe.ok || !samePath(top, cwd)) return { state: 'none' }
@@ -52,7 +53,7 @@ async function checkInstallerClone({ cwd, url }) {
   if (clone.state === 'none') return fail('none', `${cwd} is not a git repository`)
   if (clone.state === 'full') return fail('full', `${cwd} is a full git clone, not an installer install`)
 
-  const origin = await run('git', ['config', '--get', 'remote.origin.url'], { cwd })
+  const origin = await run('git', ['config', '--get', 'remote.origin.url'], { cwd, timeout: TIMEOUTS.gitLocal })
   const originUrl = origin.ok ? origin.stdout.trim() : ''
   if (!originUrl || !sameRepo(originUrl, url)) {
     const shown = originUrl ? shownUrl(originUrl) : 'no known repository'
@@ -81,7 +82,7 @@ const MOVE_ADVICE = { full: '; update it with git yourself', origin: '; it was l
 //      the clone has changed, so every earlier failure leaves it as it was.
 // Resolves { ok, error? } and never rejects, like run().
 async function moveToTag({ cwd, tag, url, onData, resetFiles = [] }) {
-  const git = (args, opts = {}) => run('git', args, { cwd, ...opts })
+  const git = (args, opts = {}) => run('git', args, { cwd, timeout: TIMEOUTS.gitLocal, ...opts })
   const fail = (error) => ({ ok: false, error })
   if (!url) return fail('moveToTag: no repository URL given')
 
@@ -97,7 +98,9 @@ async function moveToTag({ cwd, tag, url, onData, resetFiles = [] }) {
   }
 
   const ref = `refs/tags/${tag}`
-  const fetched = await git(['fetch', '--depth', '1', '--no-tags', 'origin', `+${ref}:${ref}`], { onData })
+  const fetched = await git(['fetch', '--depth', '1', '--no-tags', 'origin', `+${ref}:${ref}`], {
+    onData, env: gitNetworkEnv(), timeout: TIMEOUTS.gitNetwork,
+  })
   if (!fetched.ok) return fail(fetched.error || `git fetch of ${tag} exited with code ${fetched.code}`)
   for (const f of resetFiles) await git(['checkout', '--', f])
   const checkedOut = await git(['checkout', '--detach', ref], { onData })

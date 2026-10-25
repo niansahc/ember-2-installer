@@ -4,6 +4,7 @@
 const fs = require('fs')
 const path = require('path')
 const { run, failureReason } = require('./run')
+const { TIMEOUTS } = require('./limits')
 const { recordBuiltUiTag } = require('./installed')
 
 const removeIfThere = (dir) => {
@@ -67,11 +68,11 @@ async function buildAndServeUi({ uiDir, targetUiDir, tag, record, buildEnv, log,
   }
 
   log('Installing UI dependencies...\n')
-  const ci = await exec('npm', ['ci'], { cwd: uiDir, onData: log })
+  const ci = await exec('npm', ['ci'], { cwd: uiDir, onData: log, timeout: TIMEOUTS.npmCi })
   if (!ci.ok) return { ok: false, stage: 'ui-npm', error: `${failureReason(ci, 'npm ci')}.` }
 
   log('Building Ember UI...\n')
-  const built = await exec('node', [VITE_BIN, 'build'], { cwd: uiDir, env, onData: log })
+  const built = await exec('node', [VITE_BIN, 'build'], { cwd: uiDir, env, onData: log, timeout: TIMEOUTS.uiBuild })
   if (!built.ok) return { ok: false, stage: 'ui-build', error: `${failureReason(built, 'The UI build')}.` }
 
   const recorded = Boolean(record)

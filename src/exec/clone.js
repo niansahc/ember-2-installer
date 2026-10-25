@@ -5,6 +5,7 @@
 const fs = require('fs')
 const path = require('path')
 const { run, failureReason } = require('./run')
+const { TIMEOUTS, gitNetworkEnv } = require('./limits')
 
 // Production backend repo, the default url. Production passes either this or
 // REPO_UI_URL (src/main.js), both constants; a hermetic test passes a local
@@ -15,8 +16,8 @@ const DEFAULT_BACKEND_REPO_URL = 'https://github.com/niansahc/ember-2.git'
 // Run `git clone --depth 1 --branch <tag> <url> <folder>` in targetDir's
 // parent, streaming output to onData. tag is required: production clones the
 // pinned release tag (src/lib/release-pin.js), never the default branch.
-// Resolves { ok, code, error? } and never rejects; error carries git's last
-// stderr line (failureReason).
+// Resolves { ok, code, error? } and never rejects; error carries the cause git
+// printed (failureReason). A stalled clone is stopped (src/exec/limits.js).
 //
 // The parent is the working directory and only the folder name is an
 // argument: run() keeps shell:true and joins arguments unquoted, so a parent
@@ -33,9 +34,11 @@ function cloneRepo({ url = DEFAULT_BACKEND_REPO_URL, targetDir, tag, onData } = 
   }
   return run('git', ['clone', '--depth', '1', '--branch', tag, url, path.basename(targetDir)], {
     cwd: parent,
+    env: gitNetworkEnv(),
+    timeout: TIMEOUTS.gitNetwork,
     onData: (chunk) => { if (onData) onData(chunk) },
   }).then((r) => {
-    if (r.error !== null) return { ok: false, error: r.error }
+    if (r.error !== null) return { ok: false, error: failureReason(r, 'git clone') }
     if (r.ok) return { ok: true, code: r.code }
     return { ok: false, code: r.code, error: failureReason(r, 'git clone') }
   })

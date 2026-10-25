@@ -26,6 +26,7 @@ const { runBackendSetup } = require('./exec/backend-setup')
 const { uiToPin, uiNeedsBuild, uiBuildIsPin } = require('./exec/ui-to-pin')
 const { buildAndServeUi } = require('./exec/ui-build')
 const { createExclusive } = require('./lib/exclusive')
+const { TIMEOUTS } = require('./exec/limits')
 
 // The ember-2 / ember-2-ui release tag this installer clones and updates to,
 // and its version as the update rows show it.
@@ -34,7 +35,9 @@ const EMBER_VERSION = displayVersion(EMBER_TAG)
 
 // One clone, move, build or update at a time (src/lib/exclusive.js). A
 // handler wrapped in locked() refuses while another runs and resolves
-// { ok: false, busy: true, error }; the renderer shows the error.
+// { ok: false, busy: true, error }; the renderer shows the error. Every
+// command run under the lock has a time limit (src/exec/limits.js), so one
+// that hangs cannot hold it until the app restarts.
 const exclusive = createExclusive()
 const locked = (label, handler) => (...args) => exclusive(label, () => handler(...args))
 
@@ -81,20 +84,22 @@ function backendSetupSteps(emberPath, host, log) {
     pip: async () => {
       log('Installing Python dependencies...\n')
       return (await run(shellVenvPython(emberPath), ['-m', 'pip', 'install', '-r', 'requirements.txt'], {
-        cwd: emberPath, onData: log,
+        cwd: emberPath, onData: log, timeout: TIMEOUTS.pip,
       })).ok
     },
     docker: async () => {
       log('Stopping old API process...\n')
       if (isWin) {
-        await run('taskkill', ['/F', '/FI', 'WINDOWTITLE eq start_api*'])
-        await run('cmd', ['/c', 'for /f "tokens=5" %a in (\'netstat -aon ^| findstr :8000 ^| findstr LISTENING\') do taskkill /F /PID %a'])
+        await run('taskkill', ['/F', '/FI', 'WINDOWTITLE eq start_api*'], { timeout: TIMEOUTS.kill })
+        await run('cmd', ['/c', 'for /f "tokens=5" %a in (\'netstat -aon ^| findstr :8000 ^| findstr LISTENING\') do taskkill /F /PID %a'], {
+          timeout: TIMEOUTS.kill,
+        })
       } else {
-        await run('pkill', ['-f', API_PKILL_PATTERN])
+        await run('pkill', ['-f', API_PKILL_PATTERN], { timeout: TIMEOUTS.kill })
       }
       await new Promise((r) => setTimeout(r, 2000))
       log('Restarting Docker services...\n')
-      return (await run('docker', ['compose', 'up', '-d', '--build'], { cwd: emberPath, onData: log })).ok
+      return (await run('docker', ['compose', 'up', '-d', '--build'], { cwd: emberPath, onData: log, timeout: TIMEOUTS.docker })).ok
     },
     restart: async () => {
       log('Starting updated API...\n')
@@ -1017,13 +1022,13 @@ ipcMain.handle('run-all-updates', locked('An update', async (_e, { updates, host
   // installs may be missing nomic-embed-text and retrieval will silently
   // fail without it.
   log('Checking embedding model...\n')
-  const ollamaListResult = await run('ollama', ['list'])
+  const ollamaListResult = await run('ollama', ['list'], { timeout: TIMEOUTS.ollamaList })
   const ollamaModels = ollamaListResult.error === null ? ollamaListResult.stdout : ''
   if (!ollamaModels.includes('nomic-embed-text')) {
     log('Pulling embedding model (nomic-embed-text)...\n')
-    const pullOk = (await run('ollama', ['pull', 'nomic-embed-text'], { onData: log })).ok
+    const pullOk = (await run('ollama', ['pull', 'nomic-embed-text'], { onData: log, timeout: TIMEOUTS.ollamaPull })).ok
     if (pullOk) {
-      const verifyResult = await run('ollama', ['list'])
+      const verifyResult = await run('ollama', ['list'], { timeout: TIMEOUTS.ollamaList })
       const verify = verifyResult.error === null && verifyResult.stdout.includes('nomic-embed-text')
       log(verify ? 'Embedding model installed ✓\n' : 'Warning: embedding model pull completed but not found.\n')
     } else {
