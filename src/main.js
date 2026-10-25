@@ -202,10 +202,13 @@ const DEMO_RAW_LOG = DEMO_MODE && process.argv.includes('--demo-raw-log')
 //   --demo-ui-rebuild=refused|npm|warning: the Done screen finds no served UI,
 //     and its rebuild is refused with a reason, fails at npm ci, or succeeds
 //     with a warning. refused-once: only the first visit finds no UI.
+//   --demo-update-all=setup-unfinished (with --demo-updates): Update All
+//     succeeds but its backend setup did not finish.
 const demoArg = (name) => (process.argv.find((a) => a.startsWith(`--${name}=`)) || '').split('=')[1] || null
 const DEMO_UNREACHABLE = process.argv.includes('--demo-unreachable')
 const DEMO_EXISTING_UPDATE = demoArg('demo-existing-update')
 const DEMO_UI_REBUILD = demoArg('demo-ui-rebuild')
+const DEMO_UPDATE_ALL = demoArg('demo-update-all')
 
 // Log channels that carry child-process or status text to the renderer.
 const LOG_CHANNELS = new Set([
@@ -1003,6 +1006,10 @@ ipcMain.handle('run-all-updates', locked('An update', async (_e, { updates, host
   const pyBin = shellVenvPython(emberPath)
   const log = (text) => sendLog('update-all-log', text)
 
+  // runBackendSetup's { ok, pipOk, dockerOk, apiOk } when the setup ran, else
+  // null. It goes back in the result: the renderer leaves the backend row not
+  // done when the setup did not finish.
+  let backendSetup = null
   if (updates.backend) {
     log('Updating Ember backend...\n')
     const backend = await moveBackendToPin(emberPath, log)
@@ -1011,8 +1018,9 @@ ipcMain.handle('run-all-updates', locked('An update', async (_e, { updates, host
     if (!backend.ok) return { ok: false, stage: 'backend-move', error: `Backend update failed: ${backend.error}` }
     // A setup that does not finish is not recorded, so the next check offers
     // it again; the other updates still run.
-    if (backendNeedsSetup(backend.action) && (await setUpBackend(emberPath, host, backend.action, log)).ok) {
-      log('Backend updated ✓\n\n')
+    if (backendNeedsSetup(backend.action)) {
+      backendSetup = await setUpBackend(emberPath, host, backend.action, log)
+      if (backendSetup.ok) log('Backend updated ✓\n\n')
     }
   }
 
@@ -1048,7 +1056,7 @@ ipcMain.handle('run-all-updates', locked('An update', async (_e, { updates, host
   // 3. Installer update — handled separately via electron-updater (quit-and-install)
   // The renderer will trigger this after backend/UI updates complete.
 
-  return { ok: true, needsInstallerUpdate: !!updates.installer }
+  return { ok: true, needsInstallerUpdate: !!updates.installer, backendSetup }
 }))
 
 ipcMain.handle('check-ui-built', () => {
@@ -1678,11 +1686,15 @@ if (DEMO_MODE) {
       const log = (text) => sendLog('update-all-log', text)
       const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 
+      let backendSetup = null
       if (updates.backend) {
         log('Updating Ember backend...\n')
         await wait(1500)
         log(`  moved to ${EMBER_TAG}\n`)
         await wait(900)
+        backendSetup = DEMO_UPDATE_ALL === 'setup-unfinished'
+          ? { ok: false, pipOk: true, dockerOk: false, apiOk: false }
+          : { ok: true, pipOk: true, dockerOk: true, apiOk: true }
       }
       if (updates.ui) {
         log('Updating Ember UI...\n')
@@ -1697,10 +1709,9 @@ if (DEMO_MODE) {
         log('  installer ready\n')
         await wait(700)
       }
-      log('\nAll updates applied.\n')
       // The installer download runs only with --demo-installer-update; the
       // other update-screen tests end on the Done screen.
-      return { ok: true, needsInstallerUpdate: !!(DEMO_INSTALLER_UPDATE && updates.installer) }
+      return { ok: true, needsInstallerUpdate: !!(DEMO_INSTALLER_UPDATE && updates.installer), backendSetup }
     }
     return { ok: true, needsInstallerUpdate: false }
   })

@@ -360,6 +360,12 @@ test.describe('source: install and update handlers', () => {
     ])
   })
 
+  test('Update All returns the backend setup result, which the demo handler mirrors', () => {
+    const body = handlerBody(mainJs(), 'run-all-updates')
+    expect(body).toMatch(/backendSetup = await setUpBackend\(emberPath, host, backend\.action, log\)/)
+    expect(body).toMatch(/return \{ ok: true, needsInstallerUpdate: !!updates\.installer, backendSetup \}/)
+  })
+
   test('nothing in src/ runs the ember-2-ui npm build script', () => {
     expect(npmUiBuilds(srcText())).toEqual([])
   })

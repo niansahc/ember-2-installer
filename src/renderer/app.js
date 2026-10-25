@@ -1698,6 +1698,18 @@ function markUpdateRowDone(name) {
   if (icon) icon.textContent = '✨'
 }
 
+// A row whose update ran but did not finish: neither in progress nor done,
+// its icon back to the default, and the reason in its note.
+function markUpdateRowUnfinished(name, reason) {
+  const row = document.getElementById(`update-row-${name}`)
+  if (!row || row.classList.contains('hidden')) return
+  row.classList.remove('in-progress', 'done')
+  const icon = row.querySelector('.update-icon')
+  if (icon && icon.dataset.default) icon.textContent = icon.dataset.default
+  const note = document.getElementById(`update-${name}-note`)
+  if (note) note.textContent = reason
+}
+
 // What an update check shows: 'updates', 'current' or 'unreachable'. The
 // backend and UI rows target the pin, which needs no GitHub API answer (Update
 // All uses git), so an unreachable API never hides an update that was found;
@@ -2342,8 +2354,17 @@ document.getElementById('btn-run-update-all').addEventListener('click', () => {
         }
       }
 
-      const summary = celebrationSummary()
-      await showCelebration({ version: summary.version, bullet: summary.bullet, durationMs: 8000 })
+      // A backend setup (pip, docker, API restart) that did not finish is not
+      // recorded, so the next update check offers it again. The backend row
+      // stays not done, there is no celebration, and the screen stays put.
+      const setupUnfinished = Boolean(result.backendSetup && !result.backendSetup.ok)
+      if (setupUnfinished) {
+        markUpdateRowUnfinished('backend', 'The setup did not finish. The next update check offers it again.')
+        logBox.textContent += '\nThe backend setup did not finish. The next update check offers it again.\n'
+      } else {
+        const summary = celebrationSummary()
+        await showCelebration({ version: summary.version, bullet: summary.bullet, durationMs: 8000 })
+      }
 
       if (result.needsInstallerUpdate) {
         logBox.textContent += '\nBackend and UI updated. Downloading installer update...\n'
@@ -2361,6 +2382,10 @@ document.getElementById('btn-run-update-all').addEventListener('click', () => {
         }
         logBox.textContent += `\n${download.message}\n`
         showInstallerUpdateNotice(download.message)
+      } else if (setupUnfinished) {
+        btn.textContent = 'Try Again'
+        btn.disabled = false
+        return
       } else {
         logBox.textContent += '\nAll updates applied. Starting Ember...\n'
       }

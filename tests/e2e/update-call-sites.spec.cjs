@@ -56,6 +56,36 @@ test.describe('update call sites', () => {
     await expect(window.locator('.screen.active')).toHaveAttribute('id', 'screen-update', { timeout: 10000 })
   })
 
+  // From the update banner to the Update screen, then Update All.
+  async function runUpdateAll(window) {
+    await expect(window.locator('#update-available-banner')).toBeVisible({ timeout: 10000 })
+    await window.locator('#btn-view-updates').click()
+    await expect(window.locator('.screen.active')).toHaveAttribute('id', 'screen-update', { timeout: 5000 })
+    await window.locator('#btn-run-update-all').click()
+  }
+
+  test('Update All with an unfinished backend setup leaves the backend row not done and says so', async () => {
+    const window = await launch(['--demo-updates', '--demo-update-all=setup-unfinished'])
+    await runUpdateAll(window)
+    const log = window.locator('#update-all-log')
+    await expect(log).toContainText('The backend setup did not finish. The next update check offers it again.', { timeout: 20000 })
+    await expect(window.locator('#update-row-backend')).not.toHaveClass(/\bdone\b/)
+    await expect(window.locator('#update-backend-note')).toHaveText('The setup did not finish. The next update check offers it again.')
+    await expect(window.locator('#update-row-ui')).toHaveClass(/\bdone\b/)
+    await expect(window.locator('#btn-run-update-all')).toHaveText('Try Again')
+    await expect(window.locator('#update-celebration')).toBeHidden()
+    await expect(log).not.toContainText('All updates applied')
+    await expect(window.locator('.screen.active')).toHaveAttribute('id', 'screen-update')
+  })
+
+  test('control: a finished backend setup marks the backend row done', async () => {
+    const window = await launch(['--demo-updates'])
+    await runUpdateAll(window)
+    await expect(window.locator('#update-celebration')).toBeVisible({ timeout: 20000 })
+    await expect(window.locator('#update-row-backend')).toHaveClass(/\bdone\b/)
+    await expect(window.locator('#update-all-log')).not.toContainText('did not finish')
+  })
+
   test('a refused update of an existing install shows its reason, not the connection hint', async () => {
     const window = await launch(['--demo-existing-update=refused'])
     await findExistingInstall(window)
