@@ -294,6 +294,13 @@ const rawUiBuilds = (text) => text.split(/\r?\n/)
   .filter((l) => /\['run', 'build'\]|fs\.cpSync\(|recordBuiltUiTag\(/.test(l))
   .map((l) => l.trim())
 
+// Runs of ember-2-ui's `npm run build` anywhere in src/. That script
+// (build-with-key.js) wipes and rewrites ../ember-2/ui itself, so the build
+// runs vite directly and serveUi is the only writer of the served folder.
+const npmUiBuilds = (text) => text.split(/\r?\n/)
+  .filter((l) => /\['run', 'build'\]|['"]npm run build['"]/.test(l))
+  .map((l) => l.trim())
+
 // version.json reads in main.js that bypass installedBackendVersion
 // (src/exec/installed.js), which reads only .version, as /api/health does.
 const rawVersionReads = (text) => text.split(/\r?\n/)
@@ -351,6 +358,16 @@ test.describe('source: install and update handlers', () => {
       "const buildOk = (await run('npm', ['run', 'build'], { cwd: uiDir, env, onData: log })).ok",
       "fs.cpSync(path.join(uiDir, 'dist'), targetUiDir, { recursive: true })",
     ])
+  })
+
+  test('nothing in src/ runs the ember-2-ui npm build script', () => {
+    expect(npmUiBuilds(srcText())).toEqual([])
+  })
+
+  test('control: an npm build script run is flagged', () => {
+    const raw = `${srcText()}
+      if (!(await exec('npm', ['run', 'build'], { cwd: uiDir, env, onData: log })).ok) {`
+    expect(npmUiBuilds(raw)).toEqual(["if (!(await exec('npm', ['run', 'build'], { cwd: uiDir, env, onData: log })).ok) {"])
   })
 
   test('scan-for-ember and check-target-path read the version as the update checks do', () => {

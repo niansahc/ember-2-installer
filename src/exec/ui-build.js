@@ -41,35 +41,47 @@ function serveUi(distDir, targetUiDir, recordTag) {
   removeIfThere(old)
 }
 
-// npm ci, npm run build with the environment buildEnv() resolves ({ env,
-// keyOk }: the API key baked into the bundle, and whether it was read), then
-// serveUi. The tag is recorded only when record is set (the build is the
-// pinned release) and the key was read: a build without the key fails every
-// authenticated request, and with no record the next update check offers a
-// rebuild. exec is run(), replaceable in tests.
+// vite's own entry, run with node from the clone (the shell joins arguments
+// unquoted, so the path stays relative to cwd). ember-2-ui's `npm run build`
+// script is not used: it also wipes and rewrites ../ember-2/ui itself, before
+// serveUi, which would leave no served UI if the build failed part way.
+const VITE_BIN = path.join('node_modules', 'vite', 'bin', 'vite.js')
+
+// Read the API key (buildEnv() resolves { env, keyOk, error }: the
+// environment with the key baked into the bundle, whether it was read, and
+// why not), npm ci, vite build, then serveUi, the only writer of the served
+// folder. Without the key nothing is built: the bundle would fail every
+// authenticated request, so the served UI is left as it was. The tag is
+// recorded only when record is set (the build is the pinned release). exec is
+// run(), replaceable in tests.
 // Resolves { ok: true, recorded } or { ok: false, stage, error }.
 async function buildAndServeUi({ uiDir, targetUiDir, tag, record, buildEnv, log, exec = run }) {
+  const { env, keyOk, error } = await buildEnv()
+  if (!keyOk) {
+    return {
+      ok: false,
+      stage: 'ui-key',
+      error: `Could not read the API key (${error}), so the UI was not rebuilt. The served UI was left as it was.`,
+    }
+  }
+
   log('Installing UI dependencies...\n')
   if (!(await exec('npm', ['ci'], { cwd: uiDir, onData: log })).ok) {
     return { ok: false, stage: 'ui-npm', error: 'npm ci failed.' }
   }
 
-  const { env, keyOk } = await buildEnv()
   log('Building Ember UI...\n')
-  if (!(await exec('npm', ['run', 'build'], { cwd: uiDir, env, onData: log })).ok) {
+  if (!(await exec('node', [VITE_BIN, 'build'], { cwd: uiDir, env, onData: log })).ok) {
     return { ok: false, stage: 'ui-build', error: 'UI build failed.' }
   }
 
-  const recorded = Boolean(record && keyOk)
+  const recorded = Boolean(record)
   try {
     serveUi(path.join(uiDir, 'dist'), targetUiDir, recorded ? tag : null)
   } catch (err) {
     return { ok: false, stage: 'ui-copy', error: `Failed to copy UI: ${err.message}. The served UI was left as it was.` }
   }
-  if (record && !keyOk) {
-    log(`The UI was built without the API key, so it is not recorded as built from ${tag}; the next update check offers a rebuild.\n`)
-  }
   return { ok: true, recorded }
 }
 
-module.exports = { serveUi, buildAndServeUi }
+module.exports = { serveUi, buildAndServeUi, VITE_BIN }

@@ -50,10 +50,12 @@ release, and the installer uses tag `v<emberRelease>` for both.
   back if that clone fails. Unpackaged dev mode (`npm run start:real`) builds the developer's clone as
   it stands, with a warning, and never moves or renames it (`src/exec/ui-to-pin.js`).
 - **The UI is rebuilt** whenever the served build was not recorded as made from the pin, except for a
-  clone ahead of the pin, which is left as it is. Each build is copied to `ui.new` and swapped in for
-  `ui/` only once complete, with the tag recorded in `ui/ember-ui-build.json`
-  (`src/exec/ui-build.js`). A build that failed after the move, and a build made without the API key,
-  have no record, so the next check offers the rebuild.
+  clone ahead of the pin, which is left as it is. The installer runs `vite build` itself, not
+  ember-2-ui's `npm run build` (its build-with-key.js also wipes and rewrites `../ember-2/ui`), so each
+  build is copied to `ui.new` and swapped in for `ui/` only once complete, with the tag recorded in
+  `ui/ember-ui-build.json` (`src/exec/ui-build.js`). Nothing is built when the API key cannot be read,
+  and the served UI stays as it was. A build that failed after the move has no record, so the next
+  check offers the rebuild.
 - **The backend setup** (pip install, `docker compose up`, API restart) is recorded in
   `.venv/ember-backend-setup.json` once all three succeed and the API answers with the version on
   disk (`src/exec/backend-setup.js`); the install flow records it once its pip and docker steps

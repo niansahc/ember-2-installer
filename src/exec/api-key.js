@@ -32,17 +32,17 @@ async function readApiKey({ pyBin, emberPath, onLog } = {}) {
   return { ok: true, created: r.stdout.includes(CREATED_LINE), key, error: null }
 }
 
-// The environment for `npm run build` in ember-2-ui. The bundle needs the API
-// key baked in, or every authenticated request to the backend fails. The key is
-// read fresh for each build, so a key rotated while the installer is open is
-// picked up. It reaches the build through the child's environment only; nothing
-// holding it is written to disk. Resolves { env, keyOk }: keyOk is false when
-// the key could not be read and the build goes ahead without it.
+// The environment for the ember-2-ui build (vite build). The bundle needs the
+// API key baked in, or every authenticated request to the backend fails. The
+// key is read fresh for each build, so a key rotated while the installer is
+// open is picked up. It reaches the build through the child's environment
+// only; nothing holding it is written to disk. Resolves { env, keyOk, error }:
+// keyOk is false when the key could not be read, error says why, and the
+// caller does not build (src/exec/ui-build.js).
 async function uiBuildEnvWithKey({ pyBin, emberPath, log, parentEnv = process.env }) {
   log('Reading API key for the UI build...\n')
   const keyResult = await readApiKey({ pyBin, emberPath, onLog: log })
-  if (!keyResult.ok) log('Warning: could not retrieve API key. The UI will build without auth.\n')
-  return { env: uiBuildEnv(parentEnv, keyResult.key), keyOk: keyResult.ok }
+  return { env: uiBuildEnv(parentEnv, keyResult.key), keyOk: keyResult.ok, error: keyResult.error }
 }
 
 module.exports = { readApiKey, uiBuildEnvWithKey }

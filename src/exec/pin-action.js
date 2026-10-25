@@ -21,8 +21,8 @@ async function pinAction({ cwd, installed, tag }) {
 
 // The UI also has a served build. Adds 'clone' (no clone yet) and 'rebuild'
 // (the clone is at the pin but the served UI was not recorded as built from
-// it: a build that failed after the move, one without the API key, or one
-// from before the record existed). A clone ahead of the pin is never rebuilt.
+// it: a build that failed after the move, or one from before the record
+// existed). A clone ahead of the pin is never rebuilt.
 async function uiUpdateAction({ uiDir, targetUiDir, tag }) {
   if (!fs.existsSync(uiDir)) return 'clone'
   const action = await pinAction({ cwd: uiDir, installed: installedUiVersion(uiDir), tag })

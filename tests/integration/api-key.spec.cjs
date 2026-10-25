@@ -142,12 +142,15 @@ test.describe('uiBuildEnvWithKey', () => {
 
   test('keyOk is false when the key cannot be read, and the build gets no key', async () => {
     fs.writeFileSync(path.join(emberPath, 'scripts', 'set_api_key.py'), fakeScript({ keyExists: false, exitCode: 1, printKey: false }))
-    const { env, keyOk } = await uiBuildEnvWithKey(opts())
+    const { env, keyOk, error } = await uiBuildEnvWithKey(opts())
     expect(keyOk).toBe(false)
+    expect(error).toBeTruthy()
     expect(env.EMBER_API_KEY).toBeUndefined()
   })
 
-  test('control: keyOk is true when the key is read', async () => {
-    expect((await uiBuildEnvWithKey(opts())).keyOk).toBe(true)
+  test('control: keyOk is true when the key is read, with no error', async () => {
+    const r = await uiBuildEnvWithKey(opts())
+    expect(r.keyOk).toBe(true)
+    expect(r.error).toBeNull()
   })
 })
