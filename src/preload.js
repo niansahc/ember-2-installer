@@ -37,7 +37,6 @@ contextBridge.exposeInMainWorld('ember', {
     ipcRenderer.invoke('run-install-step', { step, emberPath }),
 
   checkForUpdate: () => ipcRenderer.invoke('check-for-update'),
-  runGitPull: () => ipcRenderer.invoke('run-git-pull'),
   checkAllUpdates: (host) => ipcRenderer.invoke('check-all-updates', { host }),
   runAllUpdates: (updates, host) => ipcRenderer.invoke('run-all-updates', { updates, host }),
   onUpdateAllLog: (fn) => ipcRenderer.on('update-all-log', (_e, text) => fn(text)),
@@ -67,9 +66,6 @@ contextBridge.exposeInMainWorld('ember', {
   installInstallerUpdate: () => ipcRenderer.invoke('install-installer-update'),
 
   checkEmberUpdate: () => ipcRenderer.invoke('check-ember-update'),
-  runEmberUpdate: () => ipcRenderer.invoke('run-ember-update'),
-  onEmberUpdateLog: (fn) =>
-    ipcRenderer.on('ember-update-log', (_e, text) => fn(text)),
 
   checkDockerDaemon: () => ipcRenderer.invoke('check-docker-daemon'),
   checkDockerContainers: (emberPath) => ipcRenderer.invoke('check-docker-containers', { emberPath }),

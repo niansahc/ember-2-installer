@@ -30,8 +30,8 @@ The Electron-based installer and setup wizard for [Ember-2](https://github.com/n
 ```bash
 npm start                # Dev mode (demo — no real infrastructure)
 npm run start:real       # Dev mode with real infrastructure
-npm run test:e2e         # Run Playwright e2e tests (108 tests)
-npm run test:integration # Hermetic integration tests (11 tests)
+npm run test:e2e         # Run Playwright e2e tests (264 tests)
+npm run test:integration # Hermetic integration tests (88 tests)
 npm run build            # Build installer
 ```
 

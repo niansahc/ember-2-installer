@@ -351,7 +351,8 @@ async function initInstallDir() {
   if (scan.found) {
     const notice = document.getElementById('ember-detected')
     const text = document.getElementById('ember-detected-text')
-    text.textContent = `I found an existing Ember installation at ${scan.path} (v${scan.version}).`
+    const version = scan.version ? ` (v${scan.version})` : ''
+    text.textContent = `I found an existing Ember installation at ${scan.path}${version}.`
     notice.classList.remove('hidden')
 
     document.getElementById('btn-use-detected').addEventListener('click', () => {
@@ -364,11 +365,25 @@ async function initInstallDir() {
   }
 }
 
+// The folder check-target-path found an existing install in. "Update" and
+// "Start fresh" act on this path, never on the input's value at click time,
+// and a new path in the input withdraws the offer until it is checked.
+let checkedParentDir = null
+
+function withdrawExistingOffer() {
+  checkedParentDir = null
+  document.getElementById('existing-install-notice').classList.add('hidden')
+  document.getElementById('btn-install-ember').disabled = false
+}
+
+document.getElementById('ember-path-input').addEventListener('input', withdrawExistingOffer)
+
 document.getElementById('btn-pick-ember').addEventListener('click', () => {
   guardClick(null, async () => {
     const chosen = await window.ember.pickEmberFolder()
     if (chosen) {
       document.getElementById('ember-path-input').value = chosen
+      withdrawExistingOffer()
     }
   })
 })
@@ -384,9 +399,11 @@ document.getElementById('btn-install-ember').addEventListener('click', () => {
   guardClick(btn, async () => {
     const check = await window.ember.checkTargetPath(parentDir)
     if (check.exists && check.isEmber) {
-      existingText.textContent = `Ember-2 found at this location (${check.version}). What would you like to do?`
+      const version = check.version ? ` (${check.version})` : ''
+      existingText.textContent = `Ember-2 found at this location${version}. What would you like to do?`
       existingNotice.classList.remove('hidden')
       btn.disabled = true
+      checkedParentDir = parentDir
       return
     }
 
@@ -428,14 +445,37 @@ async function runClone(parentDir, btn) {
     btn.textContent = 'Installed ✓'
     setTimeout(() => showScreen('screen-vault'), 800)
   } else {
-    cloneLog.textContent += '\nFailed to clone. Check your internet connection and try again.\n'
+    cloneLog.textContent += cloneFailureText(result, 'Failed to clone')
     btn.disabled = false
     btn.textContent = 'Try Again'
   }
 }
 
+// The clone log's last line after a failed update of an existing install. The
+// reason comes from the result (a line streamed just before the handler
+// returned can arrive after the listener is gone). A move that refused (a
+// full clone, local changes, another repository, another operation still
+// running) fails the same way however good the connection, so the network
+// hint is only for a failure that gave no reason.
+function existingUpdateFailureText(result) {
+  return result && result.error
+    ? `\nUpdate failed: ${result.error}\n`
+    : '\nUpdate failed. Check your internet connection and try again.\n'
+}
+
+// The clone log's last line after a failed clone or fresh install. A clone
+// that failed may be the connection, so the hint stays, after the reason; a
+// refusal (another operation is running, or Start fresh found a folder the
+// installer did not make) gets the reason alone.
+function cloneFailureText(result, failed) {
+  if (result && (result.busy || result.refused)) return `\n${result.error}\n`
+  const reason = result && result.error ? `\n${failed}: ${result.error}.` : `\n${failed}.`
+  return `${reason} Check your internet connection and try again.\n`
+}
+
 document.getElementById('btn-existing-update').addEventListener('click', () => {
-  const parentDir = document.getElementById('ember-path-input').value.trim()
+  const parentDir = checkedParentDir
+  if (!parentDir) return
   const btn = document.getElementById('btn-install-ember')
   const cloneLog = document.getElementById('clone-log')
 
@@ -467,7 +507,7 @@ document.getElementById('btn-existing-update').addEventListener('click', () => {
       btn.textContent = 'Updated ✓'
       setTimeout(() => showScreen('screen-vault'), 800)
     } else {
-      cloneLog.textContent += '\nUpdate failed. Check your internet connection and try again.\n'
+      cloneLog.textContent += existingUpdateFailureText(result)
       btn.disabled = false
       btn.textContent = 'Try Again'
     }
@@ -479,7 +519,8 @@ document.getElementById('btn-existing-update').addEventListener('click', () => {
 })
 
 document.getElementById('btn-existing-fresh').addEventListener('click', () => {
-  const parentDir = document.getElementById('ember-path-input').value.trim()
+  const parentDir = checkedParentDir
+  if (!parentDir) return
   const btn = document.getElementById('btn-install-ember')
   const cloneLog = document.getElementById('clone-log')
 
@@ -509,7 +550,7 @@ document.getElementById('btn-existing-fresh').addEventListener('click', () => {
       btn.textContent = 'Installed ✓'
       setTimeout(() => showScreen('screen-vault'), 800)
     } else {
-      cloneLog.textContent += '\nFailed. Check your internet connection and try again.\n'
+      cloneLog.textContent += cloneFailureText(result, 'Failed')
       btn.disabled = false
       btn.textContent = 'Try Again'
     }
@@ -520,10 +561,7 @@ document.getElementById('btn-existing-fresh').addEventListener('click', () => {
   })
 })
 
-document.getElementById('btn-existing-cancel').addEventListener('click', () => {
-  document.getElementById('existing-install-notice').classList.add('hidden')
-  document.getElementById('btn-install-ember').disabled = false
-})
+document.getElementById('btn-existing-cancel').addEventListener('click', withdrawExistingOffer)
 
 async function initVaultPath() {
   const defaultVault = await window.ember.getDefaultVault()
@@ -1563,6 +1601,13 @@ function prepareUpdateScreen(updates) {
     const note = document.getElementById(`update-${r}-note`)
     if (note) note.textContent = ''
   }
+  // An earlier Update All in this session left its button and log behind.
+  const runBtn = document.getElementById('btn-run-update-all')
+  runBtn.disabled = false
+  runBtn.textContent = 'Update All'
+  const runLog = document.getElementById('update-all-log')
+  runLog.textContent = ''
+  runLog.classList.add('hidden')
 
   for (const r of rows) {
     const info = updates[r]
@@ -1653,6 +1698,28 @@ function markUpdateRowDone(name) {
   if (icon) icon.textContent = '✨'
 }
 
+// A row whose update ran but did not finish: neither in progress nor done,
+// its icon back to the default, and the reason in its note.
+function markUpdateRowUnfinished(name, reason) {
+  const row = document.getElementById(`update-row-${name}`)
+  if (!row || row.classList.contains('hidden')) return
+  row.classList.remove('in-progress', 'done')
+  const icon = row.querySelector('.update-icon')
+  if (icon && icon.dataset.default) icon.textContent = icon.dataset.default
+  const note = document.getElementById(`update-${name}-note`)
+  if (note) note.textContent = reason
+}
+
+// What an update check shows: 'updates', 'current' or 'unreachable'. The
+// backend and UI rows target the pin, which needs no GitHub API answer (Update
+// All uses git), so an unreachable API never hides an update that was found;
+// it only explains finding none.
+function updateCheckOutcome(updates) {
+  const anyUpdate = updates.installer.hasUpdate || updates.backend.hasUpdate || updates.ui.hasUpdate
+  if (anyUpdate) return 'updates'
+  return updates.reachable ? 'current' : 'unreachable'
+}
+
 document.getElementById('btn-check-ember-update').addEventListener('click', () => {
   const btn = document.getElementById('btn-check-ember-update')
   const info = document.getElementById('ember-update-info')
@@ -1667,16 +1734,14 @@ document.getElementById('btn-check-ember-update').addEventListener('click', () =
     btn.disabled = false
     btn.textContent = 'Check for updates'
 
-    if (!updates.reachable) {
+    const outcome = updateCheckOutcome(updates)
+    if (outcome === 'unreachable') {
       info.classList.remove('hidden')
       msg.textContent = 'Update check unavailable — could not reach GitHub.'
-      document.getElementById('btn-run-ember-update').classList.add('hidden')
       return
     }
 
-    const anyUpdate = updates.installer.hasUpdate || updates.backend.hasUpdate || updates.ui.hasUpdate
-
-    if (anyUpdate) {
+    if (outcome === 'updates') {
       prepareUpdateScreen(updates)
       pendingUpdates = {
         backend: updates.backend.hasUpdate,
@@ -1687,52 +1752,21 @@ document.getElementById('btn-check-ember-update').addEventListener('click', () =
     } else {
       info.classList.remove('hidden')
       msg.textContent = 'Everything is up to date.'
-      document.getElementById('btn-run-ember-update').classList.add('hidden')
     }
   }, {
     errorEl: msg,
     errorMsg: 'Update check failed — please try again.',
-    // Revealing #ember-update-info (msg's container) would also show the
-    // "Update & Restart" button — hide it, there's nothing to update.
-    onError: () => document.getElementById('btn-run-ember-update').classList.add('hidden'),
   })
 })
 
-document.getElementById('btn-run-ember-update').addEventListener('click', () => {
-  const btn = document.getElementById('btn-run-ember-update')
-  const logBox = document.getElementById('ember-update-log')
-
-  guardClick(btn, async () => {
-    btn.disabled = true
-    btn.textContent = 'Updating...'
-    logBox.classList.remove('hidden')
-    logBox.textContent = ''
-
-    window.ember.onEmberUpdateLog((text) => {
-      logBox.textContent += text
-      logBox.scrollTop = logBox.scrollHeight
-    })
-
-    const result = await window.ember.runEmberUpdate()
-    window.ember.removeAllListeners('ember-update-log')
-
-    if (result.ok) {
-      btn.textContent = 'Done'
-      logBox.textContent += `\nUpdate complete — now on ${result.tag || 'latest'}\n`
-      document.getElementById('ember-version-label').textContent = result.tag || 'latest'
-      // Re-run the start API + health check flow so the user doesn't have to figure it out
-      loadEmberVersion()
-    } else {
-      btn.textContent = 'Failed'
-      logBox.textContent += '\nUpdate failed. Try running git pull manually.\n'
-      btn.disabled = false
-    }
-  }, {
-    errorEl: logBox,
-    errorMsg: 'Update failed. Try running git pull manually.',
-    onError: () => window.ember.removeAllListeners('ember-update-log'),
-  })
-})
+// The note under the Done screen's status after its UI rebuild: a failure's
+// reason, or a successful build's warning. A failed npm ci most often means
+// Node.js is missing, so its reason keeps that hint.
+function doneUiNoteText(result) {
+  if (result.ok) return result.warning || ''
+  if (!result.error) return ''
+  return result.stage === 'ui-npm' ? `${result.error} Check that Node.js is installed, then try again.` : result.error
+}
 
 async function loadEmberVersion() {
   const title = document.getElementById('done-title')
@@ -1744,6 +1778,12 @@ async function loadEmberVersion() {
   // Launch button is always available — the launcher script handles everything
   launchBtn.disabled = false
 
+  // A note from an earlier visit (a refused rebuild since fixed by an update)
+  // no longer applies.
+  const uiNote = document.getElementById('done-ui-note')
+  uiNote.textContent = ''
+  uiNote.classList.add('hidden')
+
   status.textContent = 'Checking Ember interface...'
   const uiCheck = await window.ember.checkUiBuilt()
   if (!uiCheck.ok) {
@@ -1751,8 +1791,18 @@ async function loadEmberVersion() {
     voice.textContent = '"My interface didn\'t build correctly. Let me try again."'
     status.textContent = "Ember's interface is missing. Rebuilding..."
     const rebuildResult = await window.ember.runInstallStep('build-ui', state.emberPath)
+    // There is no install log on this screen, so the build's own reason (a
+    // refused move, a clone kept aside, a developer clone built as it stands)
+    // is shown here.
+    const reason = doneUiNoteText(rebuildResult)
+    if (reason) {
+      uiNote.textContent = reason
+      uiNote.classList.remove('hidden')
+    }
     if (!rebuildResult.ok) {
-      status.textContent = "Interface build failed. Try reinstalling or check that Node.js is installed."
+      status.textContent = reason
+        ? 'Interface build failed. The reason is below.'
+        : "Interface build failed. Try reinstalling or check that Node.js is installed."
       btn.disabled = false
       document.getElementById('btn-retry-api').style.display = ''
       document.getElementById('done-troubleshooting').classList.remove('hidden')
@@ -2263,8 +2313,17 @@ document.getElementById('btn-run-update-all').addEventListener('click', () => {
         }
       }
 
-      const summary = celebrationSummary()
-      await showCelebration({ version: summary.version, bullet: summary.bullet, durationMs: 8000 })
+      // A backend setup (pip, docker, API restart) that did not finish is not
+      // recorded, so the next update check offers it again. The backend row
+      // stays not done, there is no celebration, and the screen stays put.
+      const setupUnfinished = Boolean(result.backendSetup && !result.backendSetup.ok)
+      if (setupUnfinished) {
+        markUpdateRowUnfinished('backend', 'The setup did not finish. The next update check offers it again.')
+        logBox.textContent += '\nThe backend setup did not finish. The next update check offers it again.\n'
+      } else {
+        const summary = celebrationSummary()
+        await showCelebration({ version: summary.version, bullet: summary.bullet, durationMs: 8000 })
+      }
 
       if (result.needsInstallerUpdate) {
         logBox.textContent += '\nBackend and UI updated. Downloading installer update...\n'
@@ -2282,6 +2341,10 @@ document.getElementById('btn-run-update-all').addEventListener('click', () => {
         }
         logBox.textContent += `\n${download.message}\n`
         showInstallerUpdateNotice(download.message)
+      } else if (setupUnfinished) {
+        btn.textContent = 'Try Again'
+        btn.disabled = false
+        return
       } else {
         logBox.textContent += '\nAll updates applied. Starting Ember...\n'
       }
@@ -2289,7 +2352,10 @@ document.getElementById('btn-run-update-all').addEventListener('click', () => {
       showScreen('screen-done')
       loadEmberVersion()
     } else {
-      logBox.textContent += `\nUpdate failed at stage: ${result.stage || 'unknown'}\n`
+      // The reason comes from the result; each one names what failed.
+      logBox.textContent += result.error
+        ? `\n${result.error}\n`
+        : `\nUpdate failed at stage: ${result.stage || 'unknown'}\n`
       btn.textContent = 'Failed'
       btn.disabled = false
     }
@@ -2324,17 +2390,18 @@ document.getElementById('btn-check-installer-update').addEventListener('click', 
 
 // Boot sequence:
 //   1. If an existing ember-2 install is found, check all three repos for updates.
-//   2. If any updates are available, jump straight to the Update screen.
-//   3. Otherwise (no install, no updates, or GitHub unreachable), show the
-//      Welcome screen and begin preloading data (install dir, vault, models)
-//      in the background so later screens render instantly.
+//   2. If any update was found (updateCheckOutcome, even with GitHub
+//      unreachable: the backend and UI target the pin), show the update
+//      banner on Welcome; the user opens the Update screen from it.
+//   3. Show the Welcome screen and begin preloading data (install dir, vault,
+//      models) in the background so later screens render instantly.
 async function init() {
   const demoMode = await window.ember.getDemoMode()
   if (demoMode) {
     document.getElementById('demo-badge').classList.remove('hidden')
     // Demo/dev-only test seam: lets e2e drive the render path with crafted input
     // to prove dynamic values are escaped. Never exposed in packaged builds.
-    window.__emberTest = { buildModelCard, addRawInstallLogListener }
+    window.__emberTest = { buildModelCard, addRawInstallLogListener, updateCheckOutcome, existingUpdateFailureText, cloneFailureText, doneUiNoteText }
   }
 
   const emberPath = await window.ember.getEmberPath()
@@ -2346,15 +2413,11 @@ async function init() {
     try {
       const updates = await window.ember.checkAllUpdates(state.host)
 
-      if (updates.reachable) {
-        const anyUpdate = updates.installer.hasUpdate || updates.backend.hasUpdate || updates.ui.hasUpdate
-
-        if (anyUpdate) {
-          // Stash update info — don't auto-navigate to the update screen.
-          // Instead show a subtle banner on Welcome and let the user decide.
-          cachedBootUpdates = updates
-          document.getElementById('update-available-banner').classList.remove('hidden')
-        }
+      if (updateCheckOutcome(updates) === 'updates') {
+        // Stash update info and don't auto-navigate to the update screen.
+        // Instead show a subtle banner on Welcome and let the user decide.
+        cachedBootUpdates = updates
+        document.getElementById('update-available-banner').classList.remove('hidden')
       }
     } catch {
       // Leave the banner hidden and fall through to the normal Welcome flow.

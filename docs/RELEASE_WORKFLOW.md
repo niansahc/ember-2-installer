@@ -4,8 +4,8 @@
 
 The installer is the Electron **setup wizard** only. Its packaged binary contains just the wizard
 (`src/**`, `assets/**`, `release_notes.html`). It does **not** bundle the backend or the frontend:
-at install time it clones ember-2 and ember-2-ui onto the user's machine and builds the UI there
-(the `build-ui` step in `src/main.js`). So releasing the installer is just packaging the wizard —
+at install time it clones ember-2 and ember-2-ui onto the user's machine, at the pinned release tag
+(see Three-Repo Version Coordination), and builds the UI there (the `build-ui` step in `src/main.js`). So releasing the installer is just packaging the wizard —
 there is no frontend build at release time.
 
 ## How electron-updater Works
@@ -28,8 +28,67 @@ macOS (unsigned DMG) the update is manual: the installer points the user to the 
 
 ## Three-Repo Version Coordination
 
-ember-2-installer is the source of truth for what ships together. Document the ember-2 (backend)
-and ember-2-ui (frontend) versions a release expects in that release's notes.
+All three repos share one version number. ember-2-installer is the source of truth for what ships
+together: `emberRelease` in `package.json` names the ember-2 (backend) and ember-2-ui (frontend)
+release, and the installer uses tag `v<emberRelease>` for both.
+
+- **Fresh installs** clone both repos with `git clone --depth 1 --branch v<emberRelease>`
+  (`src/exec/clone.js`).
+- **Updates** move both repos to that same tag (`src/exec/move-to-tag.js`) when they need it
+  (`src/exec/pin-action.js`): the tag is newer than what is installed (backend `version.json`
+  `version`, UI `package.json`), the installed version is unknown, or the version equals the pin but
+  HEAD is not at the tag (`main` between releases carries the last release's number). Nothing is
+  downgraded, and nothing clones or pulls `main`.
+- **A move is refused** for a full (non-shallow) clone such as a developer's working repo, a clone
+  whose stored `origin` is another repository (read with `git config`, so a `url.<base>.insteadOf`
+  rewrite does not count), and a clone with edited tracked files. The two files the installer itself
+  rewrites, backend `version.json` and UI `package-lock.json`, are reset to the tag after the fetch
+  succeeds, so edits to them are discarded by a move and kept by a failed one. The reason is shown on
+  the screen that asked for the move.
+- **A full ember-2-ui clone** (installers before `--depth 1` made them) cannot be moved. A packaged
+  install renames it to `ember-2-ui.old-<date>`, keeps it, and clones the pin in its place, putting it
+  back if that clone fails. Unpackaged dev mode (`npm run start:real`) builds the developer's clone as
+  it stands, with a warning, and never moves or renames it (`src/exec/ui-to-pin.js`).
+- **The UI is rebuilt** whenever the served build was not recorded as made from the pin, except for a
+  clone ahead of the pin, which is left as it is. The installer runs `vite build` itself, not
+  ember-2-ui's `npm run build` (its build-with-key.js also wipes and rewrites `../ember-2/ui`), so each
+  build is copied to `ui.new` and swapped in for `ui/` only once complete, with the tag recorded in
+  `ui/ember-ui-build.json` (`src/exec/ui-build.js`). Nothing is built when the API key cannot be read,
+  and the served UI stays as it was. A build that failed after the move has no record, so the next
+  check offers the rebuild.
+- **The backend setup** (pip install, `docker compose up`, API restart) is recorded in
+  `.venv/ember-backend-setup.json` once all three succeed and the API answers with the version on
+  disk (`src/exec/backend-setup.js`); the install flow records it once its pip and docker steps
+  succeed. A clone at the pin with no record shows "(needs setup)" and Update All runs the setup
+  again, so an update that stopped part way is finished on the next run.
+- **One clone, move, build or update runs at a time** (`src/lib/exclusive.js`); a second one is
+  refused with the name of the running one. Every command run under the lock has a generous time
+  limit, and git clone and fetch also stop after 60 seconds under 1 KB/s (`src/exec/limits.js`), so
+  a command that hangs cannot hold the lock until the app restarts.
+- **"Start fresh"** replaces `<folder>/ember-2` only when it is a shallow clone whose stored origin
+  is the backend repository, and only at the path the existing-install check found; anything else is
+  refused and left as is (`src/exec/fresh-install.js`). It renames the old install aside and puts it
+  back if the new clone fails (`src/exec/aside.js`).
+- **The update screen** targets the pin for the backend and UI rows, not GitHub's latest release. A
+  newer backend or UI reaches users with the installer release that pins it, and appears after the
+  installer updates itself (on Linux and macOS, after the user downloads the new installer).
+
+Who bumps `emberRelease`:
+
+- **Coordinated release** (all three repos): once the ember-2 and ember-2-ui tags exist, set
+  `emberRelease` to the new version in the installer's release-please PR before merging it. It then
+  equals `version`.
+- **Installer-only patch release:** leave `emberRelease` alone. It stays behind `version`, at the same
+  major.minor, so the tags it names still exist.
+
+Checks:
+
+- `tests/e2e/release-pin.spec.cjs` fails if `emberRelease` is not x.y.z, has a different major.minor
+  from `version`, or is newer than `version`. A release-please PR that bumps the minor therefore stays
+  red until `emberRelease` is bumped with it.
+- The `check-pinned-tags` job in `release.yml` runs before any build and fails the release if
+  `v<emberRelease>` is missing from either repo (`git ls-remote --exit-code --tags`). A repo it
+  cannot reach fails the job too, with its own message, so re-run it rather than checking tags.
 
 ## Automated Release (implemented)
 
@@ -39,8 +98,9 @@ Release is automated via GitHub Actions and stays human-gated:
    auto-generated changelog and version bump. Per CLAUDE.md these PRs are **never** auto-merged.
 2. When the human merges the release PR, release-please creates a **published** GitHub Release
    (`draft: false` in `release-please-config.json`) at tag `vX.Y.Z`.
-3. **`.github/workflows/release.yml`** fires on `release: published` and runs three jobs
-   (windows-latest, macos-latest, ubuntu-latest), each `electron-builder --<platform> --publish
+3. **`.github/workflows/release.yml`** fires on `release: published`. It runs the
+   `check-pinned-tags` gate first (ubuntu-latest), then three build jobs (windows-latest,
+   macos-latest, ubuntu-latest) that each wait for it, each `electron-builder --<platform> --publish
    always`, attaching that platform's installer plus its `latest*.yml` to the release.
 
 Conventional commits (`feat:`, `fix:`, `chore:` ...) drive the semver bump. The workflow never cuts
@@ -137,7 +197,8 @@ Per the testing discipline in CLAUDE.md, this must be fixed or marked skip-with-
 
 If you must release by hand:
 
-1. Bump the version in `package.json` (normally release-please does this).
+1. Bump the version in `package.json` (normally release-please does this), and `emberRelease` too
+   for a coordinated release. Confirm both `v<emberRelease>` tags exist.
 2. `npm ci`
 3. `npx electron-builder --<platform> --publish always` with `GH_TOKEN` set -- or run a local build
    and upload the installer binary + `latest*.yml` to the published (non-draft) GitHub Release.
@@ -151,6 +212,8 @@ If you must release by hand:
 - Missing `app-update.yml`: affected installed versions can never auto-update; requires manual
   reinstall
 - Version not bumped: electron-updater compares versions and concludes no update available
+- `emberRelease` naming a tag that does not exist: every fresh install fails at the clone. The
+  `check-pinned-tags` job in `release.yml` blocks the release before anything is built.
 - Publish type mismatch: electron-builder defaults to `releaseType: draft`. release-please publishes
   the release immediately (`draft: false`), so electron-builder finds `existingType=release`,
   logs `skipped publishing ... reason=existing type not compatible with publishing type`, attaches

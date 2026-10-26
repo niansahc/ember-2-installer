@@ -12,6 +12,9 @@
 const { test, expect } = require('@playwright/test')
 const { launchApp, closeApp } = require('./helpers.cjs')
 
+// Backend and UI rows target the release this installer pins.
+const PIN = require('../../package.json').emberRelease
+
 test.describe('Update Screen — cute additions', () => {
   let app, window
 
@@ -66,11 +69,11 @@ test.describe('Update Screen — cute additions', () => {
     await expect(window.locator('#update-row-ui')).toBeVisible()
     await expect(window.locator('#update-row-installer')).toBeVisible()
 
-    // Versions come from the demo handler
-    await expect(window.locator('#update-backend-installed')).toHaveText('v0.13.1')
-    await expect(window.locator('#update-backend-latest')).toHaveText('v0.14.0')
-    await expect(window.locator('#update-ui-installed')).toHaveText('0.5.3')
-    await expect(window.locator('#update-ui-latest')).toHaveText('0.6.0')
+    // Versions come from the demo handler; the targets are the pin
+    await expect(window.locator('#update-backend-installed')).toHaveText('v0.17.0')
+    await expect(window.locator('#update-backend-latest')).toHaveText(`v${PIN}`)
+    await expect(window.locator('#update-ui-installed')).toHaveText('0.17.0')
+    await expect(window.locator('#update-ui-latest')).toHaveText(PIN)
 
     // First-bullet changelog notes come from the demo handler
     await expect(window.locator('#update-backend-note')).toContainText('Faster retrieval')
@@ -99,7 +102,7 @@ test.describe('Update Screen — cute additions', () => {
 
     // Card shows the cached version and first-bullet for the preferred
     // repo (backend wins the priority in celebrationSummary).
-    await expect(window.locator('#celebration-version')).toHaveText('v0.14.0')
+    await expect(window.locator('#celebration-version')).toHaveText(`v${PIN}`)
     await expect(window.locator('#celebration-bullet')).toContainText('Faster retrieval')
 
     // After ~8s the card hides and the Done screen takes over.

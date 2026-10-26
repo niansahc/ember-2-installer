@@ -42,10 +42,10 @@ function buildEnvFile({ vault, host, model, vision, platform } = {}) {
   return lines.join('')
 }
 
-// Environment for the ember-2-ui `npm run build`. The key travels in the child's
-// environment, never in a file: build-with-key.js reads EMBER_API_KEY first, and
-// a plain `vite build` reads VITE_* from process.env ahead of any env file.
-// Without a key the UI still builds; build-with-key.js falls back to the keyring.
+// Environment for the ember-2-ui build. The installer runs `vite build`, which
+// reads VITE_* from process.env ahead of any env file, so the key travels in
+// the child's environment, never in a file. EMBER_API_KEY is what ember-2-ui's
+// own build-with-key.js reads first, for anyone building by hand.
 function uiBuildEnv(baseEnv, apiKey) {
   const env = { ...baseEnv, VITE_EMBER_API_URL: '/v1' }
   if (apiKey) {

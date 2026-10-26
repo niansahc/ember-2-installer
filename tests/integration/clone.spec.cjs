@@ -7,13 +7,26 @@ const { test, expect } = require('@playwright/test')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { execFileSync } = require('child_process')
 const { cloneRepo } = require('../../src/exec/clone')
-
-const git = (args, cwd) => execFileSync('git', args, { cwd, stdio: 'ignore' })
+const { run } = require('../../src/exec/run')
+const { git, gitOut, seedRepo } = require('./git-fixture.cjs')
 
 test.describe('cloneRepo', () => {
+  // One seeded repo (main one commit ahead of tag v1.0.0) for the file; each
+  // test clones into its own temp dir.
+  let seedDir
+  let repo
   let tmp
+  test.beforeAll(() => {
+    seedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ember-clone-seed-'))
+    repo = seedRepo(seedDir, [
+      { files: { 'README.md': 'release\n' }, tag: 'v1.0.0' },
+      { files: { 'README.md': 'unreleased\n' } },
+    ])
+  })
+  test.afterAll(() => {
+    try { fs.rmSync(seedDir, { recursive: true, force: true }) } catch {}
+  })
   test.beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ember-clone-'))
   })
@@ -21,36 +34,61 @@ test.describe('cloneRepo', () => {
     try { fs.rmSync(tmp, { recursive: true, force: true }) } catch {}
   })
 
-  test('clones an injected local repo into the target dir and reports ok', async () => {
-    // Seed a bare repo with one commit on main.
-    const bare = path.join(tmp, 'src.git')
-    const work = path.join(tmp, 'work')
-    execFileSync('git', ['init', '--bare', '--initial-branch=main', bare], { stdio: 'ignore' })
-    fs.mkdirSync(work)
-    git(['init'], work)
-    fs.writeFileSync(path.join(work, 'README.md'), 'hi\n')
-    git(['add', '.'], work)
-    git(['-c', 'user.email=t@example.com', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'commit', '-m', 'init'], work)
-    git(['branch', '-M', 'main'], work)
-    git(['remote', 'add', 'origin', bare], work)
-    git(['push', 'origin', 'main'], work)
-    // Ensure the bare repo's HEAD tracks main so the clone checks it out.
-    git(['symbolic-ref', 'HEAD', 'refs/heads/main'], bare)
-
+  test('clones the given tag, not main, and reports ok', async () => {
     const target = path.join(tmp, 'clone')
-    const result = await cloneRepo({ url: bare, targetDir: target, onData: () => {} })
+    const result = await cloneRepo({ url: repo.url, targetDir: target, tag: 'v1.0.0', onData: () => {} })
 
     expect(result.ok).toBe(true)
-    expect(fs.existsSync(path.join(target, 'README.md'))).toBe(true)
+    expect(gitOut(['rev-parse', 'HEAD'], target)).toBe(repo.ids['v1.0.0'])
+    expect(gitOut(['rev-parse', 'HEAD'], target)).not.toBe(repo.ids.main)
+    expect(fs.readFileSync(path.join(target, 'README.md'), 'utf8').trim()).toBe('release')
+    expect(gitOut(['rev-parse', '--is-shallow-repository'], target)).toBe('true')
+  })
+
+  test('clones under a parent path with a space (C:\\Users\\Jane Doe\\...)', async () => {
+    const target = path.join(tmp, 'Jane Doe', 'Ember-2', 'ember-2-ui')
+    const result = await cloneRepo({ url: repo.url, targetDir: target, tag: 'v1.0.0', onData: () => {} })
+    expect(result).toEqual({ ok: true, code: 0 })
+    expect(gitOut(['rev-parse', 'HEAD'], target)).toBe(repo.ids['v1.0.0'])
+  })
+
+  test('control: the full path as a git argument splits on the space and fails', async () => {
+    // run() joins arguments unquoted under shell:true, which is why cloneRepo
+    // passes only the folder name.
+    const target = path.join(tmp, 'Jane Doe', 'ember-2-ui')
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    const r = await run('git', ['clone', '--depth', '1', '--branch', 'v1.0.0', repo.url, target])
+    expect(r.ok).toBe(false)
+    expect(fs.existsSync(target)).toBe(false)
+  })
+
+  test('control: the same repo cloned without a tag lands on main\'s newer commit', () => {
+    const target = path.join(tmp, 'clone-default')
+    git(['clone', '--depth', '1', repo.url, target])
+    expect(gitOut(['rev-parse', 'HEAD'], target)).toBe(repo.ids.main)
+  })
+
+  test('refuses to clone without a tag and creates nothing', async () => {
+    const target = path.join(tmp, 'clone')
+    const result = await cloneRepo({ url: repo.url, targetDir: target, onData: () => {} })
+    expect(result).toEqual({ ok: false, error: 'cloneRepo: no release tag given' })
+    expect(fs.existsSync(target)).toBe(false)
   })
 
   test('reports a string error (not undefined) when the clone fails', async () => {
     const result = await cloneRepo({
       url: path.join(tmp, 'does-not-exist.git'),
       targetDir: path.join(tmp, 'clone'),
+      tag: 'v1.0.0',
       onData: () => {},
     })
     expect(result.ok).toBe(false)
     expect(result.error).toMatch(/exited with code|ENOENT|not found/i)
+  })
+
+  test('reports an error when the tag does not exist', async () => {
+    const result = await cloneRepo({ url: repo.url, targetDir: path.join(tmp, 'clone'), tag: 'v9.9.9', onData: () => {} })
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/exited with code/)
   })
 })
