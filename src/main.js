@@ -13,7 +13,7 @@ const { cloneRepo, DEFAULT_BACKEND_REPO_URL } = require('./exec/clone')
 const { run } = require('./exec/run')
 const { readApiKey, uiBuildEnvWithKey } = require('./exec/api-key')
 const { redactSecrets } = require('./lib/redact')
-const { isAllowedExternalUrl } = require('./lib/external-url')
+const { isAllowedExternalUrl, parseTailscaleDns, tailnetHostFromDnsName } = require('./lib/external-url')
 const { downloadInstallerUpdate, isManualPlatform, manualResult } = require('./lib/installer-update')
 const { API_PKILL_PATTERN, apiSpawnSpec } = require('./lib/api-launch')
 const { releaseTag, rowInstalled } = require('./lib/release-pin')
@@ -40,6 +40,12 @@ const EMBER_VERSION = displayVersion(EMBER_TAG)
 // that hangs cannot hold it until the app restarts.
 const exclusive = createExclusive()
 const locked = (label, handler) => (...args) => exclusive(label, () => handler(...args))
+
+// The user's own Tailscale Serve name, Self.DNSName as get-tailscale-dns last
+// read it. Set only by that handler, never from the renderer. Null until read,
+// or after a read that failed: every *.ts.net URL is then denied.
+let tailnetHost = null
+const externalUrlAllowed = (url) => isAllowedExternalUrl(url, { tailnetHost })
 
 // Backend actions (backendUpdateAction in src/exec/pin-action.js) that an
 // update acts on: 'update' moves the clone and then runs the setup, 'finish'
@@ -312,7 +318,7 @@ function createWindow() {
   // No in-app windows: a target="_blank" link or window.open goes to the default
   // browser when the URL is allowed and is dropped otherwise.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (isAllowedExternalUrl(url)) shell.openExternal(url)
+    if (externalUrlAllowed(url)) shell.openExternal(url)
     return { action: 'deny' }
   })
   // The app is one local page. Any navigation away from it is cancelled, with
@@ -320,7 +326,7 @@ function createWindow() {
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (url === mainWindow.webContents.getURL()) return
     event.preventDefault()
-    if (isAllowedExternalUrl(url)) shell.openExternal(url)
+    if (externalUrlAllowed(url)) shell.openExternal(url)
   })
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'))
@@ -1356,7 +1362,7 @@ ipcMain.handle('get-startup-task', async () => {
 })
 
 ipcMain.handle('open-url', (_e, url) => {
-  if (!isAllowedExternalUrl(url)) {
+  if (!externalUrlAllowed(url)) {
     console.warn(`[open-url] Blocked URL not on the external allowlist: ${url}`)
     return
   }
@@ -1457,17 +1463,13 @@ ipcMain.handle('run-tailscale-serve', async () => {
   return { ok: r.ok, output: out.trim() }
 })
 
+// Sets tailnetHost (the demo handler does the same). Cleared first, so a read
+// that fails or throws leaves it unknown.
 ipcMain.handle('get-tailscale-dns', async () => {
-  const r = await run('tailscale', ['status', '--json'])
-  if (!r.ok) return null
-  try {
-    const status = JSON.parse(r.stdout)
-    const dns = status.Self?.DNSName
-    // DNSName ends with a trailing dot, strip it
-    return dns ? dns.replace(/\.$/, '') : null
-  } catch {
-    return null
-  }
+  tailnetHost = null
+  const dns = parseTailscaleDns(await run('tailscale', ['status', '--json']))
+  tailnetHost = tailnetHostFromDnsName(dns)
+  return dns
 })
 
 // Demo mode: every IPC handler that touches real infrastructure is replaced
@@ -1766,7 +1768,9 @@ if (DEMO_MODE) {
   ipcMain.removeHandler('get-tailscale-dns')
   ipcMain.handle('get-tailscale-dns', async () => {
     await sleep(300)
-    return 'ember.example.ts.net'
+    const dns = 'ember.example.ts.net'
+    tailnetHost = tailnetHostFromDnsName(dns)
+    return dns
   })
 
   ipcMain.removeHandler('check-ember-update')

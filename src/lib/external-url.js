@@ -27,7 +27,35 @@ const LOCAL_HTTP_HOSTS = new Set(['localhost', '127.0.0.1'])
 // The user's own Ember over Tailscale Serve: https://<machine>.<tailnet>.ts.net
 const TAILNET_SUFFIX = '.ts.net'
 
-function isAllowedExternalUrl(url) {
+// Self.DNSName from `tailscale status --json`, trailing dot stripped. Null when
+// the command failed or the output carries no DNSName.
+function parseTailscaleDns(result) {
+  if (!result || !result.ok) return null
+  try {
+    const dns = JSON.parse(result.stdout).Self?.DNSName
+    return dns ? dns.replace(/\.$/, '') : null
+  } catch {
+    return null
+  }
+}
+
+// One DNS label: letters, digits and inner hyphens.
+const DNS_LABEL = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/
+
+// The one tailnet host open-url may allow: <machine>.<tailnet>.ts.net, as a
+// plain hostname. Anything else (a port, userinfo, an IP, an empty label, fewer
+// labels, another domain) gives null, and null allows no *.ts.net host at all.
+function tailnetHostFromDnsName(dns) {
+  if (typeof dns !== 'string') return null
+  const name = dns.toLowerCase().replace(/\.$/, '')
+  const labels = name.split('.')
+  if (!name.endsWith(TAILNET_SUFFIX) || labels.length < 4 || !labels.every((l) => DNS_LABEL.test(l))) return null
+  return name
+}
+
+// tailnetHost is the user's own Serve name as main read it from Tailscale. It
+// is re-validated here, so a bad value cannot widen the list.
+function isAllowedExternalUrl(url, { tailnetHost = null } = {}) {
   if (typeof url !== 'string') return false
   let parsed
   try {
@@ -38,10 +66,11 @@ function isAllowedExternalUrl(url) {
   if (parsed.username || parsed.password) return false
   const host = parsed.hostname
   if (parsed.protocol === 'https:') {
-    return ALLOWED_EXTERNAL_HOSTS.has(host) || host.endsWith(TAILNET_SUFFIX)
+    const ownTailnetHost = tailnetHostFromDnsName(tailnetHost)
+    return ALLOWED_EXTERNAL_HOSTS.has(host) || (ownTailnetHost !== null && host === ownTailnetHost)
   }
   if (parsed.protocol === 'http:') return LOCAL_HTTP_HOSTS.has(host)
   return false
 }
 
-module.exports = { ALLOWED_EXTERNAL_HOSTS, isAllowedExternalUrl }
+module.exports = { ALLOWED_EXTERNAL_HOSTS, isAllowedExternalUrl, parseTailscaleDns, tailnetHostFromDnsName }

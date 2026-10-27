@@ -151,7 +151,8 @@
     }
   ],
   "browserLinks": {
-    "$comment": "Opened only when the user clicks, in the system browser (shell.openExternal). Never contacted by an unattended install. Must equal ALLOWED_EXTERNAL_HOSTS in src/lib/external-url.js; the drift test checks both that and every host literal in src/.",
+    "$comment": "Opened only when the user clicks, in the system browser (shell.openExternal). Never contacted by an unattended install. Must equal ALLOWED_EXTERNAL_HOSTS in src/lib/external-url.js; the drift test checks both that and every host literal in src/. hosts has no *.ts.net entry; tailnetHost is the only ts.net name allowed.",
+    "tailnetHost": "The user's own Tailscale Serve name: Self.DNSName from tailscale status --json, read by get-tailscale-dns. Exact match, https only. Denied until read. No other *.ts.net host is allowed.",
     "hosts": [
       "git-scm.com",
       "www.python.org",
