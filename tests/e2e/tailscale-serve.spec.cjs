@@ -5,16 +5,10 @@
 // the main process per test to drive each failure.
 
 const { test, expect } = require('@playwright/test')
-const { launchApp, closeApp, walkToHostScreen } = require('./helpers.cjs')
+const { launchApp, closeApp, openServeStep } = require('./helpers.cjs')
 
 const NOT_SET_UP = "Phone access isn't set up yet."
 const DEMO_TAILNET_IP = '100.72.128.44'
-
-async function openServeStep(window) {
-  await walkToHostScreen(window)
-  await window.locator('input[name="host"][value="tailscale"]').check()
-  await expect(window.locator('#ts-step-serve')).toBeVisible({ timeout: 10000 })
-}
 
 // Replace a demo IPC handler with one that resolves `value`.
 function overrideHandler(app, channel, value) {

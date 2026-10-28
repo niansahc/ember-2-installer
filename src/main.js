@@ -42,10 +42,15 @@ const exclusive = createExclusive()
 const locked = (label, handler) => (...args) => exclusive(label, () => handler(...args))
 
 // The user's own Tailscale Serve name, Self.DNSName as get-tailscale-dns last
-// read it. Set only by that handler, never from the renderer. Null until read,
-// or after a read that failed: every *.ts.net URL is then denied.
+// read it. Set only by that handler (real or demo), through rememberTailnetHost,
+// never from the renderer. Null until read, or after a read that failed: every
+// *.ts.net URL is then denied.
 let tailnetHost = null
 const externalUrlAllowed = (url) => isAllowedExternalUrl(url, { tailnetHost })
+const rememberTailnetHost = (dns) => {
+  tailnetHost = tailnetHostFromDnsName(dns)
+  return dns
+}
 
 // Backend actions (backendUpdateAction in src/exec/pin-action.js) that an
 // update acts on: 'update' moves the clone and then runs the setup, 'finish'
@@ -1463,13 +1468,8 @@ ipcMain.handle('run-tailscale-serve', async () => {
   return { ok: r.ok, output: out.trim() }
 })
 
-// Sets tailnetHost (the demo handler does the same). Cleared first, so a read
-// that fails or throws leaves it unknown.
 ipcMain.handle('get-tailscale-dns', async () => {
-  tailnetHost = null
-  const dns = parseTailscaleDns(await run('tailscale', ['status', '--json']))
-  tailnetHost = tailnetHostFromDnsName(dns)
-  return dns
+  return rememberTailnetHost(parseTailscaleDns(await run('tailscale', ['status', '--json'])))
 })
 
 // Demo mode: every IPC handler that touches real infrastructure is replaced
@@ -1759,18 +1759,18 @@ if (DEMO_MODE) {
     return { ok: true, ip: '100.72.128.44' }
   })
 
+  const DEMO_TAILNET_HOST = 'ember.example.ts.net'
+
   ipcMain.removeHandler('run-tailscale-serve')
   ipcMain.handle('run-tailscale-serve', async () => {
     await sleep(1000)
-    return { ok: true, output: 'Available at https://ember.example.ts.net' }
+    return { ok: true, output: `Available at https://${DEMO_TAILNET_HOST}` }
   })
 
   ipcMain.removeHandler('get-tailscale-dns')
   ipcMain.handle('get-tailscale-dns', async () => {
     await sleep(300)
-    const dns = 'ember.example.ts.net'
-    tailnetHost = tailnetHostFromDnsName(dns)
-    return dns
+    return rememberTailnetHost(DEMO_TAILNET_HOST)
   })
 
   ipcMain.removeHandler('check-ember-update')

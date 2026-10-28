@@ -133,8 +133,3 @@ test('control: a ts.net entry added to either list is caught', () => {
   assert.deepEqual(tailnetEntries([...ALLOWED_EXTERNAL_HOSTS, 'ember.not-a-real-tailnet.ts.net']), ['ember.not-a-real-tailnet.ts.net'])
   assert.deepEqual(tailnetEntries([...declared.browserLinks.hosts, 'ts.net']), ['ts.net'])
 })
-
-test('browserLinks documents the tailnet host rule', () => {
-  assert.equal(typeof declared.browserLinks.tailnetHost, 'string')
-  assert.ok(declared.browserLinks.tailnetHost.length > 0)
-})

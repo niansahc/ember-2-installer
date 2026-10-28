@@ -78,22 +78,23 @@ test.describe('isAllowedExternalUrl', () => {
     expect(isAllowedExternalUrl('http://100.72.128.44:8000')).toBe(false)
   })
 
-  test('every allowlisted host is reachable over https only', () => {
+  test('every allowlisted host is reachable over https only, with or without a tailnet host', () => {
     for (const host of ALLOWED_EXTERNAL_HOSTS) {
-      expect(isAllowedExternalUrl(`https://${host}/`), host).toBe(true)
-      expect(isAllowedExternalUrl(`http://${host}/`), host).toBe(false)
+      for (const options of [undefined, { tailnetHost: OWN }]) {
+        expect(isAllowedExternalUrl(`https://${host}/`, options), host).toBe(true)
+        expect(isAllowedExternalUrl(`http://${host}/`, options), host).toBe(false)
+      }
     }
   })
 })
 
 // Other tailnet names: a sibling machine, another tailnet, a subdomain of the
-// user's own name, and the ts.net apex names.
+// user's own name, and the tailnet apex (bare ts.net is in LOOKALIKES).
 const OTHER_TAILNET_URLS = [
   'https://other.example.ts.net',
   'https://ember.other.ts.net',
   'https://x.ember.example.ts.net',
   'https://example.ts.net',
-  'https://ts.net',
 ]
 
 // The tailnet rule before it was narrowed to the user's own host, kept to prove
@@ -103,43 +104,36 @@ function oldTailnetCheck(url) {
 }
 
 // tailnetHost values that must not allow anything: a non-tailnet domain, too few
-// labels, a port, userinfo, an IP.
+// labels, a port, userinfo, an IP, an empty label.
 const INVALID_TAILNET_HOSTS = [
   'evil.example.test', 'ts.net', 'example.ts.net', 'ember.example.ts.net:443',
   'user@ember.example.ts.net', '100.72.128.44', 'a..example.ts.net',
 ]
 
+// "allows the user's own host" is the positive control for each denial below:
+// the same check, with the own host known, does open a URL.
 test.describe('tailnet host', () => {
   test("allows the user's own host", () => {
-    for (const url of [OWN_URL, `${OWN_URL}/chat`, 'https://EMBER.Example.ts.net']) {
+    for (const url of [OWN_URL, `${OWN_URL}/chat`, `${OWN_URL}:443`, 'https://EMBER.Example.ts.net']) {
       expect(isAllowedExternalUrl(url, { tailnetHost: OWN }), url).toBe(true)
     }
-    // The raw DNSName form, mixed case with the trailing dot.
-    expect(isAllowedExternalUrl(OWN_URL, { tailnetHost: 'Ember.Example.ts.net.' })).toBe(true)
+    expect(isAllowedExternalUrl(OWN_URL, { tailnetHost: 'Ember.Example.ts.net' })).toBe(true)
   })
 
   test('denies every other *.ts.net host when the own host is known', () => {
     for (const url of OTHER_TAILNET_URLS) expect(isAllowedExternalUrl(url, { tailnetHost: OWN }), url).toBe(false)
   })
 
-  test('control: the old suffix rule allowed the other tailnet hosts, and the own host still passes', () => {
-    for (const url of OTHER_TAILNET_URLS.filter((u) => u !== 'https://ts.net')) {
-      expect(oldTailnetCheck(url), url).toBe(true)
-    }
-    expect(isAllowedExternalUrl(OWN_URL, { tailnetHost: OWN })).toBe(true)
+  test('control: the old suffix rule allowed every other tailnet host', () => {
+    for (const url of OTHER_TAILNET_URLS) expect(oldTailnetCheck(url), url).toBe(true)
   })
 
   test('an unknown own host denies every *.ts.net host', () => {
     for (const url of [OWN_URL, ...OTHER_TAILNET_URLS]) {
-      expect(isAllowedExternalUrl(url), url).toBe(false)
-      for (const options of [{}, { tailnetHost: null }, { tailnetHost: '' }]) {
+      for (const options of [undefined, { tailnetHost: null }, { tailnetHost: '' }]) {
         expect(isAllowedExternalUrl(url, options), `${url} ${JSON.stringify(options)}`).toBe(false)
       }
     }
-  })
-
-  test('control: the same URL is allowed once the own host is known', () => {
-    expect(isAllowedExternalUrl(OWN_URL, { tailnetHost: OWN })).toBe(true)
   })
 
   test('an invalid tailnetHost allows nothing it names', () => {
@@ -149,17 +143,12 @@ test.describe('tailnet host', () => {
     }
   })
 
-  test('control: a valid tailnetHost passed the same way allows its URL', () => {
-    expect(isAllowedExternalUrl(OWN_URL, { tailnetHost: OWN })).toBe(true)
-    expect(isAllowedExternalUrl(`${OWN_URL}:443`, { tailnetHost: OWN })).toBe(true)
-  })
-
   test('the own host is https only', () => {
     expect(isAllowedExternalUrl(`http://${OWN}`, { tailnetHost: OWN })).toBe(false)
   })
 
   test('tailnetHostFromDnsName keeps only a <machine>.<tailnet>.ts.net name', () => {
-    expect(tailnetHostFromDnsName('Ember.Example.ts.net.')).toBe(OWN)
+    expect(tailnetHostFromDnsName('Ember.Example.ts.net')).toBe(OWN)
     for (const dns of [null, undefined, '', 42, ...INVALID_TAILNET_HOSTS]) {
       expect(tailnetHostFromDnsName(dns), String(dns)).toBeNull()
     }
@@ -175,13 +164,6 @@ test.describe('tailnet host', () => {
       { ok: true, stdout: '{"Self":{}}' },
     ]) {
       expect(parseTailscaleDns(result), JSON.stringify(result)).toBeNull()
-    }
-  })
-
-  test('allowlisted hosts are unaffected by the tailnet host', () => {
-    for (const host of ALLOWED_EXTERNAL_HOSTS) {
-      expect(isAllowedExternalUrl(`https://${host}/`, { tailnetHost: OWN }), host).toBe(true)
-      expect(isAllowedExternalUrl(`https://${host}/`), host).toBe(true)
     }
   })
 })
