@@ -1514,11 +1514,11 @@ document.getElementById('btn-launch-ember').addEventListener('click', () => {
   })
 })
 
-// Open Ember — the Tailscale Serve HTTPS name if it was set up, otherwise the
-// local API. Not the bare tailnet IP: the API binds 127.0.0.1 only, so nothing
-// listens on <tailnet IP>:8000, and open-url does not allow that URL.
+// Open Ember — main opens the Tailscale Serve HTTPS name if it was set up,
+// otherwise the local API. Not the bare tailnet IP: the API binds 127.0.0.1
+// only, so nothing listens on <tailnet IP>:8000.
 document.getElementById('btn-open-ember').addEventListener('click', () => {
-  window.ember.openUrl(state.tailscaleDns ? `https://${state.tailscaleDns}` : 'http://localhost:8000')
+  window.ember.openEmber()
 })
 
 document.getElementById('btn-retry-api').addEventListener('click', () => {

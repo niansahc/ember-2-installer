@@ -44,13 +44,17 @@ const locked = (label, handler) => (...args) => exclusive(label, () => handler(.
 // The user's own Tailscale Serve name, Self.DNSName as get-tailscale-dns last
 // read it. Set only by that handler (real or demo), through rememberTailnetHost,
 // never from the renderer. Null until read, or after a read that failed: every
-// *.ts.net URL is then denied.
+// open-ember then falls back to the local API. No *.ts.net URL is on the
+// external allowlist: open-ember is the only way the app opens the tailnet name.
 let tailnetHost = null
-const externalUrlAllowed = (url) => isAllowedExternalUrl(url, { tailnetHost })
+// True once run-tailscale-serve last succeeded, so open-ember does not open a
+// name nothing serves.
+let serveReady = false
 const rememberTailnetHost = (dns) => {
   tailnetHost = tailnetHostFromDnsName(dns)
   return dns
 }
+const emberUrl = () => (serveReady && tailnetHost ? `https://${tailnetHost}` : 'http://localhost:8000')
 
 // Backend actions (backendUpdateAction in src/exec/pin-action.js) that an
 // update acts on: 'update' moves the clone and then runs the setup, 'finish'
@@ -323,7 +327,7 @@ function createWindow() {
   // No in-app windows: a target="_blank" link or window.open goes to the default
   // browser when the URL is allowed and is dropped otherwise.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (externalUrlAllowed(url)) shell.openExternal(url)
+    if (isAllowedExternalUrl(url)) shell.openExternal(url)
     return { action: 'deny' }
   })
   // The app is one local page. Any navigation away from it is cancelled, with
@@ -331,7 +335,7 @@ function createWindow() {
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (url === mainWindow.webContents.getURL()) return
     event.preventDefault()
-    if (externalUrlAllowed(url)) shell.openExternal(url)
+    if (isAllowedExternalUrl(url)) shell.openExternal(url)
   })
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'))
@@ -1367,11 +1371,17 @@ ipcMain.handle('get-startup-task', async () => {
 })
 
 ipcMain.handle('open-url', (_e, url) => {
-  if (!externalUrlAllowed(url)) {
+  if (!isAllowedExternalUrl(url)) {
     console.warn(`[open-url] Blocked URL not on the external allowlist: ${url}`)
     return
   }
   shell.openExternal(url)
+})
+
+// The Done screen's Open Ember button. Takes no argument: main picks the
+// destination, the Serve HTTPS name if Serve is up, otherwise the local API.
+ipcMain.handle('open-ember', () => {
+  shell.openExternal(emberUrl())
 })
 
 ipcMain.handle('get-default-vault', () => {
@@ -1464,6 +1474,7 @@ ipcMain.handle('run-tailscale-serve', async () => {
   const r = await run('tailscale', ['serve', '--bg', '--https=443', 'http://127.0.0.1:8000'], {
     onData: (chunk) => (out += chunk),
   })
+  serveReady = r.error === null && r.ok
   if (r.error !== null) return { ok: false, output: r.error }
   return { ok: r.ok, output: out.trim() }
 })
@@ -1764,6 +1775,7 @@ if (DEMO_MODE) {
   ipcMain.removeHandler('run-tailscale-serve')
   ipcMain.handle('run-tailscale-serve', async () => {
     await sleep(1000)
+    serveReady = true
     return { ok: true, output: `Available at https://${DEMO_TAILNET_HOST}` }
   })
 

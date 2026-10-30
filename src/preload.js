@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('ember', {
   onUpdateAllLog: (fn) => ipcRenderer.on('update-all-log', (_e, text) => fn(text)),
 
   openUrl: (url) => ipcRenderer.invoke('open-url', url),
+  openEmber: () => ipcRenderer.invoke('open-ember'),
   getPlatform: () => ipcRenderer.invoke('get-platform'),
   restartComputer: () => ipcRenderer.invoke('restart-computer'),
 

@@ -59,14 +59,16 @@ test.describe('Open Ember with Tailscale', () => {
   })
 })
 
-// open-url allows only the tailnet host main read from Tailscale. One launch,
-// in order: main's tailnet host only goes from unknown to known (the Serve
-// click). The handler opens synchronously once the IPC call resolves, so the
-// recorded list is final when openUrl returns. "after Serve, the user's own
-// tailnet host opens" is the positive control for both blocked cases.
+// open-ember takes no argument; main picks the destination. open-url never
+// opens a *.ts.net URL, the user's own name included. One launch, in order:
+// Serve only goes from not set up to set up. The handler opens synchronously once
+// the IPC call resolves, so the recorded list is final when it returns.
+// "after Serve, openEmber opens the own host" is the positive control for the
+// denied openUrl cases.
 const openUrl = (window, url) => window.evaluate((u) => window.ember.openUrl(u), url)
+const openEmber = (window) => window.evaluate(() => window.ember.openEmber())
 
-test.describe.serial('open-url and the tailnet host', () => {
+test.describe.serial('open-ember and open-url', () => {
   let app, window
 
   test.beforeAll(async () => {
@@ -86,19 +88,25 @@ test.describe.serial('open-url and the tailnet host', () => {
     await closeApp(closing)
   })
 
-  test('before Serve, the own tailnet host is blocked', async () => {
+  test('before Serve, openEmber opens the local API', async () => {
+    await openEmber(window)
+    expect(await openedExternal(app)).toEqual(['http://localhost:8000'])
+  })
+
+  test('before Serve, openUrl blocks the own tailnet host', async () => {
     await openUrl(window, OWN_URL)
     expect(await openedExternal(app)).toEqual([])
   })
 
-  test("after Serve, the user's own tailnet host opens", async () => {
+  test("after Serve, openEmber opens the user's own tailnet host", async () => {
     await setUpServe(window)
-    await openUrl(window, OWN_URL)
+    await openEmber(window)
     expect(await openedExternal(app)).toEqual([OWN_URL])
   })
 
-  test('after Serve, another tailnet host is blocked', async () => {
+  test('after Serve, openUrl blocks the own host and any other tailnet host', async () => {
     await setUpServe(window)
+    await openUrl(window, OWN_URL)
     await openUrl(window, 'https://other.example.ts.net')
     expect(await openedExternal(app)).toEqual([])
   })

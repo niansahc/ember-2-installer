@@ -21,9 +21,9 @@ const RENDERER_URLS = [...new Set(['index.html', 'app.js'].flatMap((file) => {
   return source.match(/https?:\/\/[^"'`<>\s)]+/g) || []
 }))].filter((url) => !url.includes('${'))
 
-// The tailnet HTTPS name and the local API, which the renderer builds at runtime.
-// The tailnet name is allowed only once main has read it (tailnetHost).
-const TEMPLATED_URL_SAMPLES = [OWN_URL, 'http://127.0.0.1:8000']
+// The local API, which the renderer builds at runtime. The tailnet name is not
+// here: main's open-ember handler opens it, and open-url denies it.
+const TEMPLATED_URL_SAMPLES = ['http://127.0.0.1:8000']
 
 // https or http-localhost strings that are not allowed destinations.
 const LOOKALIKES = [
@@ -56,12 +56,12 @@ test.describe('isAllowedExternalUrl', () => {
     // Guards the scan itself: a regex that found nothing would pass vacuously.
     expect(RENDERER_URLS.length).toBeGreaterThan(10)
     for (const url of [...RENDERER_URLS, ...TEMPLATED_URL_SAMPLES]) {
-      expect(isAllowedExternalUrl(url, { tailnetHost: OWN }), url).toBe(true)
+      expect(isAllowedExternalUrl(url), url).toBe(true)
     }
   })
 
   test('denies lookalike hosts and embedded credentials', () => {
-    for (const url of LOOKALIKES) expect(isAllowedExternalUrl(url, { tailnetHost: OWN }), url).toBe(false)
+    for (const url of LOOKALIKES) expect(isAllowedExternalUrl(url), url).toBe(false)
   })
 
   test('control: the old prefix check allowed every lookalike', () => {
@@ -78,29 +78,28 @@ test.describe('isAllowedExternalUrl', () => {
     expect(isAllowedExternalUrl('http://100.72.128.44:8000')).toBe(false)
   })
 
-  test('every allowlisted host is reachable over https only, with or without a tailnet host', () => {
+  test('every allowlisted host is reachable over https only', () => {
     for (const host of ALLOWED_EXTERNAL_HOSTS) {
-      for (const options of [undefined, { tailnetHost: OWN }]) {
-        expect(isAllowedExternalUrl(`https://${host}/`, options), host).toBe(true)
-        expect(isAllowedExternalUrl(`http://${host}/`, options), host).toBe(false)
-      }
+      expect(isAllowedExternalUrl(`https://${host}/`), host).toBe(true)
+      expect(isAllowedExternalUrl(`http://${host}/`), host).toBe(false)
     }
   })
 })
 
-// Other tailnet names: a sibling machine, another tailnet, a subdomain of the
-// user's own name, and the tailnet apex (bare ts.net is in LOOKALIKES).
-const OTHER_TAILNET_URLS = [
+// Every *.ts.net URL, the user's own name included: open-url never opens one.
+const TAILNET_URLS = [
+  OWN_URL,
+  `${OWN_URL}/chat`,
   'https://other.example.ts.net',
   'https://ember.other.ts.net',
   'https://x.ember.example.ts.net',
   'https://example.ts.net',
 ]
 
-// The tailnet rule before it was narrowed to the user's own host, kept to prove
-// the fixtures above exercise the narrowing.
-function oldTailnetCheck(url) {
-  return new URL(url).hostname.endsWith('.ts.net')
+// The tailnet rule before open-ember, kept as the positive control: it allowed
+// the user's own name, which is what the denial below removes.
+function oldOwnHostCheck(url) {
+  return new URL(url).hostname === OWN
 }
 
 // tailnetHost values that must not allow anything: a non-tailnet domain, too few
@@ -110,41 +109,13 @@ const INVALID_TAILNET_HOSTS = [
   'user@ember.example.ts.net', '100.72.128.44', 'a..example.ts.net',
 ]
 
-// "allows the user's own host" is the positive control for each denial below:
-// the same check, with the own host known, does open a URL.
 test.describe('tailnet host', () => {
-  test("allows the user's own host", () => {
-    for (const url of [OWN_URL, `${OWN_URL}/chat`, `${OWN_URL}:443`, 'https://EMBER.Example.ts.net']) {
-      expect(isAllowedExternalUrl(url, { tailnetHost: OWN }), url).toBe(true)
-    }
-    expect(isAllowedExternalUrl(OWN_URL, { tailnetHost: 'Ember.Example.ts.net' })).toBe(true)
+  test('open-url denies every *.ts.net URL, the own host included', () => {
+    for (const url of TAILNET_URLS) expect(isAllowedExternalUrl(url), url).toBe(false)
   })
 
-  test('denies every other *.ts.net host when the own host is known', () => {
-    for (const url of OTHER_TAILNET_URLS) expect(isAllowedExternalUrl(url, { tailnetHost: OWN }), url).toBe(false)
-  })
-
-  test('control: the old suffix rule allowed every other tailnet host', () => {
-    for (const url of OTHER_TAILNET_URLS) expect(oldTailnetCheck(url), url).toBe(true)
-  })
-
-  test('an unknown own host denies every *.ts.net host', () => {
-    for (const url of [OWN_URL, ...OTHER_TAILNET_URLS]) {
-      for (const options of [undefined, { tailnetHost: null }, { tailnetHost: '' }]) {
-        expect(isAllowedExternalUrl(url, options), `${url} ${JSON.stringify(options)}`).toBe(false)
-      }
-    }
-  })
-
-  test('an invalid tailnetHost allows nothing it names', () => {
-    for (const tailnetHost of INVALID_TAILNET_HOSTS) {
-      expect(isAllowedExternalUrl(OWN_URL, { tailnetHost }), tailnetHost).toBe(false)
-      expect(isAllowedExternalUrl(`https://${tailnetHost}`, { tailnetHost }), tailnetHost).toBe(false)
-    }
-  })
-
-  test('the own host is https only', () => {
-    expect(isAllowedExternalUrl(`http://${OWN}`, { tailnetHost: OWN })).toBe(false)
+  test('control: the old own-host rule allowed the own host', () => {
+    expect(oldOwnHostCheck(OWN_URL)).toBe(true)
   })
 
   test('tailnetHostFromDnsName keeps only a <machine>.<tailnet>.ts.net name', () => {

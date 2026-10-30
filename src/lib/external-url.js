@@ -40,18 +40,18 @@ function parseTailscaleDns(result) {
   }
 }
 
-// The one tailnet host open-url may allow, lowercased. Anything else (a port,
+// The one tailnet host open-ember may open, lowercased. Anything else (a port,
 // userinfo, an IP, an empty label, fewer labels, another domain) gives null,
-// and null allows no *.ts.net host at all.
+// and null makes open-ember fall back to the local API.
 function tailnetHostFromDnsName(dns) {
   if (typeof dns !== 'string') return null
   const name = dns.toLowerCase()
   return TAILNET_HOST.test(name) ? name : null
 }
 
-// tailnetHost is the user's own Serve name as main read it from Tailscale. It
-// is re-validated here, so a bad value cannot widen the list.
-function isAllowedExternalUrl(url, { tailnetHost = null } = {}) {
+// No *.ts.net host is allowed here. The user's own Serve name is opened only by
+// main's open-ember handler, which builds the URL itself.
+function isAllowedExternalUrl(url) {
   if (typeof url !== 'string') return false
   let parsed
   try {
@@ -62,7 +62,7 @@ function isAllowedExternalUrl(url, { tailnetHost = null } = {}) {
   if (parsed.username || parsed.password) return false
   const host = parsed.hostname
   if (parsed.protocol === 'https:') {
-    return ALLOWED_EXTERNAL_HOSTS.has(host) || host === tailnetHostFromDnsName(tailnetHost)
+    return ALLOWED_EXTERNAL_HOSTS.has(host)
   }
   if (parsed.protocol === 'http:') return LOCAL_HTTP_HOSTS.has(host)
   return false
