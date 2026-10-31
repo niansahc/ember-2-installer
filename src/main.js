@@ -50,10 +50,16 @@ let tailnetHost = null
 // True once run-tailscale-serve last succeeded, so open-ember does not open a
 // name nothing serves.
 let serveReady = false
+// Returns the validated host, so the renderer shows a name only when open-ember
+// would open it (a DNSName outside <machine>.<tailnet>.ts.net reads as not set up).
 const rememberTailnetHost = (dns) => {
   tailnetHost = tailnetHostFromDnsName(dns)
-  return dns
+  return tailnetHost
 }
+// A launch failure is logged, not left as an unhandled rejection in main.
+const openExternalSafe = (url) => shell.openExternal(url).catch((e) => {
+  console.warn(`[open-external] Could not open ${url}: ${e.message}`)
+})
 const emberUrl = () => (serveReady && tailnetHost ? `https://${tailnetHost}` : 'http://localhost:8000')
 
 // Backend actions (backendUpdateAction in src/exec/pin-action.js) that an
@@ -1375,14 +1381,12 @@ ipcMain.handle('open-url', (_e, url) => {
     console.warn(`[open-url] Blocked URL not on the external allowlist: ${url}`)
     return
   }
-  shell.openExternal(url)
+  return openExternalSafe(url)
 })
 
 // The Done screen's Open Ember button. Takes no argument: main picks the
 // destination, the Serve HTTPS name if Serve is up, otherwise the local API.
-ipcMain.handle('open-ember', () => {
-  shell.openExternal(emberUrl())
-})
+ipcMain.handle('open-ember', () => openExternalSafe(emberUrl()))
 
 ipcMain.handle('get-default-vault', () => {
   return process.platform === 'win32'
@@ -1770,7 +1774,8 @@ if (DEMO_MODE) {
     return { ok: true, ip: '100.72.128.44' }
   })
 
-  const DEMO_TAILNET_HOST = 'ember.example.ts.net'
+  // Test seam: --demo-tailnet-dns=<name> sets the DNSName the demo Tailscale reports.
+  const DEMO_TAILNET_HOST = demoArg('demo-tailnet-dns') || 'ember.example.ts.net'
 
   ipcMain.removeHandler('run-tailscale-serve')
   ipcMain.handle('run-tailscale-serve', async () => {

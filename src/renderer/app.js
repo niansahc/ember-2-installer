@@ -13,7 +13,6 @@ const state = {
   model: 'qwen3:8b',
   vision: null,
   host: '127.0.0.1',
-  tailscaleDns: null,
   models: [],
   ollamaModelsPath: null,
 }
@@ -905,7 +904,6 @@ document.getElementById('btn-ts-serve').addEventListener('click', () => {
     // the API binds 127.0.0.1, so nothing listens on <tailnet IP>:8000.
     if (serveResult.ok && dnsName) {
       icon.textContent = '✅'
-      state.tailscaleDns = dnsName
       btn.classList.add('hidden')
       resultEl.classList.remove('hidden')
       resultEl.textContent = 'Your Ember URL: '

@@ -110,4 +110,28 @@ test.describe.serial('open-ember and open-url', () => {
     await openUrl(window, 'https://other.example.ts.net')
     expect(await openedExternal(app)).toEqual([])
   })
+
+  // Same test, same stub: an allowlisted URL is recorded, so the empty lists
+  // above are not an open-url that never reaches the stub.
+  test('control: openUrl records an allowlisted URL after the denied ones', async () => {
+    await openUrl(window, OWN_URL)
+    await openUrl(window, 'https://github.com/')
+    expect(await openedExternal(app)).toEqual(['https://github.com/'])
+  })
+
+  // A launch failure is logged in main, not left as an unhandled rejection. The
+  // control makes the same rejection unhandled and expects it to be recorded.
+  test('a failing openExternal is not an unhandled rejection', async () => {
+    await app.evaluate(({ shell }) => {
+      globalThis.__unhandled = []
+      process.on('unhandledRejection', (e) => globalThis.__unhandled.push(String(e)))
+      shell.openExternal = async () => { throw new Error('launch failed') }
+    })
+    await openEmber(window)
+    await openUrl(window, 'https://github.com/')
+    await new Promise((r) => setTimeout(r, 300))
+    expect(await app.evaluate(() => globalThis.__unhandled)).toEqual([])
+    await app.evaluate(({ shell }) => { void shell.openExternal('https://github.com/') })
+    await expect.poll(() => app.evaluate(() => globalThis.__unhandled.length)).toBe(1)
+  })
 })

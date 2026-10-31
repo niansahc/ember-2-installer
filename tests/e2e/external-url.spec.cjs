@@ -96,10 +96,10 @@ const TAILNET_URLS = [
   'https://example.ts.net',
 ]
 
-// The tailnet rule before open-ember, kept as the positive control: it allowed
-// the user's own name, which is what the denial below removes.
-function oldOwnHostCheck(url) {
-  return new URL(url).hostname === OWN
+// The tailnet rule before it was narrowed to the user's own host, kept as the
+// positive control: it allowed every URL the denial below must refuse.
+function oldTailnetCheck(url) {
+  return new URL(url).hostname.endsWith('.ts.net')
 }
 
 // tailnetHost values that must not allow anything: a non-tailnet domain, too few
@@ -114,8 +114,8 @@ test.describe('tailnet host', () => {
     for (const url of TAILNET_URLS) expect(isAllowedExternalUrl(url), url).toBe(false)
   })
 
-  test('control: the old own-host rule allowed the own host', () => {
-    expect(oldOwnHostCheck(OWN_URL)).toBe(true)
+  test('control: the old suffix rule allowed every one of those URLs', () => {
+    for (const url of TAILNET_URLS) expect(oldTailnetCheck(url), url).toBe(true)
   })
 
   test('tailnetHostFromDnsName keeps only a <machine>.<tailnet>.ts.net name', () => {
