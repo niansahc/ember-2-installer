@@ -17,7 +17,7 @@ const declared = JSON.parse(fs.readFileSync(path.join(REPO, 'docs', 'network-des
 const NOT_DESTINATIONS = [
   { match: (h) => h === '127.0.0.1' || h === 'localhost', reason: 'loopback (local API, open-url allowlist)' },
   { match: (h) => h === 'www.apple.com', reason: 'plist DOCTYPE identifier, never fetched' },
-  { match: (h) => h === 'ember-desktop' || h.endsWith('.ts.net'), reason: 'demo-mode fake Tailscale status' },
+  { match: (h) => h === 'ember-desktop' || h.endsWith('.example.ts.net'), reason: 'demo-mode fake Tailscale status' },
 ]
 
 function sourceFiles(dir) {
@@ -73,8 +73,12 @@ test('control: the scan sees real literals and catches an injected one', () => {
   const all = new Set(srcTexts.flatMap((t) => [...hostLiterals(t)]))
   assert.ok(all.has('github.com') && all.has('api.github.com'), 'scan found the known clone and update hosts')
   assert.equal(wingetIds(srcTexts.join('\n')).length, 5)
-  const injected = [...srcTexts, "const X = 'https://undeclared.example.test/x'", "const WINGET_PACKAGES = {\n  foo: 'Foo.Bar',\n}"]
-  assert.deepEqual(undeclared(injected, declared), { missingHosts: ['undeclared.example.test'], missingPkgs: ['Foo.Bar'] })
+  // A tailnet name outside example.ts.net is not covered by the demo exemption.
+  const injected = [...srcTexts, "const X = 'https://undeclared.example.test/x'", "const T = 'https://ember.not-a-real-tailnet.ts.net'", "const WINGET_PACKAGES = {\n  foo: 'Foo.Bar',\n}"]
+  assert.deepEqual(undeclared(injected, declared), {
+    missingHosts: ['ember.not-a-real-tailnet.ts.net', 'undeclared.example.test'],
+    missingPkgs: ['Foo.Bar'],
+  })
 })
 
 test('declared list entries are well formed', () => {
@@ -114,4 +118,18 @@ test('control: a host added to only one list is caught on either side', () => {
     onlyInAllowlist: ['allow-only.example.test', 'brew.sh'],
     onlyInDeclared: ['declared-only.example.test'],
   })
+})
+
+// The only ts.net name allowed is the user's own, read at runtime. A ts.net
+// entry in either host list would allow it for everyone.
+const tailnetEntries = (hosts) => [...hosts].filter((h) => h === 'ts.net' || h.endsWith('.ts.net')).sort()
+
+test('no *.ts.net entry in ALLOWED_EXTERNAL_HOSTS or browserLinks.hosts', () => {
+  assert.deepEqual(tailnetEntries(ALLOWED_EXTERNAL_HOSTS), [])
+  assert.deepEqual(tailnetEntries(declared.browserLinks.hosts), [])
+})
+
+test('control: a ts.net entry added to either list is caught', () => {
+  assert.deepEqual(tailnetEntries([...ALLOWED_EXTERNAL_HOSTS, 'ember.not-a-real-tailnet.ts.net']), ['ember.not-a-real-tailnet.ts.net'])
+  assert.deepEqual(tailnetEntries([...declared.browserLinks.hosts, 'ts.net']), ['ts.net'])
 })

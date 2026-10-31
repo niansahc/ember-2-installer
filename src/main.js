@@ -13,7 +13,7 @@ const { cloneRepo, DEFAULT_BACKEND_REPO_URL } = require('./exec/clone')
 const { run } = require('./exec/run')
 const { readApiKey, uiBuildEnvWithKey } = require('./exec/api-key')
 const { redactSecrets } = require('./lib/redact')
-const { isAllowedExternalUrl } = require('./lib/external-url')
+const { isAllowedExternalUrl, parseTailscaleDns, tailnetHostFromDnsName } = require('./lib/external-url')
 const { downloadInstallerUpdate, isManualPlatform, manualResult } = require('./lib/installer-update')
 const { API_PKILL_PATTERN, apiSpawnSpec } = require('./lib/api-launch')
 const { releaseTag, rowInstalled } = require('./lib/release-pin')
@@ -40,6 +40,27 @@ const EMBER_VERSION = displayVersion(EMBER_TAG)
 // that hangs cannot hold it until the app restarts.
 const exclusive = createExclusive()
 const locked = (label, handler) => (...args) => exclusive(label, () => handler(...args))
+
+// The user's own Tailscale Serve name, Self.DNSName as get-tailscale-dns last
+// read it. Set only by that handler (real or demo), through rememberTailnetHost,
+// never from the renderer. Null until read, or after a read that failed: every
+// open-ember then falls back to the local API. No *.ts.net URL is on the
+// external allowlist: open-ember is the only way the app opens the tailnet name.
+let tailnetHost = null
+// True once run-tailscale-serve last succeeded, so open-ember does not open a
+// name nothing serves.
+let serveReady = false
+// Returns the validated host, so the renderer shows a name only when open-ember
+// would open it (a DNSName outside <machine>.<tailnet>.ts.net reads as not set up).
+const rememberTailnetHost = (dns) => {
+  tailnetHost = tailnetHostFromDnsName(dns)
+  return tailnetHost
+}
+// A launch failure is logged, not left as an unhandled rejection in main.
+const openExternalSafe = (url) => shell.openExternal(url).catch((e) => {
+  console.warn(`[open-external] Could not open ${url}: ${e.message}`)
+})
+const emberUrl = () => (serveReady && tailnetHost ? `https://${tailnetHost}` : 'http://localhost:8000')
 
 // Backend actions (backendUpdateAction in src/exec/pin-action.js) that an
 // update acts on: 'update' moves the clone and then runs the setup, 'finish'
@@ -1360,8 +1381,12 @@ ipcMain.handle('open-url', (_e, url) => {
     console.warn(`[open-url] Blocked URL not on the external allowlist: ${url}`)
     return
   }
-  shell.openExternal(url)
+  return openExternalSafe(url)
 })
+
+// The Done screen's Open Ember button. Takes no argument: main picks the
+// destination, the Serve HTTPS name if Serve is up, otherwise the local API.
+ipcMain.handle('open-ember', () => openExternalSafe(emberUrl()))
 
 ipcMain.handle('get-default-vault', () => {
   return process.platform === 'win32'
@@ -1453,21 +1478,13 @@ ipcMain.handle('run-tailscale-serve', async () => {
   const r = await run('tailscale', ['serve', '--bg', '--https=443', 'http://127.0.0.1:8000'], {
     onData: (chunk) => (out += chunk),
   })
+  serveReady = r.error === null && r.ok
   if (r.error !== null) return { ok: false, output: r.error }
   return { ok: r.ok, output: out.trim() }
 })
 
 ipcMain.handle('get-tailscale-dns', async () => {
-  const r = await run('tailscale', ['status', '--json'])
-  if (!r.ok) return null
-  try {
-    const status = JSON.parse(r.stdout)
-    const dns = status.Self?.DNSName
-    // DNSName ends with a trailing dot, strip it
-    return dns ? dns.replace(/\.$/, '') : null
-  } catch {
-    return null
-  }
+  return rememberTailnetHost(parseTailscaleDns(await run('tailscale', ['status', '--json'])))
 })
 
 // Demo mode: every IPC handler that touches real infrastructure is replaced
@@ -1757,16 +1774,20 @@ if (DEMO_MODE) {
     return { ok: true, ip: '100.72.128.44' }
   })
 
+  // Test seam: --demo-tailnet-dns=<name> sets the DNSName the demo Tailscale reports.
+  const DEMO_TAILNET_HOST = demoArg('demo-tailnet-dns') || 'ember.example.ts.net'
+
   ipcMain.removeHandler('run-tailscale-serve')
   ipcMain.handle('run-tailscale-serve', async () => {
     await sleep(1000)
-    return { ok: true, output: 'Available at https://ember.example.ts.net' }
+    serveReady = true
+    return { ok: true, output: `Available at https://${DEMO_TAILNET_HOST}` }
   })
 
   ipcMain.removeHandler('get-tailscale-dns')
   ipcMain.handle('get-tailscale-dns', async () => {
     await sleep(300)
-    return 'ember.example.ts.net'
+    return rememberTailnetHost(DEMO_TAILNET_HOST)
   })
 
   ipcMain.removeHandler('check-ember-update')
