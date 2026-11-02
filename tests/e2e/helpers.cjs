@@ -157,7 +157,14 @@ async function walkToHostScreen(window) {
   await expect(window.locator('.screen.active')).toHaveAttribute('id', 'screen-host')
 }
 
+// On to the Tailscale walkthrough's Serve step (demo Tailscale is connected).
+async function openServeStep(window) {
+  await walkToHostScreen(window)
+  await window.locator('input[name="host"][value="tailscale"]').check()
+  await expect(window.locator('#ts-step-serve')).toBeVisible({ timeout: 10000 })
+}
+
 module.exports = {
   launchApp, closeApp, killTree, MAIN_PATH,
-  stubOpenExternal, openedExternal, walkToModelScreen, walkToHostScreen,
+  stubOpenExternal, openedExternal, walkToModelScreen, walkToHostScreen, openServeStep,
 }

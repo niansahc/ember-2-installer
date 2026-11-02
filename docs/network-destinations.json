@@ -152,6 +152,7 @@
   ],
   "browserLinks": {
     "$comment": "Opened only when the user clicks, in the system browser (shell.openExternal). Never contacted by an unattended install. Must equal ALLOWED_EXTERNAL_HOSTS in src/lib/external-url.js; the drift test checks both that and every host literal in src/.",
+    "tailnetHost": "The user's own Tailscale Serve name: Self.DNSName from tailscale status --json, read by get-tailscale-dns. Opened only by the open-ember IPC, which builds https://<name> in main once Serve succeeded; otherwise it opens http://localhost:8000. No *.ts.net host is on the open-url allowlist.",
     "hosts": [
       "git-scm.com",
       "www.python.org",

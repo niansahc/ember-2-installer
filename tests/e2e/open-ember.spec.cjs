@@ -4,17 +4,22 @@
 // shell.openExternal is replaced in the main process and records its URLs.
 
 const { test, expect } = require('@playwright/test')
-const { launchApp, closeApp, stubOpenExternal, openedExternal, walkToHostScreen } = require('./helpers.cjs')
+const { launchApp, closeApp, stubOpenExternal, openedExternal, openServeStep } = require('./helpers.cjs')
 
-async function installWithTailscale(window, { setUpServe }) {
-  await walkToHostScreen(window)
-  await window.locator('input[name="host"][value="tailscale"]').check()
-  // Connected: the walkthrough has read the tailnet IP and offers Serve.
-  await expect(window.locator('#ts-step-serve')).toBeVisible({ timeout: 10000 })
-  if (setUpServe) {
+// The demo get-tailscale-dns name.
+const OWN_URL = 'https://ember.example.ts.net'
+
+// Click Serve unless it is already set up, and wait for the HTTPS name.
+async function setUpServe(window) {
+  if (await window.locator('#ts-serve-result .ts-url-display').count() === 0) {
     await window.locator('#btn-ts-serve').click()
-    await expect(window.locator('#ts-serve-result')).toBeVisible({ timeout: 10000 })
   }
+  await expect(window.locator('#ts-serve-result .ts-url-display')).toHaveText(OWN_URL, { timeout: 10000 })
+}
+
+async function installWithTailscale(window, { setUpServe: serve }) {
+  await openServeStep(window)
+  if (serve) await setUpServe(window)
   await window.locator('#btn-host-next').click()
   await window.locator('#btn-start-install').click()
   await expect(window.locator('.screen.active')).toHaveAttribute('id', 'screen-agpl', { timeout: 30000 })
@@ -50,7 +55,83 @@ test.describe('Open Ember with Tailscale', () => {
     test.slow()
     await installWithTailscale(window, { setUpServe: true })
     await window.locator('#btn-open-ember').click()
-    await expect.poll(() => openedExternal(app)).toHaveLength(1)
-    expect((await openedExternal(app))[0]).toMatch(/^https:\/\/[a-z0-9.-]+\.ts\.net$/)
+    await expect.poll(() => openedExternal(app)).toEqual([OWN_URL])
+  })
+})
+
+// open-ember takes no argument; main picks the destination. open-url never
+// opens a *.ts.net URL, the user's own name included. One launch, in order:
+// Serve only goes from not set up to set up. The handler opens synchronously once
+// the IPC call resolves, so the recorded list is final when it returns.
+// "after Serve, openEmber opens the own host" is the positive control for the
+// denied openUrl cases.
+const openUrl = (window, url) => window.evaluate((u) => window.ember.openUrl(u), url)
+const openEmber = (window) => window.evaluate(() => window.ember.openEmber())
+
+test.describe.serial('open-ember and open-url', () => {
+  let app, window
+
+  test.beforeAll(async () => {
+    const launched = await launchApp()
+    app = launched.app
+    window = launched.window
+    await openServeStep(window)
+  })
+
+  test.beforeEach(async () => {
+    await stubOpenExternal(app)
+  })
+
+  test.afterAll(async () => {
+    const closing = app
+    app = undefined
+    await closeApp(closing)
+  })
+
+  test('before Serve, openEmber opens the local API', async () => {
+    await openEmber(window)
+    expect(await openedExternal(app)).toEqual(['http://localhost:8000'])
+  })
+
+  test('before Serve, openUrl blocks the own tailnet host', async () => {
+    await openUrl(window, OWN_URL)
+    expect(await openedExternal(app)).toEqual([])
+  })
+
+  test("after Serve, openEmber opens the user's own tailnet host", async () => {
+    await setUpServe(window)
+    await openEmber(window)
+    expect(await openedExternal(app)).toEqual([OWN_URL])
+  })
+
+  test('after Serve, openUrl blocks the own host and any other tailnet host', async () => {
+    await setUpServe(window)
+    await openUrl(window, OWN_URL)
+    await openUrl(window, 'https://other.example.ts.net')
+    expect(await openedExternal(app)).toEqual([])
+  })
+
+  // Same test, same stub: an allowlisted URL is recorded, so the empty lists
+  // above are not an open-url that never reaches the stub.
+  test('control: openUrl records an allowlisted URL after the denied ones', async () => {
+    await openUrl(window, OWN_URL)
+    await openUrl(window, 'https://github.com/')
+    expect(await openedExternal(app)).toEqual(['https://github.com/'])
+  })
+
+  // A launch failure is logged in main, not left as an unhandled rejection. The
+  // control makes the same rejection unhandled and expects it to be recorded.
+  test('a failing openExternal is not an unhandled rejection', async () => {
+    await app.evaluate(({ shell }) => {
+      globalThis.__unhandled = []
+      process.on('unhandledRejection', (e) => globalThis.__unhandled.push(String(e)))
+      shell.openExternal = async () => { throw new Error('launch failed') }
+    })
+    await openEmber(window)
+    await openUrl(window, 'https://github.com/')
+    await new Promise((r) => setTimeout(r, 300))
+    expect(await app.evaluate(() => globalThis.__unhandled)).toEqual([])
+    await app.evaluate(({ shell }) => { void shell.openExternal('https://github.com/') })
+    await expect.poll(() => app.evaluate(() => globalThis.__unhandled.length)).toBe(1)
   })
 })

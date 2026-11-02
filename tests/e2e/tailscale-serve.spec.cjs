@@ -5,16 +5,10 @@
 // the main process per test to drive each failure.
 
 const { test, expect } = require('@playwright/test')
-const { launchApp, closeApp, walkToHostScreen } = require('./helpers.cjs')
+const { launchApp, closeApp, openServeStep, stubOpenExternal, openedExternal } = require('./helpers.cjs')
 
 const NOT_SET_UP = "Phone access isn't set up yet."
 const DEMO_TAILNET_IP = '100.72.128.44'
-
-async function openServeStep(window) {
-  await walkToHostScreen(window)
-  await window.locator('input[name="host"][value="tailscale"]').check()
-  await expect(window.locator('#ts-step-serve')).toBeVisible({ timeout: 10000 })
-}
 
 // Replace a demo IPC handler with one that resolves `value`.
 function overrideHandler(app, channel, value) {
@@ -32,6 +26,8 @@ async function offeredUrls(window) {
     urlText: /https?:\/\//.test(text) || text.includes(DEMO_TAILNET_IP),
   }
 }
+
+const openEmber = (window) => window.evaluate(() => window.ember.openEmber())
 
 async function expectNotSetUp(window) {
   await expect(window.locator('#ts-serve-result')).toHaveText(NOT_SET_UP, { timeout: 10000 })
@@ -67,6 +63,23 @@ test.describe('Tailscale Serve step', () => {
     await overrideHandler(app, 'run-tailscale-serve', { ok: false, error: 'serve config denied' })
     await launched.window.locator('#btn-ts-serve').click()
     await expectNotSetUp(launched.window)
+    // The demo DNS read still succeeded, so main knows the tailnet name; only the
+    // Serve gate keeps Open Ember off it. Control: open-ember.spec "with Serve,
+    // opens the tailnet HTTPS name" (same demo name, Serve succeeded).
+    await stubOpenExternal(app)
+    await openEmber(launched.window)
+    expect(await openedExternal(app)).toEqual(['http://localhost:8000'])
+  })
+
+  test('DNSName outside <machine>.<tailnet>.ts.net: not set up, Retry, Open Ember opens the local API', async () => {
+    const launched = await launchApp({ extraArgs: ['--demo-tailnet-dns=host.example.com.'] })
+    app = launched.app
+    await openServeStep(launched.window)
+    await launched.window.locator('#btn-ts-serve').click()
+    await expectNotSetUp(launched.window)
+    await stubOpenExternal(app)
+    await openEmber(launched.window)
+    expect(await openedExternal(app)).toEqual(['http://localhost:8000'])
   })
 
   test('Serve IPC rejects: not set up, Retry, no IP URL', async () => {

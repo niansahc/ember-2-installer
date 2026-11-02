@@ -13,7 +13,6 @@ const state = {
   model: 'qwen3:8b',
   vision: null,
   host: '127.0.0.1',
-  tailscaleDns: null,
   models: [],
   ollamaModelsPath: null,
 }
@@ -905,7 +904,6 @@ document.getElementById('btn-ts-serve').addEventListener('click', () => {
     // the API binds 127.0.0.1, so nothing listens on <tailnet IP>:8000.
     if (serveResult.ok && dnsName) {
       icon.textContent = '✅'
-      state.tailscaleDns = dnsName
       btn.classList.add('hidden')
       resultEl.classList.remove('hidden')
       resultEl.textContent = 'Your Ember URL: '
@@ -1514,11 +1512,11 @@ document.getElementById('btn-launch-ember').addEventListener('click', () => {
   })
 })
 
-// Open Ember — the Tailscale Serve HTTPS name if it was set up, otherwise the
-// local API. Not the bare tailnet IP: the API binds 127.0.0.1 only, so nothing
-// listens on <tailnet IP>:8000, and open-url does not allow that URL.
+// Open Ember: main opens the Tailscale Serve HTTPS name if it was set up,
+// otherwise the local API. Not the bare tailnet IP: the API binds 127.0.0.1
+// only, so nothing listens on <tailnet IP>:8000.
 document.getElementById('btn-open-ember').addEventListener('click', () => {
-  window.ember.openUrl(state.tailscaleDns ? `https://${state.tailscaleDns}` : 'http://localhost:8000')
+  window.ember.openEmber()
 })
 
 document.getElementById('btn-retry-api').addEventListener('click', () => {

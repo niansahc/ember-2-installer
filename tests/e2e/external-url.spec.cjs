@@ -5,7 +5,13 @@
 const { test, expect } = require('@playwright/test')
 const fs = require('fs')
 const path = require('path')
-const { ALLOWED_EXTERNAL_HOSTS, isAllowedExternalUrl } = require('../../src/lib/external-url')
+const {
+  ALLOWED_EXTERNAL_HOSTS, isAllowedExternalUrl, parseTailscaleDns, tailnetHostFromDnsName,
+} = require('../../src/lib/external-url')
+
+// The user's own Serve name (synthetic, as in the demo handler).
+const OWN = 'ember.example.ts.net'
+const OWN_URL = `https://${OWN}`
 
 // Every literal URL in the renderer, read from source so a link added there is
 // checked here too. Templated URLs (`https://${dns}`) are skipped; the samples
@@ -15,14 +21,16 @@ const RENDERER_URLS = [...new Set(['index.html', 'app.js'].flatMap((file) => {
   return source.match(/https?:\/\/[^"'`<>\s)]+/g) || []
 }))].filter((url) => !url.includes('${'))
 
-// The tailnet HTTPS name and the local API, which the renderer builds at runtime.
-const TEMPLATED_URL_SAMPLES = ['https://ember.example.ts.net', 'http://127.0.0.1:8000']
+// The local API, which the renderer builds at runtime. The tailnet name is not
+// here: main's open-ember handler opens it, and open-url denies it.
+const TEMPLATED_URL_SAMPLES = ['http://127.0.0.1:8000']
 
 // https or http-localhost strings that are not allowed destinations.
 const LOOKALIKES = [
   'https://github.com.evil.test/x',
   'https://evil.example.test',
   'https://ts.net',
+  'https://ember.example.ts.net.evil.test',
   'https://user:pw@github.com/',
   'http://localhost.evil.test',
   'http://127.0.0.1.evil.test',
@@ -74,6 +82,59 @@ test.describe('isAllowedExternalUrl', () => {
     for (const host of ALLOWED_EXTERNAL_HOSTS) {
       expect(isAllowedExternalUrl(`https://${host}/`), host).toBe(true)
       expect(isAllowedExternalUrl(`http://${host}/`), host).toBe(false)
+    }
+  })
+})
+
+// Every *.ts.net URL, the user's own name included: open-url never opens one.
+const TAILNET_URLS = [
+  OWN_URL,
+  `${OWN_URL}/chat`,
+  'https://other.example.ts.net',
+  'https://ember.other.ts.net',
+  'https://x.ember.example.ts.net',
+  'https://example.ts.net',
+]
+
+// The tailnet rule before it was narrowed to the user's own host, kept as the
+// positive control: it allowed every URL the denial below must refuse.
+function oldTailnetCheck(url) {
+  return new URL(url).hostname.endsWith('.ts.net')
+}
+
+// tailnetHost values that must not allow anything: a non-tailnet domain, too few
+// labels, a port, userinfo, an IP, an empty label.
+const INVALID_TAILNET_HOSTS = [
+  'evil.example.test', 'ts.net', 'example.ts.net', 'ember.example.ts.net:443',
+  'user@ember.example.ts.net', '100.72.128.44', 'a..example.ts.net',
+]
+
+test.describe('tailnet host', () => {
+  test('open-url denies every *.ts.net URL, the own host included', () => {
+    for (const url of TAILNET_URLS) expect(isAllowedExternalUrl(url), url).toBe(false)
+  })
+
+  test('control: the old suffix rule allowed every one of those URLs', () => {
+    for (const url of TAILNET_URLS) expect(oldTailnetCheck(url), url).toBe(true)
+  })
+
+  test('tailnetHostFromDnsName keeps only a <machine>.<tailnet>.ts.net name', () => {
+    expect(tailnetHostFromDnsName('Ember.Example.ts.net')).toBe(OWN)
+    for (const dns of [null, undefined, '', 42, ...INVALID_TAILNET_HOSTS]) {
+      expect(tailnetHostFromDnsName(dns), String(dns)).toBeNull()
+    }
+  })
+
+  test('parseTailscaleDns reads Self.DNSName and is null on any failure', () => {
+    expect(parseTailscaleDns({ ok: true, stdout: '{"Self":{"DNSName":"ember.example.ts.net."}}' })).toBe(OWN)
+    for (const result of [
+      null,
+      { ok: false, stdout: '{"Self":{"DNSName":"ember.example.ts.net."}}' },
+      { ok: true, stdout: 'not json' },
+      { ok: true, stdout: '{}' },
+      { ok: true, stdout: '{"Self":{}}' },
+    ]) {
+      expect(parseTailscaleDns(result), JSON.stringify(result)).toBeNull()
     }
   })
 })
