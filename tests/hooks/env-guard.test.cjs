@@ -127,6 +127,37 @@ const ALLOW = [
   ['PowerShell', { command: "git commit -m @'\r\nmentions .env\r\n'@" }, { command: 'git commit -m @"\r\n$(Get-Content .env)\r\n"@' }],
 ]
 
+// Words come from parseShell (one tokenizer): a name split by quotes or
+// escapes is the name it makes, and comments are not scanned.
+DENY.push(
+  ['Bash', { command: 'cat .en\\v' }],
+  ['Bash', { command: "cat .en''v" }],
+  ['Bash', { command: 'cat .e"n"v' }],
+  ['Bash', { command: "cat .e'n'v" }],
+  ['PowerShell', { command: 'Get-Content .e"n"v' }],
+  ['PowerShell', { command: 'Get-Content .`env' }],
+  ['PowerShell', { command: 'Get-Content <# x #> .env' }],
+  ['PowerShell', { command: 'Get-Content <#\nx\n#>.env' }],
+  ['PowerShell', { command: 'iex "Get-Content .env"' }],
+  ['PowerShell', { command: 'Get-Date <# unterminated; Get-Content .env' }],
+)
+ALLOW.push(
+  ['Bash', { command: 'echo hi # see .env' }, { command: 'echo hi; cat .env' }],
+  ['Bash', { command: 'echo hi # see .env\ncat src/main.js' }, { command: 'echo hi # note\ncat .env' }],
+  ['PowerShell', { command: 'Get-Date # see .env' }, { command: 'Get-Date; Get-Content .env' }],
+  ['PowerShell', { command: 'Get-Date <# see .env #>' }, { command: 'Get-Date <# x #> Get-Content .env' }],
+  ['PowerShell', { command: 'Get-Date <#\nnotes about .env\n#>' }, { command: 'Get-Date <#\nnotes\n#> Get-Content .env' }],
+  // A quoted wildcard stays text (control: unquoted), also after a name= in one word.
+  ['Bash', { command: "jq --arg k='.*' . package.json" }, { command: 'jq --arg k=.* . package.json' }],
+  ['Bash', { command: 'cat src/".e"x' }, { command: 'cat src/.e"n"v' }],
+)
+
+test('past the nesting limit the raw text is still scanned', () => {
+  const deep = (inner) => `echo ${'$('.repeat(9)}${inner}${')'.repeat(9)}`
+  deny(runGuard('env-guard', call('Bash', { command: deep('cat .env') }), fx))
+  allow(runGuard('env-guard', call('Bash', { command: deep('cat src/main.js') }), fx))
+})
+
 for (const [tool, input] of DENY) {
   test(`deny ${tool} ${JSON.stringify(input)}`, () => {
     const r = deny(runGuard('env-guard', call(tool, input), fx))

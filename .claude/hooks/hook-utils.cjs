@@ -182,6 +182,10 @@ const OPERATORS = ';<>|&{}'
  *   - A quote left open runs to the end of the command: its text is still
  *     scanned.
  *   - A newline is the `;` operator; `#` at a word start begins a comment.
+ *   - PowerShell: `<# ... #>` is a block comment ending at the first `#>`;
+ *     unterminated, the text after `<#` is scanned as code.
+ *   - word.parts lists a word's text by the quote it was read in:
+ *     [{ text, quote }], quote null, ' or ".
  *
  * A heredoc (Bash) is { quoted, delimiter, body, subs, start, end,
  * terminated }: `body` is the raw text between the operator line and the
@@ -276,7 +280,16 @@ function parseShell(command, flavor, depth = 0) {
     let quote = null
     let parens = 0
     let pending = []
-    const cur = () => (word ||= { text: '', bare: '', subs: [], start: i })
+    const cur = () => (word ||= { text: '', bare: '', parts: [], subs: [], start: i })
+    // Text added to the word, recorded in word.parts under the quote it was read in.
+    const addText = (w, t) => {
+      const q = quote === null ? null : quote[quote.length - 1]
+      const last = w.parts[w.parts.length - 1]
+      if (last && last.quote === q) last.text += t
+      else w.parts.push({ text: t, quote: q })
+      w.text += t
+      if (quote === null) w.bare += t
+    }
     const flush = () => {
       if (word) {
         word.end = i
@@ -287,9 +300,7 @@ function parseShell(command, flavor, depth = 0) {
     }
     const append = (ch) => {
       const w = cur()
-      const t = ch === '\\' ? '/' : ch
-      w.text += t
-      if (quote === null) w.bare += t
+      addText(w, ch === '\\' ? '/' : ch)
     }
     const sub = (skip, end) => {
       const isArith = end === ')' && s[i + skip] === '('
@@ -338,6 +349,13 @@ function parseShell(command, flavor, depth = 0) {
         sub(1, '`')
       } else if (quote === '"' || quote === '@"') {
         quoted()
+      } else if (!bash && c === '<' && n === '#') {
+        // PowerShell block comment: whitespace up to the first #> (no nesting;
+        // quotes inside do not matter). Unterminated is a parse error that runs
+        // nothing; the rest is scanned as live code, so it can only over-deny.
+        flush()
+        const close = s.indexOf('#>', i + 2)
+        i = close < 0 ? i + 2 : close + 2
       } else if (
         !bash &&
         c === '@' &&
@@ -372,9 +390,7 @@ function parseShell(command, flavor, depth = 0) {
         const end = s.indexOf('}', i)
         const stop = end < 0 ? s.length : end + 1
         const w = cur()
-        const t = s.slice(i, stop).replace(/\\/g, '/')
-        w.text += t
-        w.bare += t
+        addText(w, s.slice(i, stop).replace(/\\/g, '/'))
         i = stop
       } else if (bash && (c === '<' || c === '>') && n === '(') {
         // Process substitution: a word of its own (a /dev/fd name).
@@ -453,7 +469,8 @@ function pipelines(script) {
 const POSIX_SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh'])
 const PS_SHELLS = new Set(['pwsh', 'powershell'])
 // Every program nestedCommand() follows.
-const SHELLS = new Set([...POSIX_SHELLS, ...PS_SHELLS, 'cmd', 'eval', 'wsl'])
+const PS_EVAL = new Set(['iex', 'invoke-expression'])
+const SHELLS = new Set([...POSIX_SHELLS, ...PS_SHELLS, ...PS_EVAL, 'cmd', 'eval', 'wsl'])
 // wsl options that take a separate value.
 const WSL_VALUE_FLAGS = new Set(['-d', '--distribution', '-u', '--user', '--cd', '--shell-type', '--distribution-id'])
 
@@ -483,6 +500,12 @@ function nestedCommand(runner, args) {
   if (PS_SHELLS.has(runner)) {
     const i = args.findIndex((a) => a.length >= 2 && '-command'.startsWith(a.toLowerCase()))
     const rest = i >= 0 ? args.slice(i + 1) : runner === 'powershell' ? args.filter((a) => !a.startsWith('-')) : []
+    return rest.length ? { command: rest.join(' '), flavor: 'ps' } : null
+  }
+  if (PS_EVAL.has(runner)) {
+    // iex [-Command] <string>. A computed argument ($x, (expr)) is not known here.
+    const i = args.findIndex((a) => a.length >= 2 && '-command'.startsWith(a.toLowerCase()))
+    const rest = i >= 0 ? args.slice(i + 1) : args
     return rest.length ? { command: rest.join(' '), flavor: 'ps' } : null
   }
   if (runner === 'cmd') {
@@ -743,6 +766,7 @@ module.exports = {
   WILDCARD,
   SHELL_TOOLS,
   SHELLS,
+  PS_EVAL,
   MAX_DEPTH,
   NestingLimit,
   projectDir,

@@ -14,6 +14,7 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const { makeFixture, liveVaultFixture, runGuard, call, deny, allow } = require('./helpers.cjs')
+const { parseShell } = require('../../.claude/hooks/hook-utils.cjs')
 
 const FX = liveVaultFixture()
 test.after(() => FX.cleanup())
@@ -353,7 +354,72 @@ test('nesting past the limit is denied with a reason naming the limit', () => {
   deny(runGuard('vault-guard', call('Bash', { command: nest(8, `cat ${VAULT_FILE}`) }, ROOT), FX))
 })
 
+// ---------------------------------------------------------------------------
+// PowerShell block comments and iex / Invoke-Expression. `%` is the vault
+// file (deny) or a file beside it (allow).
+// ---------------------------------------------------------------------------
+
+const PS_DENY = [
+  '<# x #> Get-Content %',
+  '<#\n#>Get-Content %',
+  'Get-Date <# unterminated; Get-Content %',
+  'iex "Get-Content %"',
+  'Invoke-Expression "Get-Content %"',
+  'Invoke-Expression -Command "gc %"',
+  'iex -c "gc %"',
+  '"Get-Content %" | iex',
+  "echo 'Get-Content %' | Invoke-Expression",
+]
+// [allowed command, deny control]
+const PS_ALLOW = [
+  ['<#\nGet-Content %\n#>\nGet-Date', '<#\n#>\nGet-Content %\nGet-Date'],
+  ['Get-Date <# Get-Content % #>', 'Get-Date; <# x #> Get-Content %'],
+  ['Get-Date "<# x #> Get-Content %"', 'Get-Date; <# x #> Get-Content %'],
+  ['Get-Date; <# Get-Content % #>', 'Get-Date; <# Get-Content %'],
+  ['iex "Get-Date"', 'iex "Get-Content %"'],
+  ['Get-Date | iex', '"Get-Content %" | iex'],
+  ['Get-Help iex', 'Get-Help iex; Get-Content %'],
+  ['echo iex', 'echo iex; Get-Content %'],
+  ['Select-String -Pattern iex ' + OTHER_FILE, 'Select-String -Pattern iex %'],
+]
+
+test('block comments and iex: bypasses denied, comment text and plain iex allowed, each with a control', async (t) => {
+  const run = (form, file) =>
+    runGuard('vault-guard', call('PowerShell', { command: form.replaceAll('%', file) }, ROOT), FX)
+  for (const form of PS_DENY) {
+    await t.test(`deny ${JSON.stringify(form)}`, () => {
+      deny(run(form, VAULT_FILE))
+      allow(run(form.replace(/\biex\b|Invoke-Expression/i, 'Write-Output'), OTHER_FILE))
+    })
+  }
+  for (const [ok, control] of PS_ALLOW) {
+    await t.test(`allow ${JSON.stringify(ok)}`, () => {
+      allow(run(ok, VAULT_FILE))
+      deny(run(control, VAULT_FILE))
+    })
+  }
+})
+
+test('parseShell: PowerShell block comment is whitespace; Bash is unchanged', () => {
+  const texts = (src, flavor) => parseShell(src, flavor).tokens.filter((x) => typeof x !== 'string').map((x) => x.text)
+  assert.deepEqual(texts('a <# b c #> d', 'ps'), ['a', 'd'])
+  assert.deepEqual(texts('a <#\nb\n#> d', 'ps'), ['a', 'd'])
+  assert.deepEqual(texts('a "<# b #>" d', 'ps'), ['a', '<# b #>', 'd'])
+  assert.deepEqual(texts('a <# b d', 'ps'), ['a', 'b', 'd']) // unterminated: scanned as code
+  assert.deepEqual(texts('a <#b d', 'bash'), ['a']) // Bash: redirection, then a # comment
+  const [w] = parseShell(`.e"n"'v'x`, 'bash').tokens
+  assert.deepEqual(w.parts, [
+    { text: '.e', quote: null },
+    { text: 'n', quote: '"' },
+    { text: 'v', quote: "'" },
+    { text: 'x', quote: null },
+  ])
+  assert.equal(w.text, '.envx')
+})
+
 test('every table row is complete, and each control differs from its command', () => {
+  assert.ok(PS_DENY.every((form) => form.includes('%')))
+  assert.ok(PS_ALLOW.every(([ok, control]) => ok && control && ok !== control))
   assert.ok(WRAPPED.every(([, form]) => form.includes('%')))
   assert.ok(ESCAPED.every((form) => form.includes('%')))
   assert.ok(PRINTED.every((form) => form.includes('@')))

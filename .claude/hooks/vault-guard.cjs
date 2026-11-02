@@ -100,7 +100,7 @@
 const fs = require('fs')
 const path = require('path')
 const {
-  MAX_DEPTH, NestingLimit, SHELL_TOOLS, WILDCARD, absolutePath, commandName, commandStart, expandUser, fnmatch,
+  MAX_DEPTH, NestingLimit, PS_EVAL, SHELL_TOOLS, WILDCARD, absolutePath, commandName, commandStart, expandUser, fnmatch,
   literalHeredocs, main, nestedCommand, parseShell, pipelines, projectDir, proseValues, toolCall,
 } = require('./hook-utils.cjs')
 
@@ -488,6 +488,8 @@ const READ_UTILITIES = new Set([
 const LIST_UTILITIES = new Set(['ls', 'dir', 'gci', 'get-childitem', 'tree', 'find', 'wc'])
 // Commands that only print or test their arguments: name rule on redirections only.
 const NON_READING = new Set(['echo', 'printf', 'test', '[', '[[', 'test-path', 'write-output', 'write-host', 'mkdir'])
+// Stages that print their arguments: the text piped to iex.
+const PRINTERS = new Set(['echo', 'write-output', 'write-host'])
 const CD = new Set(['cd', 'chdir', 'pushd', 'set-location', 'sl', 'push-location'])
 const ALWAYS_RECURSIVE = new Set(['rg', 'ag', 'ack'])
 const GREP = new Set(['grep', 'egrep', 'fgrep'])
@@ -683,8 +685,14 @@ function scanScript(script, state, literal, level) {
       state.pendingCd.push(words.length > 1 ? words[words.length - 1] : '~')
       continue
     }
-    for (const s of stages) {
-      const nested = nestedCommand(s.runner, s.words.slice(1))
+    for (const [k, s] of stages.entries()) {
+      let nested = nestedCommand(s.runner, s.words.slice(1))
+      // "text" | iex: the text the previous stage prints, when it is a literal.
+      if (!nested && k > 0 && PS_EVAL.has(s.runner)) {
+        const prev = stages[k - 1]
+        const text = (PRINTERS.has(prev.runner) ? prev.words.slice(1) : prev.words).join(' ')
+        nested = text ? { command: text, flavor: 'ps' } : null
+      }
       const hit = nested && scanCommand(nested.command, state, nested.flavor, level + 1)
       if (hit) return hit
     }

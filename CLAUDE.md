@@ -45,7 +45,7 @@ Key optimizations and features:
 
 Shipped release: v0.18.1 (2026-08-31). `package.json` `version` is 0.18.1, and `emberRelease` (the ember-2 / ember-2-ui tag the installer pins) is 0.18.1. The jump from 0.8.1 to 0.18.0 was deliberate: it aligned the installer with the ember-2 backend so all three repos share one number.
 
-275 e2e + 108 integration Playwright tests, 27 network-gate tests (`npm run test:netgate`), 349 hook tests. Builds and ships the Windows NSIS installer (primary, verified). The Linux AppImage now builds in CI; Mac DMG is configured but not built or verified. Neither Mac nor Linux is verified on real hardware.
+275 e2e + 108 integration Playwright tests, 27 network-gate tests (`npm run test:netgate`), 387 hook tests. Builds and ships the Windows NSIS installer (primary, verified). The Linux AppImage now builds in CI; Mac DMG is configured but not built or verified. Neither Mac nor Linux is verified on real hardware.
 
 ---
 
@@ -179,7 +179,7 @@ Blocks pushes during US Eastern business hours (9am-5pm Mon-Fri). Local hook: `h
 
 ## Hooks
 
-Configured in `.claude/settings.json`, scripts in `.claude/hooks/`. PreToolUse guards on Read, Grep, Glob, Edit, Write, Bash and PowerShell: `env-guard.cjs` denies `.env` and `.env.*` in any repo (`.env.example` allowed); `vault-guard.cjs` denies any `private_vault` path and the configured vault (`PRIVATE_VAULT_PATH` from the sibling ember-2 `.env`). Both deny on an internal error (fail closed); an unparseable payload is allowed. In Bash, a heredoc body is skipped only when it is literal text (quoted delimiter, `<<'EOF'`) for an inert consumer: tee to a file, `git commit -F -`, `gh --body-file -`, or `cat` inside a git/gh message value (`git commit -m "$(cat <<'EOF' ... EOF)"`); every other body is scanned. vault-guard denies a command nested past 8 levels and says it hit the nesting limit.
+Configured in `.claude/settings.json`, scripts in `.claude/hooks/`. PreToolUse guards on Read, Grep, Glob, Edit, Write, Bash and PowerShell: `env-guard.cjs` denies `.env` and `.env.*` in any repo (`.env.example` allowed); `vault-guard.cjs` denies any `private_vault` path and the configured vault (`PRIVATE_VAULT_PATH` from the sibling ember-2 `.env`). Both deny on an internal error (fail closed); an unparseable payload is allowed. In Bash, a heredoc body is skipped only when it is literal text (quoted delimiter, `<<'EOF'`) for an inert consumer: tee to a file, `git commit -F -`, `gh --body-file -`, or `cat` inside a git/gh message value (`git commit -m "$(cat <<'EOF' ... EOF)"`); every other body is scanned. vault-guard denies a command nested past 8 levels and says it hit the nesting limit. Both guards read commands through one parser (`parseShell`): comments, including PowerShell `<# ... #>`, are not scanned (an unterminated `<#` is scanned as code), a name split by quotes or escapes counts as the name it makes, and vault-guard follows `iex` / `Invoke-Expression` (argument or piped literal) like a nested shell.
 
 Threat model: the guards prevent accidental exposure of `.env` and vault content by an agent. They are pattern checks on the tool call, not a sandbox, and do not defend against deliberate evasion.
 
