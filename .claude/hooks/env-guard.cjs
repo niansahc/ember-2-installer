@@ -244,8 +244,8 @@ const PATH_FIELDS = new Map([
 // Quotes, separators, redirections and `=` (for --path=.env) all delimit.
 // Backslashes do NOT, so Windows paths survive intact.
 const TOKEN_SPLIT = /[\s"'`;|&<>(){}=,]+/
-// A closed quoted span, a lone unmatched quote, or an unquoted run.
-const SPAN = /"(?:[^"\\]|\\.)*"|'[^']*'|["']|[^"']+/g
+/** The names in a run of text. */
+const pieces = (text) => text.split(TOKEN_SPLIT).filter(Boolean)
 // Flags whose value the program matches as a glob against file names.
 const GLOB_FLAGS = new Set([
   '-name', '-iname', '-path', '-ipath', '-wholename', '-iwholename',
@@ -271,16 +271,15 @@ function isProse(w) {
  * the whole word that no part holds (a name split by quotes is one name).
  */
 function addWord(w, out) {
-  const split = (text) => text.split(TOKEN_SPLIT).filter(Boolean)
   const seen = new Set()
   for (const part of w.parts) {
     const quoted = part.quote !== null && !w.open && !(part.quote === '"' && w.subs.length > 0)
-    for (const piece of split(part.text)) {
+    for (const piece of pieces(part.text)) {
       seen.add(piece)
       out.push([piece, quoted])
     }
   }
-  if (w.parts.length > 1) for (const piece of split(w.text)) if (!seen.has(piece)) out.push([piece, false])
+  if (w.parts.length > 1) for (const piece of pieces(w.text)) if (!seen.has(piece)) out.push([piece, false])
   for (const sub of w.subs) addScript(sub, out)
 }
 
@@ -294,7 +293,7 @@ function addScript(script, out) {
       for (const w of st.redirs) addWord(w, out)
       // A heredoc body is text (literal ones were dropped already); the
       // substitutions in it are inside that text.
-      for (const h of st.heredocs) for (const piece of h.body.split(TOKEN_SPLIT).filter(Boolean)) out.push([piece, false])
+      for (const h of st.heredocs) for (const piece of pieces(h.body)) out.push([piece, false])
     }
   }
 }
@@ -304,7 +303,7 @@ function addScript(script, out) {
  * regex-split raw text, all of it scanned. Over-denies (comments, prose).
  */
 function legacyWords(command) {
-  return (command.match(SPAN) || []).flatMap((span) => span.split(TOKEN_SPLIT).filter(Boolean)).map((w) => [w, false])
+  return pieces(command).map((w) => [w, false])
 }
 
 /**
