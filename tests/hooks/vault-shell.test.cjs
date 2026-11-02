@@ -14,7 +14,7 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const { makeFixture, liveVaultFixture, runGuard, call, deny, allow } = require('./helpers.cjs')
-const { parseShell } = require('../../.claude/hooks/hook-utils.cjs')
+const { nestedCommand, parseShell } = require('../../.claude/hooks/hook-utils.cjs')
 
 const FX = liveVaultFixture()
 test.after(() => FX.cleanup())
@@ -355,58 +355,93 @@ test('nesting past the limit is denied with a reason naming the limit', () => {
 })
 
 // ---------------------------------------------------------------------------
-// PowerShell block comments and iex / Invoke-Expression. `%` is the vault
-// file (deny) or a file beside it (allow).
+// PowerShell block comments, iex / Invoke-Expression, and cmd /c. `%` is the
+// vault file (the vault for the deny, a file beside it for the allow). Every
+// deny has an allow control that keeps the vault file and changes only the
+// mechanism under test.
 // ---------------------------------------------------------------------------
 
+// [deny, allow control]
 const PS_DENY = [
-  '<# x #> Get-Content %',
-  '<#\n#>Get-Content %',
-  'Get-Date <# unterminated; Get-Content %',
-  'iex "Get-Content %"',
-  'Invoke-Expression "Get-Content %"',
-  'Invoke-Expression -Command "gc %"',
-  'iex -c "gc %"',
-  '"Get-Content %" | iex',
-  "echo 'Get-Content %' | Invoke-Expression",
+  // A command after a block comment runs; the same read inside the comment does not.
+  ['<# x #> Get-Content %', '<# x Get-Content % #>'],
+  ['<#\n#>Get-Content %', '<#\nGet-Content %\n#>'],
+  // Unterminated: scanned as code (control: terminated).
+  ['Get-Date; <# Get-Content %', 'Get-Date; <# Get-Content % #>'],
+  // <# inside a word is text (control: at a token start it opens the comment).
+  ['gc a<#\ngc % #>', 'gc a <#\ngc % #>'],
+  // A quoted <# opens nothing (control: unquoted it is a comment that hides the read).
+  ['Get-Date "<# x"; Get-Content %; "#>"', 'Get-Date <# x; Get-Content % #>'],
+  // iex and Invoke-Expression run their string (control: Write-Output only prints it).
+  ['iex "Get-Content %"', 'Write-Output "Get-Content %"'],
+  ['Invoke-Expression "Get-Content %"', 'Write-Output "Get-Content %"'],
+  ['Invoke-Expression -Command "gc %"', 'Write-Output -Command "gc %"'],
+  ['iex -c "gc %"', 'Write-Output -c "gc %"'],
+  ['iex -Command:"gc %"', 'Write-Output -Command:"gc %"'],
+  ['iex -c:"gc %"', 'Write-Output -c:"gc %"'],
+  ['pwsh -Command:"gc %"', 'Write-Output -Command:"gc %"'],
+  // Piped literal, past pass-through stages and printer flags.
+  ['"Get-Content %" | iex', '"Get-Content %" | Write-Output'],
+  ["echo 'Get-Content %' | Invoke-Expression", "echo 'Get-Content %' | Write-Output"],
+  ['echo "Get-Content %" | Out-String | iex', 'echo "Get-Content %" | Out-String | Write-Output'],
+  ['echo "Get-Content %" | Tee-Object -Variable v | iex', 'echo "Get-Content %" | Tee-Object -Variable v | Write-Output'],
+  ['echo -n "Get-Content %" | iex', 'echo -n "Get-Content %" | Write-Output'],
+  ['Write-Output -NoEnumerate "Get-Content %" | iex', 'Write-Output -NoEnumerate "Get-Content %" | Write-Output'],
+  // cmd /c is cmd: no # comment, no <# block comment, ' is not a quote, ^ escapes
+  // (control: the same text under PowerShell, where the read is hidden or quoted).
+  ['cmd /c "echo a <# & type % & echo #>nul"', 'powershell -Command "echo a <# & type % & echo #>nul"'],
+  ['cmd /c "echo # & type %"', 'powershell -Command "echo # & type %"'],
+  ['cmd /c "echo \'x & type %"', 'powershell -Command "echo \'x & type %"'],
+  ['cmd.exe /c "echo # & type %"', 'powershell -Command "echo # & type %"'],
 ]
-// [allowed command, deny control]
+// [allow, deny control]
 const PS_ALLOW = [
   ['<#\nGet-Content %\n#>\nGet-Date', '<#\n#>\nGet-Content %\nGet-Date'],
   ['Get-Date <# Get-Content % #>', 'Get-Date; <# x #> Get-Content %'],
-  ['Get-Date "<# x #> Get-Content %"', 'Get-Date; <# x #> Get-Content %'],
-  ['Get-Date; <# Get-Content % #>', 'Get-Date; <# Get-Content %'],
   ['iex "Get-Date"', 'iex "Get-Content %"'],
   ['Get-Date | iex', '"Get-Content %" | iex'],
-  ['Get-Help iex', 'Get-Help iex; Get-Content %'],
-  ['echo iex', 'echo iex; Get-Content %'],
+  // iex is a word here, not a command: same words, iex moved out of command position.
+  ['Get-Help iex "Get-Content %"', 'iex "Get-Content %"'],
+  ['echo iex "Get-Content %"', 'iex "Get-Content %"'],
   ['Select-String -Pattern iex ' + OTHER_FILE, 'Select-String -Pattern iex %'],
+  // cmd: ^ escapes (control: the escaped read of the vault file).
+  ['cmd /c "t^ype ' + OTHER_FILE + '"', 'cmd /c "t^ype %"'],
 ]
 
-test('block comments and iex: bypasses denied, comment text and plain iex allowed, each with a control', async (t) => {
-  const run = (form, file) =>
-    runGuard('vault-guard', call('PowerShell', { command: form.replaceAll('%', file) }, ROOT), FX)
-  for (const form of PS_DENY) {
+test('block comments, iex and cmd: each bypass denied, each control allowed', async (t) => {
+  const run = (form) =>
+    runGuard('vault-guard', call('PowerShell', { command: form.replaceAll('%', VAULT_FILE) }, ROOT), FX)
+  for (const [form, control] of PS_DENY) {
     await t.test(`deny ${JSON.stringify(form)}`, () => {
-      deny(run(form, VAULT_FILE))
-      allow(run(form.replace(/\biex\b|Invoke-Expression/i, 'Write-Output'), OTHER_FILE))
+      deny(run(form))
+      allow(run(control))
     })
   }
   for (const [ok, control] of PS_ALLOW) {
     await t.test(`allow ${JSON.stringify(ok)}`, () => {
-      allow(run(ok, VAULT_FILE))
-      deny(run(control, VAULT_FILE))
+      allow(run(ok))
+      deny(run(control))
     })
   }
 })
 
-test('parseShell: PowerShell block comment is whitespace; Bash is unchanged', () => {
+test('parseShell: flavors differ where the shells do', () => {
   const texts = (src, flavor) => parseShell(src, flavor).tokens.filter((x) => typeof x !== 'string').map((x) => x.text)
+  // PowerShell: a block comment at a token start is whitespace.
   assert.deepEqual(texts('a <# b c #> d', 'ps'), ['a', 'd'])
   assert.deepEqual(texts('a <#\nb\n#> d', 'ps'), ['a', 'd'])
   assert.deepEqual(texts('a "<# b #>" d', 'ps'), ['a', '<# b #>', 'd'])
   assert.deepEqual(texts('a <# b d', 'ps'), ['a', 'b', 'd']) // unterminated: scanned as code
-  assert.deepEqual(texts('a <#b d', 'bash'), ['a']) // Bash: redirection, then a # comment
+  assert.deepEqual(texts('a<#b d', 'ps'), ['a<#b', 'd']) // inside a word: text
+  // Bash: <#b is a redirection and a comment; # after { or } is expansion text.
+  assert.deepEqual(texts('a <#b d', 'bash'), ['a'])
+  assert.deepEqual(texts('echo {#,x}', 'bash'), ['echo', '#,x'])
+  assert.deepEqual(texts('echo a #,x', 'bash'), ['echo', 'a'])
+  // PowerShell: { opens a scriptblock, so # after it is a comment.
+  assert.deepEqual(texts('echo {#,x}', 'ps'), ['echo'])
+  // cmd: no # comment, ' is not a quote, ^ escapes.
+  assert.deepEqual(texts("echo # 'x & y", 'cmd'), ['echo', '#', "'x", 'y'])
+  assert.deepEqual(texts('t^ype x', 'cmd'), ['type', 'x'])
   const [w] = parseShell(`.e"n"'v'x`, 'bash').tokens
   assert.deepEqual(w.parts, [
     { text: '.e', quote: null },
@@ -417,8 +452,16 @@ test('parseShell: PowerShell block comment is whitespace; Bash is unchanged', ()
   assert.equal(w.text, '.envx')
 })
 
+test('nestedCommand: -Command forms, iex, and the cmd flavor', () => {
+  assert.deepEqual(nestedCommand('iex', ['-Command:gc x']), { command: 'gc x', flavor: 'ps' })
+  assert.deepEqual(nestedCommand('iex', ['-c:', 'gc x']), { command: 'gc x', flavor: 'ps' })
+  assert.deepEqual(nestedCommand('pwsh', ['-Command:gc', 'x']), { command: 'gc x', flavor: 'ps' })
+  assert.deepEqual(nestedCommand('cmd', ['/c', 'type x']), { command: 'type x', flavor: 'cmd' })
+  assert.equal(nestedCommand('iex', []), null)
+})
+
 test('every table row is complete, and each control differs from its command', () => {
-  assert.ok(PS_DENY.every((form) => form.includes('%')))
+  assert.ok(PS_DENY.every(([form, control]) => form.includes('%') && control.includes('%') && form !== control))
   assert.ok(PS_ALLOW.every(([ok, control]) => ok && control && ok !== control))
   assert.ok(WRAPPED.every(([, form]) => form.includes('%')))
   assert.ok(ESCAPED.every((form) => form.includes('%')))

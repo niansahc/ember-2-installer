@@ -62,11 +62,11 @@
 // Words come from parseShell, so quote-split and escaped names (`.e"n"v`,
 // `.en\v`, PowerShell `.`env`) are read as the name they make, and comments
 // (`#`, PowerShell `<# #>`) are not scanned. A command nested past MAX_DEPTH
-// falls back to a regex split of its raw text (over-denies).
+// falls back to a regex split of its raw text (unparsedWords; over-denies).
 //
 // Limits: a name built at runtime (a variable, base64, a script that opens
-// the file, an 8.3 short name) is not caught,
-// nor is a recursive read that never names the file (grep -r KEY .).
+// the file, an 8.3 short name) is not caught, nor is a recursive read that
+// never names the file (grep -r KEY .).
 //
 // Input: hook JSON on stdin. Output: a deny decision on stdout, or nothing.
 // Exit code is always 0. Fail closed: an exception inside the check is a
@@ -302,7 +302,7 @@ function addScript(script, out) {
  * The words of a command that could not be parsed (nested past MAX_DEPTH):
  * regex-split raw text, all of it scanned. Over-denies (comments, prose).
  */
-function legacyWords(command) {
+function unparsedWords(command) {
   return pieces(command).map((w) => [w, false])
 }
 
@@ -312,7 +312,7 @@ function legacyWords(command) {
  */
 function words(command, bash) {
   const script = parseOrNull(command, bash ? 'bash' : 'ps')
-  if (!script) return legacyWords(command)
+  if (!script) return unparsedWords(command)
   const out = []
   addScript(script, out)
   const nested = out.some(([w]) => SHELLS.has(commandName(w)))

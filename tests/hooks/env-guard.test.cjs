@@ -140,6 +140,19 @@ DENY.push(
   ['PowerShell', { command: 'Get-Content <#\nx\n#>.env' }],
   ['PowerShell', { command: 'iex "Get-Content .env"' }],
   ['PowerShell', { command: 'Get-Date <# unterminated; Get-Content .env' }],
+  // Redirection targets are scanned.
+  ['Bash', { command: 'cat < .env' }],
+  ['Bash', { command: 'cat <.env' }],
+  ['Bash', { command: 'echo x > .env' }],
+  ['PowerShell', { command: 'Get-Content x > .env' }],
+  // An open quote and a double-quoted substitution do not make a wildcard text.
+  ['Bash', { command: "cat '.*" }],
+  ['Bash', { command: 'cat ".*$(true)"' }],
+  // # after { or } is brace-expansion text, not a comment.
+  ['Bash', { command: 'echo a{#,.env}' }],
+  ['Bash', { command: 'cat {#,.env}' }],
+  // <# inside a word is text, not a comment.
+  ['PowerShell', { command: 'gc a<# .env #>' }],
 )
 ALLOW.push(
   ['Bash', { command: 'echo hi # see .env' }, { command: 'echo hi; cat .env' }],
@@ -150,6 +163,21 @@ ALLOW.push(
   // A quoted wildcard stays text (control: unquoted), also after a name= in one word.
   ['Bash', { command: "jq --arg k='.*' . package.json" }, { command: 'jq --arg k=.* . package.json' }],
   ['Bash', { command: 'cat src/".e"x' }, { command: 'cat src/.e"n"v' }],
+  // Redirection: the target is the only difference.
+  ['Bash', { command: 'cat < src/main.js' }, { command: 'cat < .env' }],
+  ['Bash', { command: 'echo x > out.txt' }, { command: 'echo x > .env' }],
+  ['PowerShell', { command: 'Get-Content x > out.txt' }, { command: 'Get-Content x > .env' }],
+  // Quoted wildcard stays text: closed quote vs open quote, no substitution vs one.
+  ['Bash', { command: "cat '.*'" }, { command: "cat '.*" }],
+  ['Bash', { command: 'cat ".*"' }, { command: 'cat ".*$(true)"' }],
+  // iex is not a nested shell in Bash: the quoted wildcard stays text (control: bash is).
+  ['Bash', { command: "echo iex; jq '.*' package.json" }, { command: "echo bash; jq '.*' package.json" }],
+  // # after a blank is a comment; right after { it is not.
+  ['Bash', { command: 'echo a #,.env' }, { command: 'echo a{#,.env}' }],
+  // PowerShell: { opens a scriptblock, so # after it is a comment.
+  ['PowerShell', { command: 'Get-Date {#,.env}' }, { command: 'Get-Date {x,.env}' }],
+  // <# at a token start is a comment; inside a word it is text.
+  ['PowerShell', { command: 'gc a <# .env #>' }, { command: 'gc a<# .env #>' }],
 )
 
 test('past the nesting limit the raw text is still scanned', () => {
@@ -245,4 +273,8 @@ test('every guarded tool has deny and allow cases', () => {
     assert.ok(ALLOW.some(([t]) => t === tool), `no allow case for ${tool}`)
   }
   assert.ok(ALLOW.every((row) => row.length === 3 && row[2]), 'an allow row has no deny control')
+  assert.ok(
+    ALLOW.every(([, input, control]) => JSON.stringify(input) !== JSON.stringify(control)),
+    'an allow row is its own control',
+  )
 })

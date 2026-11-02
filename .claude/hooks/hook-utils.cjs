@@ -11,7 +11,10 @@
 //     [!...]) with Python fnmatchcase semantics.
 //   - parseShell(), pipelines(): one quote- and escape-aware shell parser
 //     (words, operators, substitutions, heredocs).
-//   - SHELLS, nestedCommand(): one table of programs that run a command line.
+//   - SHELLS, PS_EVAL, nestedCommand(): one table of programs that run a
+//     command line (PS_EVAL: iex and Invoke-Expression, followed by
+//     nestedCommand but not shell words for env-guard). The 'cmd' flavor of
+//     parseShell is cmd.exe: no # comments, ^ escapes, ' is not a quote.
 //   - commandStart(): one rule for the command a stage runs (keywords,
 //     VAR=value and wrappers skipped).
 //   - proseValues(), proseFlagPrefix(): one rule for git/gh message values.
@@ -198,6 +201,8 @@ const OPERATORS = ';<>|&{}'
 function parseShell(command, flavor, depth = 0) {
   const s = command
   const bash = flavor === 'bash'
+  const cmd = flavor === 'cmd'
+  const ps = !bash && !cmd
   let i = 0
 
   /** The heredoc operator whose `<<` ends at s[i], or null when no delimiter word follows. */
@@ -336,7 +341,11 @@ function parseShell(command, flavor, depth = 0) {
           append(n)
           i += 2
         }
-      } else if (!bash && c === '`' && n !== undefined) {
+      } else if (ps && c === '`' && n !== undefined) {
+        append(n)
+        i += 2
+      } else if (cmd && c === '^' && quote === null && n !== undefined) {
+        // cmd escape: ^x is a literal x (e^cho runs echo).
         append(n)
         i += 2
       } else if (close === '`' && c === '`') {
@@ -349,15 +358,21 @@ function parseShell(command, flavor, depth = 0) {
         sub(1, '`')
       } else if (quote === '"' || quote === '@"') {
         quoted()
-      } else if (!bash && c === '<' && n === '#') {
-        // PowerShell block comment: whitespace up to the first #> (no nesting;
-        // quotes inside do not matter). Unterminated is a parse error that runs
-        // nothing; the rest is scanned as live code, so it can only over-deny.
-        flush()
-        const close = s.indexOf('#>', i + 2)
-        i = close < 0 ? i + 2 : close + 2
+      } else if (ps && c === '<' && n === '#') {
+        if (word === null) {
+          // PowerShell block comment, only at a token start: whitespace up to
+          // the first #> (no nesting; quotes inside do not matter). Unterminated
+          // is a parse error that runs nothing; the rest is scanned as live
+          // code, so it can only over-deny.
+          const close = s.indexOf('#>', i + 2)
+          i = close < 0 ? i + 2 : close + 2
+        } else {
+          // Inside a word (a<# b) the pair is ordinary text.
+          append(c)
+          i++
+        }
       } else if (
-        !bash &&
+        ps &&
         c === '@' &&
         (n === "'" || n === '"') &&
         (word === null || word.text.endsWith('=')) &&
@@ -366,7 +381,7 @@ function parseShell(command, flavor, depth = 0) {
         cur()
         quote = c + n
         i = s.indexOf('\n', i) + 1
-      } else if (c === "'" || c === '"') {
+      } else if (c === '"' || (c === "'" && !cmd)) {
         quote = c
         cur()
         i++
@@ -383,7 +398,8 @@ function parseShell(command, flavor, depth = 0) {
       } else if (c === ' ' || c === '\t' || c === '\r') {
         flush()
         i++
-      } else if (c === '#' && word === null) {
+      } else if (c === '#' && word === null && !cmd && !(bash && (s[i - 1] === '{' || s[i - 1] === '}'))) {
+        // Bash: after { or } the # is brace-expansion text ({#,x}), not a comment.
         const nl = s.indexOf('\n', i)
         i = nl < 0 ? s.length : nl
       } else if (c === '$' && n === '{') {
@@ -470,7 +486,9 @@ const POSIX_SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'csh',
 const PS_SHELLS = new Set(['pwsh', 'powershell'])
 // Every program nestedCommand() follows.
 const PS_EVAL = new Set(['iex', 'invoke-expression'])
-const SHELLS = new Set([...POSIX_SHELLS, ...PS_SHELLS, ...PS_EVAL, 'cmd', 'eval', 'wsl'])
+// Programs that run a command line as a nested shell (PS_EVAL is separate: it
+// is followed by nestedCommand but is not a shell word for env-guard).
+const SHELLS = new Set([...POSIX_SHELLS, ...PS_SHELLS, 'cmd', 'eval', 'wsl'])
 // wsl options that take a separate value.
 const WSL_VALUE_FLAGS = new Set(['-d', '--distribution', '-u', '--user', '--cd', '--shell-type', '--distribution-id'])
 
@@ -480,12 +498,30 @@ function optionValues(word) {
 }
 
 /**
+ * The words after a -Command flag of pwsh/powershell/iex, or null without one.
+ * The flag is any prefix of -Command (-c, -com...), with the value either the
+ * next words or joined by a colon (-Command:"line").
+ */
+function psCommandArg(args) {
+  for (let i = 0; i < args.length; i++) {
+    const colon = args[i].indexOf(':')
+    const flag = (colon < 0 ? args[i] : args[i].slice(0, colon)).toLowerCase()
+    if (flag.length >= 2 && '-command'.startsWith(flag)) {
+      const value = colon < 0 ? '' : args[i].slice(colon + 1)
+      return [...(value ? [value] : []), ...args.slice(i + 1)]
+    }
+  }
+  return null
+}
+
+/**
  * The command line `runner` (a commandName) runs from `args`, as
  * { command, flavor }, or null: POSIX shells -c [options] [--|-|+] <line>
  * (option words after -c are skipped, with the values of -o/-O; a lone -
  * or + ends them like --);
  * pwsh/powershell -Command <line...> (powershell also takes bare words);
- * cmd /c|/k <line...>; eval <line...>; wsl [options] [--|-e|--exec]
+ * iex / Invoke-Expression [-Command] <line>; cmd /c|/k <line...> (flavor
+ * 'cmd': no # comments, ^ escapes, ' is not a quote); eval <line...>; wsl [options] [--|-e|--exec]
  * <command...>.
  */
 function nestedCommand(runner, args) {
@@ -498,19 +534,17 @@ function nestedCommand(runner, args) {
     return k < args.length ? { command: args[k], flavor: 'bash' } : null
   }
   if (PS_SHELLS.has(runner)) {
-    const i = args.findIndex((a) => a.length >= 2 && '-command'.startsWith(a.toLowerCase()))
-    const rest = i >= 0 ? args.slice(i + 1) : runner === 'powershell' ? args.filter((a) => !a.startsWith('-')) : []
+    const rest = psCommandArg(args) ?? (runner === 'powershell' ? args.filter((a) => !a.startsWith('-')) : [])
     return rest.length ? { command: rest.join(' '), flavor: 'ps' } : null
   }
   if (PS_EVAL.has(runner)) {
     // iex [-Command] <string>. A computed argument ($x, (expr)) is not known here.
-    const i = args.findIndex((a) => a.length >= 2 && '-command'.startsWith(a.toLowerCase()))
-    const rest = i >= 0 ? args.slice(i + 1) : args
+    const rest = psCommandArg(args) ?? args
     return rest.length ? { command: rest.join(' '), flavor: 'ps' } : null
   }
   if (runner === 'cmd') {
     const i = args.findIndex((a) => /^\/[ck]$/i.test(a))
-    return i >= 0 && i + 1 < args.length ? { command: args.slice(i + 1).join(' '), flavor: 'ps' } : null
+    return i >= 0 && i + 1 < args.length ? { command: args.slice(i + 1).join(' '), flavor: 'cmd' } : null
   }
   if (runner === 'eval') return args.length ? { command: args.join(' '), flavor: 'bash' } : null
   if (runner === 'wsl') {

@@ -90,8 +90,16 @@
 // followed MAX_DEPTH (8) levels deep. A command nested deeper is denied
 // with a reason that names the nesting limit.
 //
+// PowerShell: <# ... #> block comments are not commands (an unterminated one
+// is scanned as code). iex / Invoke-Expression [-Command[:]] <string> runs the
+// string as a command, and so does text piped into iex from a literal or a
+// printer (echo "x" | iex), past Out-String, Tee-Object, Select-Object and
+// Out-Host. cmd /c runs as cmd (no # comments, ^ escapes, ' is not a quote).
+//
 // Known limits: a path built at runtime ($VAR, %VAR%), a different utility,
-// a script, or base64 is not caught. A literal path containing a wildcard
+// a script, or base64 is not caught; nor is iex of a variable or expression
+// (iex $s), `& iex`, a literal built in an earlier pipeline, or a source
+// behind a scriptblock stage (% { $_ } | iex); nor ${x:-path}. A literal path containing a wildcard
 // character (`[`, `*`, `?`) gets no realpath, so a junction named `[x]`
 // that points into the vault is matched only by its lexical spelling.
 
@@ -438,6 +446,20 @@ function outputWords(script, level) {
 }
 
 /**
+ * The command line piped into iex by the stages before it: their words, past
+ * pass-through stages (Out-String, Tee-Object, ...), the command word of a
+ * printer (echo "x" | iex), and flag words (echo -n "x" | iex). Null when
+ * nothing is left.
+ */
+function pipedToEval(before) {
+  const words = before
+    .filter((st) => !PASS_THROUGH.has(st.runner))
+    .flatMap((st) => (PRINTERS.has(st.runner) ? st.words.slice(1) : st.words))
+    .filter((w) => !w.startsWith('-'))
+  return words.length ? { command: words.join(' '), flavor: 'ps' } : null
+}
+
+/**
  * A parsed stage as { words, output, prose, redirs, heredocs, runner,
  * utility, at }: `words` the texts from the command the stage runs,
  * `output[k]` the words the substitutions in words[k] print (none for a
@@ -487,9 +509,11 @@ const READ_UTILITIES = new Set([
 // Listing and counting: their output is entry names (record IDs) or a count.
 const LIST_UTILITIES = new Set(['ls', 'dir', 'gci', 'get-childitem', 'tree', 'find', 'wc'])
 // Commands that only print or test their arguments: name rule on redirections only.
-const NON_READING = new Set(['echo', 'printf', 'test', '[', '[[', 'test-path', 'write-output', 'write-host', 'mkdir'])
-// Stages that print their arguments: the text piped to iex.
+// Stages that print their arguments (the text piped to iex).
 const PRINTERS = new Set(['echo', 'write-output', 'write-host'])
+const NON_READING = new Set([...PRINTERS, 'printf', 'test', '[', '[[', 'test-path', 'mkdir'])
+// Stages that pass piped text on unchanged, so a literal before them still reaches iex.
+const PASS_THROUGH = new Set(['out-string', 'tee-object', 'tee', 'select-object', 'out-host'])
 const CD = new Set(['cd', 'chdir', 'pushd', 'set-location', 'sl', 'push-location'])
 const ALWAYS_RECURSIVE = new Set(['rg', 'ag', 'ack'])
 const GREP = new Set(['grep', 'egrep', 'fgrep'])
@@ -687,12 +711,7 @@ function scanScript(script, state, literal, level) {
     }
     for (const [k, s] of stages.entries()) {
       let nested = nestedCommand(s.runner, s.words.slice(1))
-      // "text" | iex: the text the previous stage prints, when it is a literal.
-      if (!nested && k > 0 && PS_EVAL.has(s.runner)) {
-        const prev = stages[k - 1]
-        const text = (PRINTERS.has(prev.runner) ? prev.words.slice(1) : prev.words).join(' ')
-        nested = text ? { command: text, flavor: 'ps' } : null
-      }
+      if (!nested && k > 0 && PS_EVAL.has(s.runner)) nested = pipedToEval(stages.slice(0, k))
       const hit = nested && scanCommand(nested.command, state, nested.flavor, level + 1)
       if (hit) return hit
     }
