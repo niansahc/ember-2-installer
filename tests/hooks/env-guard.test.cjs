@@ -127,6 +127,65 @@ const ALLOW = [
   ['PowerShell', { command: "git commit -m @'\r\nmentions .env\r\n'@" }, { command: 'git commit -m @"\r\n$(Get-Content .env)\r\n"@' }],
 ]
 
+// Words come from parseShell (one tokenizer): a name split by quotes or
+// escapes is the name it makes, and comments are not scanned.
+DENY.push(
+  ['Bash', { command: 'cat .en\\v' }],
+  ['Bash', { command: "cat .en''v" }],
+  ['Bash', { command: 'cat .e"n"v' }],
+  ['Bash', { command: "cat .e'n'v" }],
+  ['PowerShell', { command: 'Get-Content .e"n"v' }],
+  ['PowerShell', { command: 'Get-Content .`env' }],
+  ['PowerShell', { command: 'Get-Content <# x #> .env' }],
+  ['PowerShell', { command: 'Get-Content <#\nx\n#>.env' }],
+  ['PowerShell', { command: 'iex "Get-Content .env"' }],
+  ['PowerShell', { command: 'Get-Date <# unterminated; Get-Content .env' }],
+  // Redirection targets are scanned.
+  ['Bash', { command: 'cat < .env' }],
+  ['Bash', { command: 'cat <.env' }],
+  ['Bash', { command: 'echo x > .env' }],
+  ['PowerShell', { command: 'Get-Content x > .env' }],
+  // An open quote and a double-quoted substitution do not make a wildcard text.
+  ['Bash', { command: "cat '.*" }],
+  ['Bash', { command: 'cat ".*$(true)"' }],
+  // # after { or } is brace-expansion text, not a comment.
+  ['Bash', { command: 'echo a{#,.env}' }],
+  ['Bash', { command: 'cat {#,.env}' }],
+  // <# inside a word is text, not a comment.
+  ['PowerShell', { command: 'gc a<# .env #>' }],
+)
+ALLOW.push(
+  ['Bash', { command: 'echo hi # see .env' }, { command: 'echo hi; cat .env' }],
+  ['Bash', { command: 'echo hi # see .env\ncat src/main.js' }, { command: 'echo hi # note\ncat .env' }],
+  ['PowerShell', { command: 'Get-Date # see .env' }, { command: 'Get-Date; Get-Content .env' }],
+  ['PowerShell', { command: 'Get-Date <# see .env #>' }, { command: 'Get-Date <# x #> Get-Content .env' }],
+  ['PowerShell', { command: 'Get-Date <#\nnotes about .env\n#>' }, { command: 'Get-Date <#\nnotes\n#> Get-Content .env' }],
+  // A quoted wildcard stays text (control: unquoted), also after a name= in one word.
+  ['Bash', { command: "jq --arg k='.*' . package.json" }, { command: 'jq --arg k=.* . package.json' }],
+  ['Bash', { command: 'cat src/".e"x' }, { command: 'cat src/.e"n"v' }],
+  // Redirection: the target is the only difference.
+  ['Bash', { command: 'cat < src/main.js' }, { command: 'cat < .env' }],
+  ['Bash', { command: 'echo x > out.txt' }, { command: 'echo x > .env' }],
+  ['PowerShell', { command: 'Get-Content x > out.txt' }, { command: 'Get-Content x > .env' }],
+  // Quoted wildcard stays text: closed quote vs open quote, no substitution vs one.
+  ['Bash', { command: "cat '.*'" }, { command: "cat '.*" }],
+  ['Bash', { command: 'cat ".*"' }, { command: 'cat ".*$(true)"' }],
+  // iex is not a nested shell in Bash: the quoted wildcard stays text (control: bash is).
+  ['Bash', { command: "echo iex; jq '.*' package.json" }, { command: "echo bash; jq '.*' package.json" }],
+  // # after a blank is a comment; right after { it is not.
+  ['Bash', { command: 'echo a #,.env' }, { command: 'echo a{#,.env}' }],
+  // PowerShell: { opens a scriptblock, so # after it is a comment.
+  ['PowerShell', { command: 'Get-Date {#,.env}' }, { command: 'Get-Date {x,.env}' }],
+  // <# at a token start is a comment; inside a word it is text.
+  ['PowerShell', { command: 'gc a <# .env #>' }, { command: 'gc a<# .env #>' }],
+)
+
+test('past the nesting limit the raw text is still scanned', () => {
+  const deep = (inner) => `echo ${'$('.repeat(9)}${inner}${')'.repeat(9)}`
+  deny(runGuard('env-guard', call('Bash', { command: deep('cat .env') }), fx))
+  allow(runGuard('env-guard', call('Bash', { command: deep('cat src/main.js') }), fx))
+})
+
 for (const [tool, input] of DENY) {
   test(`deny ${tool} ${JSON.stringify(input)}`, () => {
     const r = deny(runGuard('env-guard', call(tool, input), fx))
@@ -214,4 +273,8 @@ test('every guarded tool has deny and allow cases', () => {
     assert.ok(ALLOW.some(([t]) => t === tool), `no allow case for ${tool}`)
   }
   assert.ok(ALLOW.every((row) => row.length === 3 && row[2]), 'an allow row has no deny control')
+  assert.ok(
+    ALLOW.every(([, input, control]) => JSON.stringify(input) !== JSON.stringify(control)),
+    'an allow row is its own control',
+  )
 })

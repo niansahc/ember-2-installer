@@ -59,9 +59,14 @@
 // scan, so a commit message may mention .env. Any other message value is
 // scanned.
 //
-// Limits: a name built at runtime (`.e""nv`, PowerShell backtick escapes,
-// base64, a script that opens the file, an 8.3 short name) is not caught,
-// nor is a recursive read that never names the file (grep -r KEY .).
+// Words come from parseShell, so quote-split and escaped names (`.e"n"v`,
+// `.en\v`, PowerShell `.`env`) are read as the name they make, and comments
+// (`#`, PowerShell `<# #>`) are not scanned. A command nested past MAX_DEPTH
+// falls back to a regex split of its raw text (unparsedWords; over-denies).
+//
+// Limits: a name built at runtime (a variable, base64, a script that opens
+// the file, an 8.3 short name) is not caught, nor is a recursive read that
+// never names the file (grep -r KEY .).
 //
 // Input: hook JSON on stdin. Output: a deny decision on stdout, or nothing.
 // Exit code is always 0. Fail closed: an exception inside the check is a
@@ -70,7 +75,7 @@
 'use strict'
 
 const {
-  SHELLS, SHELL_TOOLS, WILDCARD, bracketEnd, commandName, cutSpans, dropLiteralHeredocs, fnmatch, main,
+  SHELLS, SHELL_TOOLS, WILDCARD, bracketEnd, commandName, dropLiteralHeredocs, fnmatch, main,
   parseOrNull, pipelines, proseFlagPrefix, proseValues, toolCall,
 } = require('./hook-utils.cjs')
 
@@ -239,8 +244,8 @@ const PATH_FIELDS = new Map([
 // Quotes, separators, redirections and `=` (for --path=.env) all delimit.
 // Backslashes do NOT, so Windows paths survive intact.
 const TOKEN_SPLIT = /[\s"'`;|&<>(){}=,]+/
-// A closed quoted span, a lone unmatched quote, or an unquoted run.
-const SPAN = /"(?:[^"\\]|\\.)*"|'[^']*'|["']|[^"']+/g
+/** The names in a run of text. */
+const pieces = (text) => text.split(TOKEN_SPLIT).filter(Boolean)
 // Flags whose value the program matches as a glob against file names.
 const GLOB_FLAGS = new Set([
   '-name', '-iname', '-path', '-ipath', '-wholename', '-iwholename',
@@ -248,28 +253,57 @@ const GLOB_FLAGS = new Set([
 ])
 
 /**
- * The command with each git/gh message value (proseValues) cut out when it
- * is quoted end to end (nothing read outside quotes but, on a
- * --message="..." word, the flag itself; no quote left open) and runs no
- * substitution: bash runs `$(cat .env)` inside double quotes, and its
- * output would land in the commit or PR text. Too deeply nested to parse:
- * unchanged, so all of it is scanned.
+ * True when a git/gh message value is quoted end to end (nothing read
+ * outside quotes but, on a --message="..." word, the flag itself; no quote
+ * left open) and runs no substitution: bash runs `$(cat <file>)` inside
+ * double quotes, and its output would land in the commit or PR text.
  */
-function withoutProse(command, flavor) {
-  const script = parseOrNull(command, flavor)
-  if (!script) return command
-  const cuts = []
-  for (const pipeline of pipelines(script)) {
-    for (const st of pipeline) {
-      for (const k of proseValues(st.words.map((w) => w.text))) {
-        const w = st.words[k]
-        if (!w || w.subs.length || w.open) continue
-        const flag = proseFlagPrefix(w.text)
-        if (w.bare === '' || (flag && w.bare === flag)) cuts.push(w)
-      }
+function isProse(w) {
+  if (w.subs.length || w.open) return false
+  const flag = proseFlagPrefix(w.text)
+  return w.bare === '' || (flag !== '' && w.bare === flag)
+}
+
+/**
+ * Add the candidate names of one parsed word to `out` as [name, quoted]: the
+ * pieces of each quote part (`quoted` when, in Bash, the part is in quotes
+ * and runs no substitution, so its wildcards are text), plus the pieces of
+ * the whole word that no part holds (a name split by quotes is one name).
+ */
+function addWord(w, out) {
+  const seen = new Set()
+  for (const part of w.parts) {
+    const quoted = part.quote !== null && !w.open && !(part.quote === '"' && w.subs.length > 0)
+    for (const piece of pieces(part.text)) {
+      seen.add(piece)
+      out.push([piece, quoted])
     }
   }
-  return cutSpans(command, cuts, ' ')
+  if (w.parts.length > 1) for (const piece of pieces(w.text)) if (!seen.has(piece)) out.push([piece, false])
+  for (const sub of w.subs) addScript(sub, out)
+}
+
+function addScript(script, out) {
+  for (const pipeline of pipelines(script)) {
+    for (const st of pipeline) {
+      const prose = proseValues(st.words.map((w) => w.text))
+      st.words.forEach((w, k) => {
+        if (!(prose.has(k) && isProse(w))) addWord(w, out)
+      })
+      for (const w of st.redirs) addWord(w, out)
+      // A heredoc body is text (literal ones were dropped already); the
+      // substitutions in it are inside that text.
+      for (const h of st.heredocs) for (const piece of pieces(h.body)) out.push([piece, false])
+    }
+  }
+}
+
+/**
+ * The words of a command that could not be parsed (nested past MAX_DEPTH):
+ * regex-split raw text, all of it scanned. Over-denies (comments, prose).
+ */
+function unparsedWords(command) {
+  return pieces(command).map((w) => [w, false])
 }
 
 /**
@@ -277,19 +311,12 @@ function withoutProse(command, flavor) {
  * runs no nested shell, the shell passes the word's wildcards through as text.
  */
 function words(command, bash) {
-  const spans = (withoutProse(command, bash ? 'bash' : 'ps').match(SPAN) || []).map((span) => [
-    span,
-    span.split(TOKEN_SPLIT).filter(Boolean),
-  ])
-  if (bash && spans.some(([, ws]) => ws.some((w) => SHELLS.has(commandName(w))))) bash = false
+  const script = parseOrNull(command, bash ? 'bash' : 'ps')
+  if (!script) return unparsedWords(command)
   const out = []
-  for (const [span, ws] of spans) {
-    const quoted =
-      bash && span.length > 1 && (span[0] === '"' || span[0] === "'") &&
-      !(span[0] === '"' && (span.includes('$(') || span.includes('`')))
-    for (const word of ws) out.push([word, quoted])
-  }
-  return out
+  addScript(script, out)
+  const nested = out.some(([w]) => SHELLS.has(commandName(w)))
+  return out.map(([w, quoted]) => [w, bash && !nested && quoted])
 }
 
 /** The first word of a shell command that names a .env file, or null. */
