@@ -449,7 +449,7 @@ function parseShell(command, flavor, depth = 0) {
     }
     flush()
     // An operator with no line after it inside this level has no body.
-    return { tokens }
+    return { tokens, bash }
   }
 
   return script(depth, null, false)
@@ -560,7 +560,7 @@ function expandFrom(text, live, steps) {
       const bounds = [p, ...cuts, q]
       parts = bounds.slice(0, -1).map((from, k) => [text.slice(from + 1, bounds[k + 1]), live.slice(from + 1, bounds[k + 1])])
     } else {
-      const seq = live.slice(p + 1, q) === '1'.repeat(q - p - 1) ? rangeWords(text.slice(p + 1, q)) : null
+      const seq = !live.slice(p + 1, q).includes('0') ? rangeWords(text.slice(p + 1, q)) : null
       if (!seq) continue
       parts = seq.map((v) => [v, '0'.repeat(v.length)])
     }
@@ -583,6 +583,7 @@ function expandFrom(text, live, steps) {
  * empty unquoted word). Throws BraceOverflow past the caps.
  */
 function expandBraces(text, live) {
+  if (!text.includes('{')) return text ? [text] : []
   const out = expandFrom(text, live, 0)
   return live.includes('0') ? out : out.filter(Boolean)
 }

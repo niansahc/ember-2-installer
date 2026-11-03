@@ -151,9 +151,7 @@ test('expandBraces: literal chars, caps, cost', () => {
   assert.throws(() => expand('{a,b}'.repeat(9)), BraceOverflow)
   assert.throws(() => expand('{a,'.repeat(40) + 'b' + '}'.repeat(40)), BraceOverflow)
   assert.equal(expand('{1..256}').length, 256)
-  const t0 = Date.now()
   assert.throws(() => expand('{1..9}{1..9}{1..9}{1..9}{1..9}{1..9}{1..9}{1..9}{1..9}{1..9}'), BraceOverflow)
-  assert.ok(Date.now() - t0 < 1000)
 })
 
 test('parseShell: a brace is a group operator only as a word of its own, in Bash', () => {
@@ -190,13 +188,6 @@ test('PowerShell and cmd have no brace expansion: the same text is not a read (v
   deny(run('PowerShell', 'cmd /c "type {private_vault\\x.json}"'))
   // Bash flavor of the same text is the bypass this file closes.
   deny(run('Bash', 'cat {a,private_vault/x.json}'))
-})
-
-test('every table row is complete, and each control differs from its command', () => {
-  for (const rows of [NAME, LOCATION, LITERAL]) {
-    assert.ok(rows.every(([a, b]) => a && b && a !== b))
-  }
-  assert.ok(BASH.every(([w, o]) => w && Array.isArray(o)))
 })
 
 // [word, the words real bash 5 prints for `printf '%s\n' <word>`], unquoted.

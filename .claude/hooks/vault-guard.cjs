@@ -122,8 +122,6 @@ const {
   expandBraces,
 } = require('./hook-utils.cjs')
 
-class BraceLimit extends Error {}
-
 const GUARD = 'vault-guard'
 const VAULT_DIR = 'private_vault'
 const VAULT_KEY = 'PRIVATE_VAULT_PATH'
@@ -477,7 +475,9 @@ function pipedToEval(before) {
  * the word it came from. Past a cap (a word, or the stage) nothing is
  * expanded and `overflow` is true.
  */
-function braceWords(stage) {
+function braceWords(stage, bash) {
+  const plain = { words: stage.words, redirs: stage.redirs, overflow: false }
+  if (!bash) return plain
   // A word with a substitution is never empty: the substitution is its value.
   const spread = (list) =>
     list.map((w) => {
@@ -485,12 +485,12 @@ function braceWords(stage) {
       return (texts.length || !w.subs.length ? texts : ['']).map((text) => ({ ...w, text }))
     })
   try {
-    const words = spread(stage.words)
-    const redirs = spread(stage.redirs)
-    if ([...words, ...redirs].reduce((n, alts) => n + alts.length, 0) > MAX_BRACE_STAGE) throw new BraceOverflow()
-    return { words: words.flat(), redirs: redirs.flat(), overflow: false }
+    const words = spread(stage.words).flat()
+    const redirs = spread(stage.redirs).flat()
+    if (words.length + redirs.length > MAX_BRACE_STAGE) throw new BraceOverflow()
+    return { words, redirs, overflow: false }
   } catch (err) {
-    if (err instanceof BraceOverflow) return { words: stage.words, redirs: stage.redirs, overflow: true }
+    if (err instanceof BraceOverflow) return { ...plain, overflow: true }
     throw err
   }
 }
@@ -505,7 +505,7 @@ function braceWords(stage) {
  * `at` the index of the utility word in `words`.
  */
 function analyse(stage, level, bash) {
-  const { words: spelled, redirs: targets, overflow } = bash ? braceWords(stage) : { words: stage.words, redirs: stage.redirs, overflow: false }
+  const { words: spelled, redirs: targets, overflow } = braceWords(stage, bash)
   const start = commandStart(spelled.map((w) => w.text))
   const parsed = spelled.slice(start)
   const words = parsed.map((w) => w.text)
@@ -717,28 +717,28 @@ function stageReaches(direct, base, vaults) {
 function scanCommand(command, state, flavor, level) {
   const script = parseShell(command, flavor, level)
   const literal = flavor === 'bash' ? literalHeredocs(script) : new Set()
-  return scanScript(script, state, literal, level, flavor === 'bash')
+  return scanScript(script, state, literal, level)
 }
 
-function scanScript(script, state, literal, level, bash) {
+function scanScript(script, state, literal, level) {
   if (level > MAX_DEPTH) throw new NestingLimit()
   // Substitutions run first, as commands of their own.
   for (const token of script.tokens) {
     if (typeof token === 'string' || token.heredoc) continue
     for (const sub of token.subs) {
-      const hit = scanScript(sub, state, literal, level + 1, bash)
+      const hit = scanScript(sub, state, literal, level + 1)
       if (hit) return hit
     }
   }
   for (const pipeline of pipelines(script)) {
-    const stages = pipeline.map((st) => analyse(st, level, bash))
+    const stages = pipeline.map((st) => analyse(st, level, script.bash))
     // Too many words to expand: a stage that reads or lists cannot be checked.
-    if (stages.some((s) => s.overflow && !NON_READING.has(s.runner))) throw new BraceLimit()
+    if (stages.some((s) => s.overflow && !NON_READING.has(s.runner))) throw new BraceOverflow()
     // Heredocs: the substitutions Bash runs in an unquoted body, and every
     // body that is not literal text for an inert consumer, as commands.
     for (const h of stages.flatMap((s) => s.heredocs)) {
       for (const sub of h.subs) {
-        const hit = scanScript(sub, state, literal, level + 1, bash)
+        const hit = scanScript(sub, state, literal, level + 1)
         if (hit) return hit
       }
       const hit = !literal.has(h) && scanCommand(h.body, state, 'bash', level + 1)
@@ -794,7 +794,7 @@ function evaluate(payload) {
       return utility ? { kind: 'shell', target: utility, tool } : null
     } catch (err) {
       if (err instanceof NestingLimit) return { kind: 'nesting', target: null, tool }
-      if (err instanceof BraceLimit) return { kind: 'brace', target: null, tool }
+      if (err instanceof BraceOverflow) return { kind: 'brace', target: null, tool }
       throw err
     }
   }
