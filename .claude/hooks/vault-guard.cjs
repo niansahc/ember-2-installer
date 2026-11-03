@@ -90,6 +90,15 @@
 // followed MAX_DEPTH (8) levels deep. A command nested deeper is denied
 // with a reason that names the nesting limit.
 //
+// Bash brace expansion: a word's unquoted, unescaped braces are expanded
+// before any rule runs ({a,b}, nested lists, prefix and suffix, products,
+// {1..3} / {a..e} / {1..10..2} ranges), as Bash does, so cat {a,private_vault/x}
+// and cat private_{vault,x}/f name the vault. Caps: 256 words from one word,
+// 1024 in one command stage; past a cap nothing is expanded and a stage that
+// is not a printer (echo, printf, ...) is denied with a reason naming the
+// brace limit. PowerShell and cmd have no brace expansion ({...} there is a
+// scriptblock, or text).
+//
 // PowerShell: <# ... #> block comments are not commands (an unterminated one
 // is scanned as code). iex / Invoke-Expression [-Command[:]] <string> runs the
 // string as a command, and so does text piped into iex from a literal or a
@@ -108,9 +117,12 @@
 const fs = require('fs')
 const path = require('path')
 const {
-  MAX_DEPTH, NestingLimit, PS_EVAL, SHELL_TOOLS, WILDCARD, absolutePath, commandName, commandStart, expandUser, fnmatch,
+  BraceOverflow, MAX_BRACE_STAGE, MAX_BRACE_WORD, MAX_DEPTH, NestingLimit, PS_EVAL, SHELL_TOOLS, WILDCARD, absolutePath, commandName, commandStart, expandUser, fnmatch,
   literalHeredocs, main, nestedCommand, parseShell, pipelines, projectDir, proseValues, toolCall,
+  expandBraces,
 } = require('./hook-utils.cjs')
+
+class BraceLimit extends Error {}
 
 const GUARD = 'vault-guard'
 const VAULT_DIR = 'private_vault'
@@ -460,6 +472,30 @@ function pipedToEval(before) {
 }
 
 /**
+ * The stage's words and redirection targets after Bash brace expansion, as
+ * { words, redirs, overflow }: each expanded word keeps the substitutions of
+ * the word it came from. Past a cap (a word, or the stage) nothing is
+ * expanded and `overflow` is true.
+ */
+function braceWords(stage) {
+  // A word with a substitution is never empty: the substitution is its value.
+  const spread = (list) =>
+    list.map((w) => {
+      const texts = expandBraces(w.text, w.live)
+      return (texts.length || !w.subs.length ? texts : ['']).map((text) => ({ ...w, text }))
+    })
+  try {
+    const words = spread(stage.words)
+    const redirs = spread(stage.redirs)
+    if ([...words, ...redirs].reduce((n, alts) => n + alts.length, 0) > MAX_BRACE_STAGE) throw new BraceOverflow()
+    return { words: words.flat(), redirs: redirs.flat(), overflow: false }
+  } catch (err) {
+    if (err instanceof BraceOverflow) return { words: stage.words, redirs: stage.redirs, overflow: true }
+    throw err
+  }
+}
+
+/**
  * A parsed stage as { words, output, prose, redirs, heredocs, runner,
  * utility, at }: `words` the texts from the command the stage runs,
  * `output[k]` the words the substitutions in words[k] print (none for a
@@ -468,9 +504,10 @@ function pipedToEval(before) {
  * command, `utility` the one that reads (for `xargs [flags] cmd`, cmd) and
  * `at` the index of the utility word in `words`.
  */
-function analyse(stage, level) {
-  const start = commandStart(stage.words.map((w) => w.text))
-  const parsed = stage.words.slice(start)
+function analyse(stage, level, bash) {
+  const { words: spelled, redirs: targets, overflow } = bash ? braceWords(stage) : { words: stage.words, redirs: stage.redirs, overflow: false }
+  const start = commandStart(spelled.map((w) => w.text))
+  const parsed = spelled.slice(start)
   const words = parsed.map((w) => w.text)
   const runner = words.length ? commandName(words[0]) : ''
   let at = 0
@@ -484,7 +521,8 @@ function analyse(stage, level) {
     words,
     output: parsed.map((w, k) => (prose.has(k) ? [] : printed(w))),
     prose,
-    redirs: stage.redirs.flatMap((w) => [w.text, ...printed(w)]).filter(Boolean),
+    overflow,
+    redirs: targets.flatMap((w) => [w.text, ...printed(w)]).filter(Boolean),
     heredocs: stage.heredocs,
     runner,
     utility: words.length ? commandName(words[at]) : '',
@@ -679,26 +717,28 @@ function stageReaches(direct, base, vaults) {
 function scanCommand(command, state, flavor, level) {
   const script = parseShell(command, flavor, level)
   const literal = flavor === 'bash' ? literalHeredocs(script) : new Set()
-  return scanScript(script, state, literal, level)
+  return scanScript(script, state, literal, level, flavor === 'bash')
 }
 
-function scanScript(script, state, literal, level) {
+function scanScript(script, state, literal, level, bash) {
   if (level > MAX_DEPTH) throw new NestingLimit()
   // Substitutions run first, as commands of their own.
   for (const token of script.tokens) {
     if (typeof token === 'string' || token.heredoc) continue
     for (const sub of token.subs) {
-      const hit = scanScript(sub, state, literal, level + 1)
+      const hit = scanScript(sub, state, literal, level + 1, bash)
       if (hit) return hit
     }
   }
   for (const pipeline of pipelines(script)) {
-    const stages = pipeline.map((st) => analyse(st, level))
+    const stages = pipeline.map((st) => analyse(st, level, bash))
+    // Too many words to expand: a stage that reads or lists cannot be checked.
+    if (stages.some((s) => s.overflow && !NON_READING.has(s.runner))) throw new BraceLimit()
     // Heredocs: the substitutions Bash runs in an unquoted body, and every
     // body that is not literal text for an inert consumer, as commands.
     for (const h of stages.flatMap((s) => s.heredocs)) {
       for (const sub of h.subs) {
-        const hit = scanScript(sub, state, literal, level + 1)
+        const hit = scanScript(sub, state, literal, level + 1, bash)
         if (hit) return hit
       }
       const hit = !literal.has(h) && scanCommand(h.body, state, 'bash', level + 1)
@@ -754,6 +794,7 @@ function evaluate(payload) {
       return utility ? { kind: 'shell', target: utility, tool } : null
     } catch (err) {
       if (err instanceof NestingLimit) return { kind: 'nesting', target: null, tool }
+      if (err instanceof BraceLimit) return { kind: 'brace', target: null, tool }
       throw err
     }
   }
@@ -779,6 +820,14 @@ function reason({ kind, target, tool }) {
       `past the nesting limit (${MAX_DEPTH} levels), so it cannot be checked for ` +
       `vault reads and is denied. Split it into simpler commands. See ` +
       `.claude/hooks/${GUARD}.cjs.`
+    )
+  }
+  if (kind === 'brace') {
+    return (
+      `Vault Privacy Rule: this command has a brace expansion past the limit (` +
+      `${MAX_BRACE_WORD} words from one word, ${MAX_BRACE_STAGE} in one command), so it ` +
+      `cannot be checked for vault reads and is denied. Split it into simpler ` +
+      `commands. See .claude/hooks/${GUARD}.cjs.`
     )
   }
   if (kind === 'shell') {
