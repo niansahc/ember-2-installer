@@ -159,12 +159,15 @@ function fnmatch(name, pattern) {
 const MAX_DEPTH = 8
 class NestingLimit extends Error {}
 
-// Characters that end a word and stand as operators (with `(` and `)`).
+// Characters that end a word and stand as operators (with `(` and `)`). In
+// Bash, { and } are operators only as a word of their own (see parseShell);
+// PowerShell and cmd keep them as operators.
 const OPERATORS = ';<>|&{}'
 
 /**
- * A shell command parsed for both guards: { tokens }, each token an operator
- * string, a word { text, bare, subs, start, end, open }, or { heredoc } where
+ * A shell command parsed for both guards: { tokens, bash }, each token an
+ * operator string, a word { text, bare, live, parts, subs, start, end, open },
+ * or { heredoc } where
  * a heredoc operator stands. `subs` are the parsed bodies of the
  * substitutions inside the word: $(...), and in Bash `...`, <(...) and
  * >(...). `bare` is the part of `text` read outside quotes, `start`/`end`
@@ -184,6 +187,10 @@ const OPERATORS = ';<>|&{}'
  *   - A literal backslash becomes `/`, so a Windows path stays a path.
  *   - A quote left open runs to the end of the command: its text is still
  *     scanned.
+ *   - Bash: { and } are group operators only as a word of their own
+ *     ({ cmd; }); inside a word they are text (cat {a,b}), read by expandBraces.
+ *   - word.live marks each char of text: 1 where Bash may read it as syntax,
+ *     0 where it is quoted, escaped or inside ${...}.
  *   - A newline is the `;` operator; `#` at a word start begins a comment.
  *   - PowerShell: `<# ... #>` is a block comment ending at the first `#>`;
  *     unterminated, the text after `<#` is scanned as code.
@@ -285,14 +292,17 @@ function parseShell(command, flavor, depth = 0) {
     let quote = null
     let parens = 0
     let pending = []
-    const cur = () => (word ||= { text: '', bare: '', parts: [], subs: [], start: i })
+    const cur = () => (word ||= { text: '', bare: '', live: '', parts: [], subs: [], start: i })
     // Text added to the word, recorded in word.parts under the quote it was read in.
-    const addText = (w, t) => {
+    // word.live marks each char of text: 1 when Bash may read it as expansion syntax
+    // (unquoted, unescaped, outside ${...}), 0 when literal.
+    const addText = (w, t, literal = false) => {
       const q = quote === null ? null : quote[quote.length - 1]
       const last = w.parts[w.parts.length - 1]
       if (last && last.quote === q) last.text += t
       else w.parts.push({ text: t, quote: q })
       w.text += t
+      w.live += (q === null && !literal ? '1' : '0').repeat(t.length)
       if (quote === null) w.bare += t
     }
     const flush = () => {
@@ -303,9 +313,9 @@ function parseShell(command, flavor, depth = 0) {
       }
       word = null
     }
-    const append = (ch) => {
+    const append = (ch, literal = false) => {
       const w = cur()
-      addText(w, ch === '\\' ? '/' : ch)
+      addText(w, ch === '\\' ? '/' : ch, literal)
     }
     const sub = (skip, end) => {
       const isArith = end === ')' && s[i + skip] === '('
@@ -338,7 +348,7 @@ function parseShell(command, flavor, depth = 0) {
           append(c)
           i++
         } else {
-          append(n)
+          append(n, true)
           i += 2
         }
       } else if (ps && c === '`' && n !== undefined) {
@@ -398,15 +408,14 @@ function parseShell(command, flavor, depth = 0) {
       } else if (c === ' ' || c === '\t' || c === '\r') {
         flush()
         i++
-      } else if (c === '#' && word === null && !cmd && !(bash && (s[i - 1] === '{' || s[i - 1] === '}'))) {
-        // Bash: after { or } the # is brace-expansion text ({#,x}), not a comment.
+      } else if (c === '#' && word === null && !cmd) {
         const nl = s.indexOf('\n', i)
         i = nl < 0 ? s.length : nl
       } else if (c === '$' && n === '{') {
         const end = s.indexOf('}', i)
         const stop = end < 0 ? s.length : end + 1
         const w = cur()
-        addText(w, s.slice(i, stop).replace(/\\/g, '/'))
+        addText(w, s.slice(i, stop).replace(/\\/g, '/'), true)
         i = stop
       } else if (bash && (c === '<' || c === '>') && n === '(') {
         // Process substitution: a word of its own (a /dev/fd name).
@@ -417,6 +426,11 @@ function parseShell(command, flavor, depth = 0) {
         flush()
         tokens.push(c)
         parens += c === '(' ? 1 : -1
+        i++
+      } else if (bash && (c === '{' || c === '}') && !(word === null && /^[\s;&|()]?$/.test(s[i + 1] ?? ''))) {
+        // Bash: a brace is group syntax only as a word of its own ({ cmd; });
+        // anywhere else it is word text, and brace expansion reads it ({a,b}).
+        append(c)
         i++
       } else if (OPERATORS.includes(c)) {
         flush()
@@ -438,7 +452,7 @@ function parseShell(command, flavor, depth = 0) {
     }
     flush()
     // An operator with no line after it inside this level has no body.
-    return { tokens }
+    return { tokens, bash }
   }
 
   return script(depth, null, false)
@@ -476,6 +490,135 @@ function pipelines(script) {
   return out
     .map((p) => p.filter((st) => st.words.length || st.redirs.length || st.heredocs.length))
     .filter((p) => p.length)
+}
+
+// ---------------------------------------------------------------------------
+// Bash brace expansion
+// ---------------------------------------------------------------------------
+
+// Caps, so a hostile or accidental {1..99999999} costs nothing: words from one
+// brace word, words in one command stage, and brace expressions expanded in
+// one word. Past a cap the expansion is not attempted (BraceOverflow).
+const MAX_BRACE_WORD = 256
+const MAX_BRACE_STAGE = 1024
+const MAX_BRACE_STEPS = 32
+// Live { in one word. The scan for each is linear in the word, so this bounds
+// the work (a word of 16384 { took 0.65 s, 65536 took 9.6 s before the cap).
+const MAX_LIVE_BRACES = 256
+// A Bash or PowerShell command longer than this is denied by both guards
+// before it is parsed: a PreToolUse hook that times out does not block the
+// call, and parse time grows faster than length (a chain of 16384 characters
+// of pipes or $() takes about 0.6 s, 64 K takes 2 s).
+const MAX_COMMAND_CHARS = 16384
+
+class BraceOverflow extends Error {}
+
+const RANGE = /^([+-]?\d+|[A-Za-z])\.\.([+-]?\d+|[A-Za-z])(?:\.\.([+-]?\d+))?$/
+
+/** True when `body` is a {x..y[..step]} body: two integers or two letters. */
+function isRange(body) {
+  const m = body.match(RANGE)
+  return !!m && /^[+-]?\d/.test(m[1]) === /^[+-]?\d/.test(m[2])
+}
+
+/**
+ * The index of the live } closing the live { at `p`, or -1. As in Bash, a
+ * depth-0 } closes only after a depth-0 comma or when the body so far is a
+ * range; any other depth-0 } is text and the scan goes on ({a},b} is the
+ * words "a}" and "b").
+ */
+function closingBrace(text, live, p) {
+  let depth = 0
+  let commas = 0
+  for (let j = p + 1; j < text.length; j++) {
+    if (live[j] !== '1') continue
+    const c = text[j]
+    if (c === '{') depth++
+    else if (c === '}') {
+      if (depth > 0) depth--
+      else if (commas > 0 || (!live.slice(p + 1, j).includes('0') && isRange(text.slice(p + 1, j)))) return j
+    } else if (c === ',' && depth === 0) commas++
+  }
+  return -1
+}
+
+/** The live top-level commas strictly between `p` and `q`. */
+function topLevelCommas(text, live, p, q) {
+  const cuts = []
+  let depth = 0
+  for (let j = p + 1; j < q; j++) {
+    if (live[j] !== '1') continue
+    if (text[j] === '{') depth++
+    else if (text[j] === '}') depth = Math.max(0, depth - 1)
+    else if (text[j] === ',' && depth === 0) cuts.push(j)
+  }
+  return cuts
+}
+
+/** The words of a {x..y[..step]} body (two integers or two letters), or null. Counted before generated. */
+function rangeWords(body) {
+  if (!isRange(body)) return null
+  const [, a, b, inc] = body.match(RANGE)
+  const numeric = /^[+-]?\d/.test(a)
+  const step = inc === undefined ? 1 : Math.abs(Number(inc)) || 1 // step 0 is 1
+  const x = numeric ? Number(a) : a.charCodeAt(0)
+  const y = numeric ? Number(b) : b.charCodeAt(0)
+  const count = Math.floor(Math.abs(y - x) / step) + 1
+  if (count > MAX_BRACE_WORD) throw new BraceOverflow()
+  const digits = (v) => v.replace(/^[+-]/, '').length
+  const pad = numeric && (/^[+-]?0\d/.test(a) || /^[+-]?0\d/.test(b)) ? Math.max(digits(a), digits(b)) : 0
+  const out = []
+  for (let k = 0, v = x; k < count; k++, v += y >= x ? step : -step) {
+    if (!numeric) out.push(String.fromCharCode(v))
+    else out.push(pad ? (v < 0 ? '-' : '') + String(Math.abs(v)).padStart(pad, '0') : String(v))
+  }
+  return out
+}
+
+function expandFrom(text, live, steps) {
+  if (steps > MAX_BRACE_STEPS) throw new BraceOverflow()
+  for (let p = 0; p < text.length; p++) {
+    if (live[p] !== '1' || text[p] !== '{') continue
+    if (p === 0 && text[1] === '}' && live[1] === '1') continue // a leading {} is text
+    const q = closingBrace(text, live, p)
+    if (q < 0) continue
+    const cuts = topLevelCommas(text, live, p, q)
+    let parts // [replacement text, replacement live]
+    if (cuts.length) {
+      const bounds = [p, ...cuts, q]
+      parts = bounds.slice(0, -1).map((from, k) => [text.slice(from + 1, bounds[k + 1]), live.slice(from + 1, bounds[k + 1])])
+    } else {
+      const seq = !live.slice(p + 1, q).includes('0') ? rangeWords(text.slice(p + 1, q)) : null
+      if (!seq) continue
+      parts = seq.map((v) => [v, '0'.repeat(v.length)])
+    }
+    const out = []
+    for (const [t, l] of parts) {
+      out.push(...expandFrom(text.slice(0, p) + t + text.slice(q + 1), live.slice(0, p) + l + live.slice(q + 1), steps + 1))
+      if (out.length > MAX_BRACE_WORD) throw new BraceOverflow()
+    }
+    return out
+  }
+  return [text]
+}
+
+/**
+ * The words Bash makes of one word by brace expansion: {a,b}, nested lists,
+ * prefix and suffix, products, and {x..y[..step]} ranges; `live` is
+ * word.live (1 where a char may act as syntax). A quoted, escaped or ${...}
+ * brace, an unterminated one, {a} and an invalid range stay text. An empty
+ * result is dropped unless the word had a literal char (Bash removes an
+ * empty unquoted word). Throws BraceOverflow past the caps (words from the
+ * word, expansion steps, live braces in the word).
+ */
+function expandBraces(text, live) {
+  if (!text.includes('{')) return text ? [text] : []
+  let braces = 0
+  for (let j = 0; j < text.length; j++) {
+    if (live[j] === '1' && text[j] === '{' && ++braces > MAX_LIVE_BRACES) throw new BraceOverflow()
+  }
+  const out = expandFrom(text, live, 0)
+  return live.includes('0') ? out : out.filter(Boolean)
 }
 
 // ---------------------------------------------------------------------------
@@ -762,6 +905,17 @@ function runHook(guard, raw, evaluate, reason) {
   } catch (err) {
     return { stdout: '', stderr: `[${guard}] unparseable hook payload, allowing (${errorType(err)})\n` }
   }
+  const call = toolCall(payload)
+  if (call && SHELL_TOOLS.has(call.tool) && typeof call.input.command === 'string' && call.input.command.length > MAX_COMMAND_CHARS) {
+    return {
+      stdout: denial(
+        `${guard}: this command is ${call.input.command.length} characters, over the ${MAX_COMMAND_CHARS} limit, ` +
+          `so it cannot be checked in time and is denied. Split it into smaller commands or write the ` +
+          `content to a file. See .claude/hooks/${guard}.cjs.`,
+      ),
+      stderr: '',
+    }
+  }
   try {
     const target = evaluate(payload)
     return { stdout: target == null ? '' : denial(reason(target)), stderr: '' }
@@ -803,6 +957,13 @@ module.exports = {
   PS_EVAL,
   MAX_DEPTH,
   NestingLimit,
+  BraceOverflow,
+  MAX_BRACE_STAGE,
+  MAX_BRACE_STEPS,
+  MAX_BRACE_WORD,
+  MAX_COMMAND_CHARS,
+  MAX_LIVE_BRACES,
+  expandBraces,
   projectDir,
   expandUser,
   absolutePath,

@@ -433,9 +433,9 @@ test('parseShell: flavors differ where the shells do', () => {
   assert.deepEqual(texts('a "<# b #>" d', 'ps'), ['a', '<# b #>', 'd'])
   assert.deepEqual(texts('a <# b d', 'ps'), ['a', 'b', 'd']) // unterminated: scanned as code
   assert.deepEqual(texts('a<#b d', 'ps'), ['a<#b', 'd']) // inside a word: text
-  // Bash: <#b is a redirection and a comment; # after { or } is expansion text.
+  // Bash: <#b is a redirection and a comment; a brace inside a word is word text.
   assert.deepEqual(texts('a <#b d', 'bash'), ['a'])
-  assert.deepEqual(texts('echo {#,x}', 'bash'), ['echo', '#,x'])
+  assert.deepEqual(texts('echo {#,x}', 'bash'), ['echo', '{#,x}'])
   assert.deepEqual(texts('echo a #,x', 'bash'), ['echo', 'a'])
   // PowerShell: { opens a scriptblock, so # after it is a comment.
   assert.deepEqual(texts('echo {#,x}', 'ps'), ['echo'])
