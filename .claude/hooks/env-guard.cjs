@@ -75,7 +75,7 @@
 'use strict'
 
 const {
-  SHELLS, SHELL_TOOLS, WILDCARD, bracketEnd, commandName, dropLiteralHeredocs, fnmatch, main,
+  MAX_BRACE_WORD, MAX_LIVE_BRACES, SHELLS, SHELL_TOOLS, WILDCARD, bracketEnd, commandName, dropLiteralHeredocs, fnmatch, main,
   parseOrNull, pipelines, proseFlagPrefix, proseValues, toolCall,
 } = require('./hook-utils.cjs')
 
@@ -102,11 +102,21 @@ function canonicalNames(p) {
   return new Set([base, ...base.split(':')].map((part) => part.replace(/[. ]+$/, '')))
 }
 
-function expandBraces(pattern) {
+// A pattern whose brace sets would give more than MAX_BRACE_WORD alternatives,
+// or that holds more than MAX_LIVE_BRACES {, is not expanded: {a,b} x 20 is a
+// million alternatives, and a hook that runs out of time or memory does not
+// block the call. It is denied with a reason naming the limit.
+class BraceLimit extends Error {}
+
+function expandBraces(pattern, count = { n: 0 }) {
+  if (pattern.split('{').length - 1 > MAX_LIVE_BRACES) throw new BraceLimit()
   const brace = pattern.match(BRACE)
-  if (!brace) return [pattern]
+  if (!brace) {
+    if (++count.n > MAX_BRACE_WORD) throw new BraceLimit()
+    return [pattern]
+  }
   const [, head, alts, tail] = brace
-  return alts.split(',').flatMap((alt) => expandBraces(`${head}${alt}${tail}`))
+  return alts.split(',').flatMap((alt) => expandBraces(`${head}${alt}${tail}`, count))
 }
 
 // ---------------------------------------------------------------------------
@@ -332,6 +342,17 @@ function commandNamesEnvFile(command, bash = false) {
 
 /** The matched target when the tool call names a .env file, else null. */
 function evaluate(payload) {
+  try {
+    return check(payload)
+  } catch (err) {
+    if (err instanceof BraceLimit) return BRACE_LIMIT
+    throw err
+  }
+}
+
+const BRACE_LIMIT = Symbol('brace limit')
+
+function check(payload) {
   const call = toolCall(payload)
   if (!call) return null
   const { tool, input } = call
@@ -347,6 +368,13 @@ function evaluate(payload) {
 }
 
 function reason(target) {
+  if (target === BRACE_LIMIT) {
+    return (
+      `Blocked by project hook: a brace pattern in this call expands past the limit (` +
+      `${MAX_BRACE_WORD} alternatives, ${MAX_LIVE_BRACES} braces), so it cannot be checked for ` +
+      `.env names and is denied. Use a shorter pattern. See .claude/hooks/${GUARD}.cjs.`
+    )
+  }
   return (
     `Blocked by project hook: .env files may not be read, listed or edited ` +
     `(matched '${target}'). .env holds live credentials and anything read ` +

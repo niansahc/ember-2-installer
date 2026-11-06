@@ -52,6 +52,14 @@ const NAME = [
   ['{ cat {a,private_vault/x}; }', '{ cat {a,private_valve/x}; }'],
   ['cd . && cat {a,private_vault/x}', 'cd . && cat {a,private_valve/x}'],
   ['echo a | xargs cat {a,private_vault/x}', 'echo a | xargs cat {a,private_valve/x}'],
+  // A } before the first comma is text in Bash ({a},b} is "a}" and "b"), so the list goes on.
+  ['cat {a},private_vault/x}', 'cat {a},private_valve/x}'],
+  ['cat {a}b,private_vault/x}', 'cat {a}b,private_valve/x}'],
+  // The words a substitution prints are brace-expanded by the shell that runs it.
+  ['cat $(echo private_{vault,x}/a)', 'cat $(echo private_{valve,x}/a)'],
+  ['cat $(echo {a,private_vault/x})', 'cat $(echo {a,private_valve/x})'],
+  ['cat < $(echo {a,private_vault/x})', 'cat < $(echo {a,private_valve/x})'],
+  ['cat "$(echo private_{vault,x}/a)"', 'cat "$(echo private_{valve,x}/a)"'],
 ]
 
 // [deny, control]: the configured vault (ember-2/vaults/live), reached by location.
@@ -61,19 +69,22 @@ const LOCATION = [
   ['cat ember-2/{vaults/live,x}/a.json', 'cat ember-2/{vaults/other,x}/a.json'],
   ['cat ember-2/vaults/li{ve,x}/a.json', 'cat ember-2/vaults/li{vx,x}/a.json'],
   ['cat ember-2/vaults/{kept,{live,x}}/a.json', 'cat ember-2/vaults/{kept,{other,x}}/a.json'],
+  ['cat $(echo ember-2/vaults/li{ve,x}/a.json)', 'cat $(echo ember-2/vaults/li{vx,x}/a.json)'],
+  ['cat < $(echo ember-2/vaults/li{ve,}/a.json)', 'cat < $(echo ember-2/vaults/li{vx,}/a.json)'],
   ['rg KEY {ember-2-installer/src,ember-2/vaults}', 'rg KEY {ember-2-installer/src,ember-2/README.md}'],
   ['ls {src,ember-2/vaults/live}', 'ls {src,ember-2/vaults/other}'],
   ['grep -r KEY {ember-2-installer/src,ember-2}', 'grep -r KEY {ember-2-installer/src,ember-2/README.md}'],
 ]
 
-// [allow, deny control]: the brace is text (quoted, escaped, unterminated,
-// inside ${...} or not an expression), so Bash reads one literal name.
+// [allow, deny control]: the brace is text (quoted or escaped, or the list is
+// unterminated), so Bash reads one literal name. (${...} is in its own test.)
 const LITERAL = [
   ['cat "{a,private_vault/x}"', 'cat {a,private_vault/x}'],
   ["cat '{a,private_vault/x}'", 'cat {a,private_vault/x}'],
   ['cat \\{a,private_vault/x}', 'cat {a,private_vault/x}'],
   ['cat {a,private_vault/x\\}', 'cat {a,private_vault/x}'],
   ['cat {a,private_vault/x', 'cat {a,private_vault/x}'],
+  ['cat $(echo "private_{vault,x}/a")', 'cat $(echo private_{vault,x}/a)'],
 ]
 
 test('brace expansion: each bypass denied, each control allowed (name rule)', async (t) => {
@@ -103,7 +114,7 @@ test('brace expansion: quoted, escaped and unterminated braces do not expand', a
   }
 })
 
-test('brace expansion: ${...} and a glob inside a word are not brace syntax', () => {
+test('brace expansion: a brace inside ${...} is not brace syntax', () => {
   allow(run('Bash', 'cat ${x:-{a,private_vault/x}}')) // the known ${x:-path} limit, as before
   deny(run('Bash', 'cat ${x:-a}/{b,private_vault/x}'))
   allow(run('Bash', 'cat ${x:-a}/{b,private_valve/x}'))
@@ -125,6 +136,60 @@ test('caps: over the cap a reading stage is denied with its own reason; at the c
   // The cap does not hide a vault name that is within it.
   deny(run('Bash', 'cat f{1..256} private_vault/x'))
   deny(run('Bash', 'echo {1..100000} > private_vault/x'))
+})
+
+// Words a stage gains by expansion count against the stage cap; its plain words do not.
+test('caps: the stage cap counts words added by expansion, not plain words', () => {
+  const plain = (n) => Array.from({ length: n }, (_, i) => `f${i}`).join(' ')
+  allow(run('Bash', `cat ${plain(1100)}`)) // 1100 plain words: no expansion, no cap
+  allow(run('Bash', `git add ${plain(1100)}`))
+  deny(run('Bash', `cat ${plain(1100)} private_vault/x`)) // still scanned
+  // Exactly at the cap: 4 x 256 + 6 words, 1024 added; one more word over.
+  const at = Array(4).fill('{1..256}').join(' ')
+  allow(run('Bash', `cat ${at} {1..5}`))
+  const over = deny(run('Bash', `cat ${at} {1..6}`))
+  assert.match(over.reason, /brace expansion past the limit/)
+  allow(run('Bash', `echo ${at} {1..6}`)) // a last-stage printer is exempt
+})
+
+test('caps: expansion steps and live braces in one word', () => {
+  allow(run('Bash', `cat ${'{5..5}'.repeat(32)}`)) // 32 steps
+  const steps = deny(run('Bash', `cat ${'{5..5}'.repeat(33)}`))
+  assert.match(steps.reason, /32 expansion steps/)
+  assert.match(steps.reason, /256 braces in one word/)
+  allow(run('Bash', `cat ${'{'.repeat(256)}`)) // 256 live braces, no list
+  deny(run('Bash', `cat ${'{'.repeat(257)}`))
+  allow(run('Bash', `cat "${'{'.repeat(300)}"`)) // quoted braces are not live
+  allow(run('Bash', `echo ${'{'.repeat(300)}`)) // a last-stage printer is exempt
+  deny(run('Bash', `echo ${'{'.repeat(300)} | xargs cat`)) // its words feed a reader
+  assert.throws(() => expand('{'.repeat(257)), BraceOverflow)
+  assert.equal(expand('{'.repeat(256)).length, 1)
+})
+
+test('caps: an overflowing printer stage still cannot hide a read or a redirect target', () => {
+  // Its words feed the next stage.
+  deny(run('Bash', 'echo {1..300} ember-2/vaults/li{ve,x}/a.json | xargs cat'))
+  deny(run('Bash', 'echo {1..300} | xargs cat'))
+  allow(run('Bash', 'echo {1..300} ember-2/vaults/li{ve,x}/a.json')) // control: last stage
+  // The redirect target is expanded on its own, whatever the words do.
+  deny(run('Bash', 'echo {1..300} > private_vault/x'))
+  deny(run('Bash', 'echo {1..300} > {private_vault/x,}'))
+  allow(run('Bash', 'echo {1..300} > {private_valve/x,}'))
+  // A redirect target past a cap is denied, even for a printer (control: under the cap it is checked).
+  deny(run('Bash', 'echo hi > {1..300}'))
+  allow(run('Bash', 'echo hi > {1..250}'))
+  deny(run('Bash', `echo ${Array(4).fill('{1..256}').join(' ')} > {1..250}`)) // stage cap, targets included
+  allow(run('Bash', `echo ${Array(4).fill('{1..256}').join(' ')} > x`))
+  // The words a substitution prints, past the cap, are not checkable by a reader.
+  deny(run('Bash', 'cat $(echo {1..300})'))
+  allow(run('Bash', 'echo $(echo {1..300})')) // control: the outer stage is a printer
+  deny(run('Bash', 'cat $(echo {1..300} private_vault/x)'))
+  // A substitution that prints 1000 words is checked; one that prints 1245 is past the stage cap.
+  allow(run('Bash', `cat $(echo ${Array(4).fill('{1..250}').join(' ')})`))
+  deny(run('Bash', `cat $(echo ${Array(5).fill('{1..250}').join(' ')})`))
+  // PowerShell has no brace expansion: the same text is not expanded there.
+  allow(run('PowerShell', 'Get-Content $(echo private_{vault,x}/a)'))
+  deny(run('Bash', 'cat $(echo private_{vault,x}/a)'))
 })
 
 test('expandBraces: the words Bash makes, from real bash', () => {
@@ -244,4 +309,20 @@ const BASH = [
   ["{#,x}", ["#","x"]],
   ["{5..5}", ["5"]],
   ["{a..a}", ["a"]],
+  // A } before the first comma is text; a leading {} is text (rows from bash 4.4 and 5.0).
+  ["{a},zz/x}", ["a}","zz/x"]],
+  ["{a}b,x}", ["a}b","x"]],
+  ["x{a},{p,y}", ["x{a},p","x{a},y"]],
+  ["{0},..}", ["0}",".."]],
+  ["{a},b}c", ["a}c","bc"]],
+  ["{{a},b}", ["{a}","b"]],
+  ["{a{}b},c}", ["a{}b}","c"]],
+  ["{},a}", ["{},a}"]],
+  ["x{},a}", ["x}","xa"]],
+  ["{}{},}", ["{}}","{}"]],
+  ["{}", ["{}"]],
 ]
+// Known divergence, not tabled: a body that starts with `..` and holds a stray }
+// ({..a},b} stays text in bash 4.4 and 5.0; expandBraces splits it). Found by an
+// exhaustive differential run (alphabet { } , a . 1, lengths 1 to 6, 60986 words
+// with 5000 random longer ones, both bashes): 6 mismatches, all of this form.

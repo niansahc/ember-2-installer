@@ -14,7 +14,7 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:integration": "playwright test --config playwright.integration.config.cjs",
-    "test:hooks": "node --test tests/hooks/env-guard.test.cjs tests/hooks/vault-guard.test.cjs tests/hooks/vault-shell.test.cjs tests/hooks/vault-brace.test.cjs tests/hooks/fail-closed.test.cjs tests/hooks/suite.test.cjs",
+    "test:hooks": "node --test tests/hooks/env-guard.test.cjs tests/hooks/vault-guard.test.cjs tests/hooks/vault-shell.test.cjs tests/hooks/vault-brace.test.cjs tests/hooks/guard-limits.test.cjs tests/hooks/fail-closed.test.cjs tests/hooks/suite.test.cjs",
     "test:netgate": "node --test tests/netgate/compare.test.cjs tests/netgate/declared-drift.test.cjs",
     "netgate:analyze": "node scripts/netgate/cli.cjs",
     "build:mac": "electron-builder --mac",

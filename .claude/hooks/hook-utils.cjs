@@ -159,12 +159,15 @@ function fnmatch(name, pattern) {
 const MAX_DEPTH = 8
 class NestingLimit extends Error {}
 
-// Characters that end a word and stand as operators (with `(` and `)`).
+// Characters that end a word and stand as operators (with `(` and `)`). In
+// Bash, { and } are operators only as a word of their own (see parseShell);
+// PowerShell and cmd keep them as operators.
 const OPERATORS = ';<>|&{}'
 
 /**
- * A shell command parsed for both guards: { tokens }, each token an operator
- * string, a word { text, bare, subs, start, end, open }, or { heredoc } where
+ * A shell command parsed for both guards: { tokens, bash }, each token an
+ * operator string, a word { text, bare, live, parts, subs, start, end, open },
+ * or { heredoc } where
  * a heredoc operator stands. `subs` are the parsed bodies of the
  * substitutions inside the word: $(...), and in Bash `...`, <(...) and
  * >(...). `bare` is the part of `text` read outside quotes, `start`/`end`
@@ -499,16 +502,42 @@ function pipelines(script) {
 const MAX_BRACE_WORD = 256
 const MAX_BRACE_STAGE = 1024
 const MAX_BRACE_STEPS = 32
+// Live { in one word. The scan for each is linear in the word, so this bounds
+// the work (a word of 16384 { took 0.65 s, 65536 took 9.6 s before the cap).
+const MAX_LIVE_BRACES = 256
+// A Bash or PowerShell command longer than this is denied by both guards
+// before it is parsed: a PreToolUse hook that times out does not block the
+// call, and parse time grows faster than length (a chain of 16384 characters
+// of pipes or $() takes about 0.6 s, 64 K takes 2 s).
+const MAX_COMMAND_CHARS = 16384
 
 class BraceOverflow extends Error {}
 
-/** The index of the live } closing the live { at `p`, or -1. */
+const RANGE = /^([+-]?\d+|[A-Za-z])\.\.([+-]?\d+|[A-Za-z])(?:\.\.([+-]?\d+))?$/
+
+/** True when `body` is a {x..y[..step]} body: two integers or two letters. */
+function isRange(body) {
+  const m = body.match(RANGE)
+  return !!m && /^[+-]?\d/.test(m[1]) === /^[+-]?\d/.test(m[2])
+}
+
+/**
+ * The index of the live } closing the live { at `p`, or -1. As in Bash, a
+ * depth-0 } closes only after a depth-0 comma or when the body so far is a
+ * range; any other depth-0 } is text and the scan goes on ({a},b} is the
+ * words "a}" and "b").
+ */
 function closingBrace(text, live, p) {
   let depth = 0
-  for (let j = p; j < text.length; j++) {
+  let commas = 0
+  for (let j = p + 1; j < text.length; j++) {
     if (live[j] !== '1') continue
-    if (text[j] === '{') depth++
-    else if (text[j] === '}' && --depth === 0) return j
+    const c = text[j]
+    if (c === '{') depth++
+    else if (c === '}') {
+      if (depth > 0) depth--
+      else if (commas > 0 || (!live.slice(p + 1, j).includes('0') && isRange(text.slice(p + 1, j)))) return j
+    } else if (c === ',' && depth === 0) commas++
   }
   return -1
 }
@@ -520,7 +549,7 @@ function topLevelCommas(text, live, p, q) {
   for (let j = p + 1; j < q; j++) {
     if (live[j] !== '1') continue
     if (text[j] === '{') depth++
-    else if (text[j] === '}') depth--
+    else if (text[j] === '}') depth = Math.max(0, depth - 1)
     else if (text[j] === ',' && depth === 0) cuts.push(j)
   }
   return cuts
@@ -528,11 +557,9 @@ function topLevelCommas(text, live, p, q) {
 
 /** The words of a {x..y[..step]} body (two integers or two letters), or null. Counted before generated. */
 function rangeWords(body) {
-  const m = body.match(/^([+-]?\d+|[A-Za-z])\.\.([+-]?\d+|[A-Za-z])(?:\.\.([+-]?\d+))?$/)
-  if (!m) return null
-  const [, a, b, inc] = m
+  if (!isRange(body)) return null
+  const [, a, b, inc] = body.match(RANGE)
   const numeric = /^[+-]?\d/.test(a)
-  if (numeric !== /^[+-]?\d/.test(b)) return null
   const step = inc === undefined ? 1 : Math.abs(Number(inc)) || 1 // step 0 is 1
   const x = numeric ? Number(a) : a.charCodeAt(0)
   const y = numeric ? Number(b) : b.charCodeAt(0)
@@ -552,6 +579,7 @@ function expandFrom(text, live, steps) {
   if (steps > MAX_BRACE_STEPS) throw new BraceOverflow()
   for (let p = 0; p < text.length; p++) {
     if (live[p] !== '1' || text[p] !== '{') continue
+    if (p === 0 && text[1] === '}' && live[1] === '1') continue // a leading {} is text
     const q = closingBrace(text, live, p)
     if (q < 0) continue
     const cuts = topLevelCommas(text, live, p, q)
@@ -580,10 +608,15 @@ function expandFrom(text, live, steps) {
  * word.live (1 where a char may act as syntax). A quoted, escaped or ${...}
  * brace, an unterminated one, {a} and an invalid range stay text. An empty
  * result is dropped unless the word had a literal char (Bash removes an
- * empty unquoted word). Throws BraceOverflow past the caps.
+ * empty unquoted word). Throws BraceOverflow past the caps (words from the
+ * word, expansion steps, live braces in the word).
  */
 function expandBraces(text, live) {
   if (!text.includes('{')) return text ? [text] : []
+  let braces = 0
+  for (let j = 0; j < text.length; j++) {
+    if (live[j] === '1' && text[j] === '{' && ++braces > MAX_LIVE_BRACES) throw new BraceOverflow()
+  }
   const out = expandFrom(text, live, 0)
   return live.includes('0') ? out : out.filter(Boolean)
 }
@@ -872,6 +905,17 @@ function runHook(guard, raw, evaluate, reason) {
   } catch (err) {
     return { stdout: '', stderr: `[${guard}] unparseable hook payload, allowing (${errorType(err)})\n` }
   }
+  const call = toolCall(payload)
+  if (call && SHELL_TOOLS.has(call.tool) && typeof call.input.command === 'string' && call.input.command.length > MAX_COMMAND_CHARS) {
+    return {
+      stdout: denial(
+        `${guard}: this command is ${call.input.command.length} characters, over the ${MAX_COMMAND_CHARS} limit, ` +
+          `so it cannot be checked in time and is denied. Split it into smaller commands or write the ` +
+          `content to a file. See .claude/hooks/${guard}.cjs.`,
+      ),
+      stderr: '',
+    }
+  }
   try {
     const target = evaluate(payload)
     return { stdout: target == null ? '' : denial(reason(target)), stderr: '' }
@@ -915,7 +959,10 @@ module.exports = {
   NestingLimit,
   BraceOverflow,
   MAX_BRACE_STAGE,
+  MAX_BRACE_STEPS,
   MAX_BRACE_WORD,
+  MAX_COMMAND_CHARS,
+  MAX_LIVE_BRACES,
   expandBraces,
   projectDir,
   expandUser,

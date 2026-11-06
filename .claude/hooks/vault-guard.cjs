@@ -93,11 +93,16 @@
 // Bash brace expansion: a word's unquoted, unescaped braces are expanded
 // before any rule runs ({a,b}, nested lists, prefix and suffix, products,
 // {1..3} / {a..e} / {1..10..2} ranges), as Bash does, so cat {a,private_vault/x}
-// and cat private_{vault,x}/f name the vault. Caps: 256 words from one word,
-// 1024 in one command stage; past a cap nothing is expanded and a stage that
-// is not a printer (echo, printf, ...) is denied with a reason naming the
-// brace limit. PowerShell and cmd have no brace expansion ({...} there is a
-// scriptblock, or text).
+// and cat private_{vault,x}/f name the vault; so are the words a $(...) prints.
+// Caps: 256 words from one word, 1024 words added by expansion in one command
+// stage, 32 expansion steps and 256 live { in one word. Past a cap nothing is
+// expanded and the command is denied with a reason naming the brace limit,
+// except a stage that only prints or tests its arguments (echo, printf, test,
+// [, [[, mkdir, Test-Path) and is the last of its pipeline (its words feed the
+// next stage) with no overflowing redirect target. A command over
+// MAX_COMMAND_CHARS (16384) is denied before parsing (runHook), since a hook
+// that times out does not block the call. PowerShell and cmd have no brace
+// expansion ({...} there is a scriptblock, or text).
 //
 // PowerShell: <# ... #> block comments are not commands (an unterminated one
 // is scanned as code). iex / Invoke-Expression [-Command[:]] <string> runs the
@@ -117,7 +122,7 @@
 const fs = require('fs')
 const path = require('path')
 const {
-  BraceOverflow, MAX_BRACE_STAGE, MAX_BRACE_WORD, MAX_DEPTH, NestingLimit, PS_EVAL, SHELL_TOOLS, WILDCARD, absolutePath, commandName, commandStart, expandUser, fnmatch,
+  BraceOverflow, MAX_BRACE_STAGE, MAX_BRACE_STEPS, MAX_BRACE_WORD, MAX_DEPTH, MAX_LIVE_BRACES, NestingLimit, PS_EVAL, SHELL_TOOLS, WILDCARD, absolutePath, commandName, commandStart, expandUser, fnmatch,
   literalHeredocs, main, nestedCommand, parseShell, pipelines, projectDir, proseValues, toolCall,
   expandBraces,
 } = require('./hook-utils.cjs')
@@ -440,7 +445,7 @@ function bodyWords(text) {
  * every word in it, in the substitutions nested in it, and in its heredoc
  * bodies.
  */
-function outputWords(script, level) {
+function outputWords(script, level, budget = null) {
   if (level > MAX_DEPTH) throw new NestingLimit()
   const out = []
   for (const token of script.tokens) {
@@ -449,8 +454,13 @@ function outputWords(script, level) {
       out.push(...bodyWords(token.heredoc.body))
       continue
     }
-    if (token.text) out.push(token.text)
-    for (const sub of token.subs) out.push(...outputWords(sub, level + 1))
+    if (token.text) {
+      // Bash expands the braces of the words the substitution's command prints.
+      const texts = budget && script.bash ? expandBraces(token.text, token.live) : [token.text]
+      if (budget && (budget.left -= Math.max(0, texts.length - 1)) < 0) throw new BraceOverflow()
+      out.push(...texts)
+    }
+    for (const sub of token.subs) out.push(...outputWords(sub, level + 1, budget))
   }
   return out
 }
@@ -471,12 +481,14 @@ function pipedToEval(before) {
 
 /**
  * The stage's words and redirection targets after Bash brace expansion, as
- * { words, redirs, overflow }: each expanded word keeps the substitutions of
- * the word it came from. Past a cap (a word, or the stage) nothing is
- * expanded and `overflow` is true.
+ * { words, redirs, wordsOverflow, redirsOverflow }: each expanded word keeps
+ * the substitutions of the word it came from. Past a cap (a word, or 1024
+ * words added in the stage) nothing is expanded: the lists stay as written
+ * and the flags say which list overflowed. Redirect targets are expanded
+ * apart from the words, so a padded word list never hides them.
  */
 function braceWords(stage, bash) {
-  const plain = { words: stage.words, redirs: stage.redirs, overflow: false }
+  const plain = { words: stage.words, redirs: stage.redirs, wordsOverflow: false, redirsOverflow: false }
   if (!bash) return plain
   // A word with a substitution is never empty: the substitution is its value.
   const spread = (list) =>
@@ -484,14 +496,28 @@ function braceWords(stage, bash) {
       const texts = expandBraces(w.text, w.live)
       return (texts.length || !w.subs.length ? texts : ['']).map((text) => ({ ...w, text }))
     })
-  try {
-    const words = spread(stage.words).flat()
-    const redirs = spread(stage.redirs).flat()
-    if (words.length + redirs.length > MAX_BRACE_STAGE) throw new BraceOverflow()
-    return { words, redirs, overflow: false }
-  } catch (err) {
-    if (err instanceof BraceOverflow) return { ...plain, overflow: true }
-    throw err
+  const attempt = (list) => {
+    try {
+      return { list: spread(list).flat(), over: false }
+    } catch (err) {
+      if (err instanceof BraceOverflow) return { list, over: true }
+      throw err
+    }
+  }
+  const w = attempt(stage.words)
+  const r = attempt(stage.redirs)
+  const addedWords = w.list.length - stage.words.length
+  const addedRedirs = r.list.length - stage.redirs.length
+  // Over the stage cap: the words are not expanded, and nor are the targets
+  // when expansion gave them any words.
+  const over = addedWords + addedRedirs > MAX_BRACE_STAGE
+  const wordsOverflow = w.over || over
+  const redirsOverflow = r.over || (over && addedRedirs > 0)
+  return {
+    words: wordsOverflow ? stage.words : w.list,
+    redirs: redirsOverflow ? stage.redirs : r.list,
+    wordsOverflow,
+    redirsOverflow,
   }
 }
 
@@ -505,7 +531,7 @@ function braceWords(stage, bash) {
  * `at` the index of the utility word in `words`.
  */
 function analyse(stage, level, bash) {
-  const { words: spelled, redirs: targets, overflow } = braceWords(stage, bash)
+  const { words: spelled, redirs: targets, wordsOverflow, redirsOverflow } = braceWords(stage, bash)
   const start = commandStart(spelled.map((w) => w.text))
   const parsed = spelled.slice(start)
   const words = parsed.map((w) => w.text)
@@ -516,13 +542,28 @@ function analyse(stage, level, bash) {
     if (i > 0) at = i
   }
   const prose = proseValues(words)
-  const printed = (w) => w.subs.flatMap((sub) => outputWords(sub, level + 1))
+  // The words a substitution prints, brace-expanded within a budget; past it
+  // they stay as written and the stage counts as overflowed.
+  let printedOver = false
+  const budget = { left: MAX_BRACE_STAGE }
+  const printed = (w) => {
+    try {
+      return w.subs.flatMap((sub) => outputWords(sub, level + 1, bash ? budget : null))
+    } catch (err) {
+      if (!(err instanceof BraceOverflow)) throw err
+      printedOver = true
+      return w.subs.flatMap((sub) => outputWords(sub, level + 1))
+    }
+  }
+  const output = parsed.map((w, k) => (prose.has(k) ? [] : printed(w)))
+  const redirs = targets.flatMap((w) => [w.text, ...printed(w)]).filter(Boolean)
   return {
     words,
-    output: parsed.map((w, k) => (prose.has(k) ? [] : printed(w))),
+    output,
     prose,
-    overflow,
-    redirs: targets.flatMap((w) => [w.text, ...printed(w)]).filter(Boolean),
+    wordsOverflow: wordsOverflow || printedOver,
+    redirsOverflow,
+    redirs,
     heredocs: stage.heredocs,
     runner,
     utility: words.length ? commandName(words[at]) : '',
@@ -732,8 +773,11 @@ function scanScript(script, state, literal, level) {
   }
   for (const pipeline of pipelines(script)) {
     const stages = pipeline.map((st) => analyse(st, level, script.bash))
-    // Too many words to expand: a stage that reads or lists cannot be checked.
-    if (stages.some((s) => s.overflow && !NON_READING.has(s.runner))) throw new BraceOverflow()
+    // Too many words to expand: a stage that reads or lists cannot be checked,
+    // nor can one whose words feed a later stage or whose redirect overflowed.
+    if (stages.some((s, k) => s.redirsOverflow || (s.wordsOverflow && (!NON_READING.has(s.runner) || k < stages.length - 1)))) {
+      throw new BraceOverflow()
+    }
     // Heredocs: the substitutions Bash runs in an unquoted body, and every
     // body that is not literal text for an inert consumer, as commands.
     for (const h of stages.flatMap((s) => s.heredocs)) {
@@ -825,7 +869,8 @@ function reason({ kind, target, tool }) {
   if (kind === 'brace') {
     return (
       `Vault Privacy Rule: this command has a brace expansion past the limit (` +
-      `${MAX_BRACE_WORD} words from one word, ${MAX_BRACE_STAGE} in one command), so it ` +
+      `${MAX_BRACE_WORD} words from one word, ${MAX_BRACE_STAGE} added in one command, ` +
+      `${MAX_BRACE_STEPS} expansion steps or ${MAX_LIVE_BRACES} braces in one word), so it ` +
       `cannot be checked for vault reads and is denied. Split it into simpler ` +
       `commands. See .claude/hooks/${GUARD}.cjs.`
     )
