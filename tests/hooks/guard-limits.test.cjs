@@ -134,3 +134,26 @@ test('timing: command chains at the cap finish inside half the hook timeout', ()
     allow(v.result)
   }
 })
+
+test('timing: comma lists and delimiter runs at the cap finish well inside the hook timeout', () => {
+  // Each element is a word, so a list at the cap is thousands of words: one path lookup per distinct word.
+  const distinct = Array.from({ length: 2400 }, (_, i) => 'f' + i)
+  const lists = {
+    'ps repeated list': ['PowerShell', 'gc ' + 'a,'.repeat(Math.floor((N - 3) / 2))],
+    'ps distinct list': ['PowerShell', 'gc ' + distinct.join(',')],
+    'ps array group': ['PowerShell', 'gc (' + "'a',".repeat(Math.floor((N - 5) / 4)) + "'a')"],
+    'cmd comma list': ['PowerShell', "cmd /c 'type " + 'a,'.repeat(Math.floor((N - 20) / 2)) + "'"],
+    'cmd semicolon list': ['PowerShell', "cmd /c 'type " + 'a;'.repeat(Math.floor((N - 20) / 2)) + "'"],
+  }
+  for (const [name, [tool, command]] of Object.entries(lists)) {
+    assert.ok(command.length <= N, name)
+    const v = timed(() => vault(tool, command))
+    const e = timed(() => envg(tool, { command }))
+    assert.ok(v.ms < 1000, `${name}: vault-guard ${v.ms} ms`)
+    assert.ok(e.ms < 1000, `${name}: env-guard ${e.ms} ms`)
+    allow(v.result)
+    allow(e.result)
+  }
+  // Control: a list of the same size that holds the vault name is read, not skipped for size.
+  deny(vault('PowerShell', 'gc ' + 'a,'.repeat(4000) + 'private_' + 'vault/x'))
+})
