@@ -192,6 +192,8 @@ function operandNamesVault(candidate) {
 // Vault locations
 // ---------------------------------------------------------------------------
 
+const REALPATHS = new Map()
+
 /**
  * realpath that, like Python's os.path.realpath, resolves the existing
  * prefix of a path that does not exist yet (a new file under a junction).
@@ -211,7 +213,6 @@ function realpathLoose(p) {
   }
   return real
 }
-const REALPATHS = new Map()
 
 /** Absolute forms of `p`: lexical, plus the real path when it has no wildcard. */
 function resolutions(p, base) {

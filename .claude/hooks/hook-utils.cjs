@@ -511,7 +511,7 @@ function pipelines(script) {
         } else {
           st.words.push(token)
           // The nearest MAX_DEPTH argument groups: bounded work for deep nesting.
-          for (const owner of owners.slice(-MAX_DEPTH)) owner.st.words.push(token)
+          for (let k = Math.max(0, owners.length - MAX_DEPTH); k < owners.length; k++) owners[k].st.words.push(token)
         }
         redirect = false
         afterWord = true
