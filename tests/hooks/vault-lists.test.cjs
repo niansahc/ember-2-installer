@@ -17,12 +17,14 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const { liveVaultFixture, runGuard, call, deny, allow } = require('./helpers.cjs')
-const { parseShell, pipelines } = require('../../.claude/hooks/hook-utils.cjs')
+const { MAX_DEPTH, NestingLimit, parseShell, pipelines } = require('../../.claude/hooks/hook-utils.cjs')
 
 const FX = liveVaultFixture()
 test.after(() => FX.cleanup())
 const ROOT = { cwd: FX.root }
 const run = (tool, command) => runGuard('vault-guard', call(tool, { command }, ROOT), FX)
+const runEnv = (tool, command) => runGuard('env-guard', call(tool, { command }, ROOT), FX)
+const ENV = '.' + 'env'
 
 // [vault file, decoy]: the name rule (private_vault) and the location rule (the configured vault).
 const TARGETS = [
@@ -127,6 +129,9 @@ test('PowerShell: a quoted or escaped comma is one name and is allowed; the unqu
       }
     })
   }
+})
+
+test('PowerShell over-denials (pinned): parse errors and scriptblocks that run nothing are still scanned', () => {
   for (const row of PS_PINNED) {
     for (const [file, decoy, dir, decoyDir] of TARGETS) {
       deny(run('PowerShell', fill(row, file, dir)))
@@ -136,6 +141,8 @@ test('PowerShell: a quoted or escaped comma is one name and is allowed; the unqu
   deny(run('PowerShell', 'Get-Content {a,private_vault/x.json}'))
   allow(run('PowerShell', 'Get-Content {a,private_valve/x.json}'))
   allow(run('PowerShell', 'Get-Content {a,ember-2/vaults/live/a.json}')) // no reader in the block's stage
+  // Control for that last allow: with a reader in the block's own stage the location rule does fire.
+  deny(run('PowerShell', '& { Get-Content a,ember-2/vaults/live/a.json }'))
 })
 
 test('cmd delimiters , ; = and a caret-escaped one: each read denied, each decoy allowed', async (t) => {
@@ -158,6 +165,9 @@ test('cmd: a quoted comma is one name, echo only prints; the unquoted twin is de
       }
     })
   }
+})
+
+test('cmd over-denials (pinned): external programs ignore the delimiters but are treated like type', () => {
   for (const row of CMD_PINNED) {
     for (const [file, decoy, dir, decoyDir] of TARGETS) {
       deny(run('PowerShell', cmdline(fill(row, file, dir, true))))
@@ -171,7 +181,9 @@ test('cmd from Bash and PowerShell nesting: the same lists are read as cmd reads
     deny(run('Bash', `cmd /c "type a,${back(file)}"`))
     allow(run('Bash', `cmd /c "type a,${back(decoy)}"`))
     deny(run('Bash', `bash -c 'cmd /c "type a;${back(file)}"'`))
+    allow(run('Bash', `bash -c 'cmd /c "type a;${back(decoy)}"'`))
     deny(run('PowerShell', `cmd.exe /c "type a=${back(file)}"`))
+    allow(run('PowerShell', `cmd.exe /c "type a=${back(decoy)}"`))
   }
 })
 
@@ -180,6 +192,9 @@ test('Bash is unchanged: a comma is part of a word (verified on bash 4.4.23 and 
     allow(run('Bash', `cat a,${file}`)) // one file named a,<path>: No such file
     allow(run('Bash', `cat "a,${file}"`))
     allow(run('Bash', `cat a=${decoy}`))
+    // Pinned over-denial: Bash reads a file named a=<path>, not the vault, but pathCandidates takes the value after "=".
+    // This twin is what makes the decoy allow above mean something.
+    deny(run('Bash', `cat a=${file}`))
     deny(run('Bash', `cat a, ${file}`)) // a space makes the second word
     deny(run('Bash', `cat a,${file} ${file}`)) // control: a vault word beside the list is still seen
   }
@@ -238,7 +253,54 @@ test('pipelines: a parenthesis after a word of a PowerShell stage is an argument
   // Control: Bash and cmd keep a "(" as a pipeline break.
   assert.deepEqual(texts('echo (a)', 'bash'), [[['echo']], [['a']]])
   assert.deepEqual(texts('type (a)', 'cmd'), [[['type']], [['a']]])
-  // Deep nesting is bounded: each word reaches at most MAX_DEPTH owners.
-  const deep = 'f (g '.repeat(40) + 'x' + ')'.repeat(40)
-  assert.ok(pipelines(parseShell(deep, 'ps'))[0][0].words.length <= 2 + 40)
+})
+
+test('pipelines: argument groups nest MAX_DEPTH deep, one more throws NestingLimit (PowerShell only)', () => {
+  const chain = (n, flavor) => pipelines(parseShell('f (g '.repeat(n) + 'x' + ')'.repeat(n), flavor))
+  assert.equal(MAX_DEPTH, 8)
+  // At the limit the outermost stage holds every word, the innermost included.
+  const at = chain(MAX_DEPTH, 'ps')
+  assert.deepEqual(at[0][0].words.map((w) => w.text), [...Array(MAX_DEPTH).fill(['f', 'g']).flat(), 'x'])
+  // Past it the parse throws instead of dropping words from the outer stage.
+  assert.throws(() => chain(MAX_DEPTH + 1, 'ps'), NestingLimit)
+  assert.throws(() => chain(40, 'ps'), NestingLimit)
+  // Control: Bash and cmd have no argument groups (a "(" is a pipeline break), so depth never throws.
+  assert.doesNotThrow(() => chain(40, 'bash'))
+  assert.doesNotThrow(() => chain(40, 'cmd'))
+  // Control: siblings are not nested (the owner stack pops at each ")").
+  assert.doesNotThrow(() => pipelines(parseShell('f ' + '(g x) '.repeat(40), 'ps')))
+})
+
+// gc (Write-Output (Write-Output ... 'path')): each group is an argument of the stage before it; on powershell.exe
+// 5.1 this prints the file at every depth tried (8, 9, 10, 12), so every denied row below is a real read.
+const nest = (n, p) => 'gc ' + '(Write-Output '.repeat(n) + `'${p}'` + ')'.repeat(n)
+
+test('argument groups nested past the cap are denied, not skipped; at the cap they are scanned', () => {
+  for (const [file, decoy] of TARGETS) {
+    for (const n of [1, 5, 8]) {
+      deny(run('PowerShell', nest(n, file)))
+      allow(run('PowerShell', nest(n, decoy))) // control: the vault, not the nesting, makes the deny
+    }
+    for (const n of [9, 10, 12]) {
+      const d = deny(run('PowerShell', nest(n, file)))
+      assert.match(d.reason, /nesting limit \(8 levels\)/)
+      assert.match(d.reason, /argument groups/)
+    }
+    // Pinned over-denial: the cap does not look at the path, so a decoy nested past it is denied too.
+    deny(run('PowerShell', nest(9, decoy)))
+    // Control: nine sibling groups are not nested; the decoy is allowed and the vault path still denied.
+    const siblings = (p) => 'gc ' + `(Write-Output '${p}') `.repeat(12)
+    allow(run('PowerShell', siblings(decoy)))
+    deny(run('PowerShell', siblings(file)))
+  }
+})
+
+test('env-guard: a nest past the cap falls back to the raw text (denies a named env file, allows the rest)', () => {
+  for (const n of [8, 9, 12]) {
+    deny(runEnv('PowerShell', nest(n, ENV)))
+    // Control: the text with a decoy name is allowed at every depth, so the deny above is the name, and a crash
+    // (which also denies) is not what the fallback returned.
+    allow(runEnv('PowerShell', nest(n, '.' + 'envy')))
+    allow(runEnv('PowerShell', nest(n, ENV + '.example')))
+  }
 })

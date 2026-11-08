@@ -87,8 +87,9 @@
 //     cwd as a root, since its flag may have taken a value.
 //
 // Nesting limit: substitutions, nested shells and heredoc bodies are
-// followed MAX_DEPTH (8) levels deep. A command nested deeper is denied
-// with a reason that names the nesting limit.
+// followed MAX_DEPTH (8) levels deep, and so are PowerShell argument groups
+// (a word is mirrored into every enclosing stage). A command nested deeper is
+// denied with a reason that names the nesting limit.
 //
 // Bash brace expansion: a word's unquoted, unescaped braces are expanded
 // before any rule runs ({a,b}, nested lists, prefix and suffix, products,
@@ -877,7 +878,7 @@ function evaluate(payload) {
 function reason({ kind, target, tool }) {
   if (kind === 'nesting') {
     return (
-      `Vault Privacy Rule: this command nests substitutions, shells or heredocs ` +
+      `Vault Privacy Rule: this command nests substitutions, shells, heredocs or PowerShell argument groups ` +
       `past the nesting limit (${MAX_DEPTH} levels), so it cannot be checked for ` +
       `vault reads and is denied. Split it into simpler commands. See ` +
       `.claude/hooks/${GUARD}.cjs.`

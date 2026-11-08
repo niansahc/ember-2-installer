@@ -165,7 +165,8 @@ const CMD_DELIMITERS = ',;='
 
 // Characters that end a word and stand as operators (with `(` and `)`). In
 // Bash, { and } are operators only as a word of their own (see parseShell);
-// PowerShell and cmd keep them as operators.
+// PowerShell and cmd keep them as operators. Except `;` in cmd: there it is an
+// argument delimiter, never an operator (see CMD_DELIMITERS).
 const OPERATORS = ';<>|&{}'
 
 /**
@@ -485,7 +486,8 @@ function parseShell(command, flavor, depth = 0) {
  * scanned as commands, and are also words of that stage, which goes on after
  * the ")" (Get-Content ('V') -TotalCount 1). A "(" that starts a stage, and
  * { } blocks, are groups of commands only. Empty stages and pipelines are left
- * out.
+ * out. Argument groups nested past MAX_DEPTH throw NestingLimit (a word would
+ * not reach the outermost reader); the callers deny or fall back to raw text.
  */
 function pipelines(script) {
   const stage = () => ({ words: [], redirs: [], heredocs: [] })
@@ -510,8 +512,8 @@ function pipelines(script) {
           st.redirs.push(token)
         } else {
           st.words.push(token)
-          // The nearest MAX_DEPTH argument groups: bounded work for deep nesting.
-          for (let k = Math.max(0, owners.length - MAX_DEPTH); k < owners.length; k++) owners[k].st.words.push(token)
+          // At most MAX_DEPTH owners (a deeper group throws above), so this is bounded work.
+          for (const o of owners) o.st.words.push(token)
         }
         redirect = false
         afterWord = true
@@ -523,7 +525,11 @@ function pipelines(script) {
     } else if (token === '(') {
       const owner = script.ps && afterWord && !redirect ? { pipeline, st } : null
       open.push(owner)
-      if (owner) owners.push(owner)
+      if (owner) {
+        // Past MAX_DEPTH nested argument groups the outer stage would miss words: deny, do not truncate.
+        if (owners.length >= MAX_DEPTH) throw new NestingLimit()
+        owners.push(owner)
+      }
       begin()
       redirect = false
       afterWord = false
