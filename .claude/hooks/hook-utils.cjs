@@ -484,8 +484,10 @@ function parseShell(command, flavor, depth = 0) {
  * PowerShell: a "(" that follows a word of the stage is an argument
  * (Get-Content ('a','V'), @('a','V')): its words stay a pipeline of their own,
  * scanned as commands, and are also words of that stage, which goes on after
- * the ")" (Get-Content ('V') -TotalCount 1). A "(" that starts a stage, and
- * { } blocks, are groups of commands only. Empty stages and pipelines are left
+ * the ")" (Get-Content ('V') -TotalCount 1). A "{" right after a -Parameter word
+ * is the same (1 | gc -Path {'V'}: PowerShell runs the block per input and uses
+ * its output as the path). A "(" that starts a stage, and the other { } blocks
+ * (if, %, & ...), are groups of commands only. Empty stages and pipelines are left
  * out. Argument groups nested past MAX_DEPTH throw NestingLimit (a word would
  * not reach the outermost reader); the callers deny or fall back to raw text.
  */
@@ -496,14 +498,20 @@ function pipelines(script) {
   let st = pipeline[0]
   let redirect = false
   let afterWord = false
-  const open = [] // one entry per open "(": its owner stage { pipeline, st } or null
+  let lastParam = false // the last word of the stage is a -Parameter name (-Path, -Path:)
+  const open = [] // one entry per open "(" or "{": its owner stage { pipeline, st } or null
   const owners = [] // the non-null entries of `open`
   const begin = () => {
     pipeline = [stage()]
     st = pipeline[0]
     out.push(pipeline)
   }
-  for (const token of script.tokens) {
+  // PowerShell braces are group operators glued into one token with their neighbours
+  // ("};", "|{", "}}"): split them off so each { and } is seen on its own.
+  const tokens = script.ps
+    ? script.tokens.flatMap((t) => (typeof t === 'string' && t.length > 1 && /[{}]/.test(t) ? t.match(/\{|\}|[^{}]+/g) : [t]))
+    : script.tokens
+  for (const token of tokens) {
     if (typeof token !== 'string') {
       if (token.heredoc) {
         st.heredocs.push(token.heredoc)
@@ -515,6 +523,7 @@ function pipelines(script) {
           // At most MAX_DEPTH owners (a deeper group throws above), so this is bounded work.
           for (const o of owners) o.st.words.push(token)
         }
+        lastParam = !redirect && !token.subs?.length && /^-[A-Za-z?]\w*:?$/.test(token.text)
         redirect = false
         afterWord = true
       }
@@ -522,8 +531,10 @@ function pipelines(script) {
       st = stage()
       pipeline.push(st)
       afterWord = false
-    } else if (token === '(') {
-      const owner = script.ps && afterWord && !redirect ? { pipeline, st } : null
+    } else if (token === '(' || (token === '{' && script.ps)) {
+      // "(" after any word is an argument; "{" only as the value of a -Parameter (a delay-bound
+      // scriptblock: 1 | gc -Path {'V'}). Statement and pipeline blocks (if, %, & ) are groups.
+      const owner = script.ps && afterWord && !redirect && (token === '(' || lastParam) ? { pipeline, st } : null
       open.push(owner)
       if (owner) {
         // Past MAX_DEPTH nested argument groups the outer stage would miss words: deny, do not truncate.
@@ -533,8 +544,9 @@ function pipelines(script) {
       begin()
       redirect = false
       afterWord = false
-    } else if (token === ')') {
+    } else if (token === ')' || (token === '}' && script.ps)) {
       const owner = open.pop()
+      lastParam = false
       if (owner) {
         owners.pop()
         pipeline = owner.pipeline
