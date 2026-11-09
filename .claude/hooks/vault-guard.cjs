@@ -87,8 +87,9 @@
 //     cwd as a root, since its flag may have taken a value.
 //
 // Nesting limit: substitutions, nested shells and heredoc bodies are
-// followed MAX_DEPTH (8) levels deep. A command nested deeper is denied
-// with a reason that names the nesting limit.
+// followed MAX_DEPTH (8) levels deep, and so are PowerShell argument groups
+// (a word is mirrored into every enclosing stage). A command nested deeper is
+// denied with a reason that names the nesting limit.
 //
 // Bash brace expansion: a word's unquoted, unescaped braces are expanded
 // before any rule runs ({a,b}, nested lists, prefix and suffix, products,
@@ -103,6 +104,15 @@
 // MAX_COMMAND_CHARS (16384) is denied before parsing (runHook), since a hook
 // that times out does not block the call. PowerShell and cmd have no brace
 // expansion ({...} there is a scriptblock, or text).
+//
+// Comma lists: PowerShell reads `gc a,V` as an array argument and cmd reads
+// `type a,V` (also a;V and a=V, a caret-escaped one too) as two arguments, so
+// parseShell ends a word at an unquoted comma (PowerShell) or , ; = (cmd) and
+// every element is a word the rules see; a quoted or backtick-escaped comma is
+// one name. In PowerShell a ( after a word of a stage is an argument of that
+// stage (gc ('a','V'), @('a','V')): its words are scanned as commands and are
+// also operands of the stage. Bash keeps a comma in a word. Not followed: a
+// list held in a variable ($p = 'a','V'; gc $p) and a cmd for-loop list.
 //
 // PowerShell: <# ... #> block comments are not commands (an unterminated one
 // is scanned as code). iex / Invoke-Expression [-Command[:]] <string> runs the
@@ -183,18 +193,26 @@ function operandNamesVault(candidate) {
 // Vault locations
 // ---------------------------------------------------------------------------
 
+const REALPATHS = new Map()
+
 /**
  * realpath that, like Python's os.path.realpath, resolves the existing
  * prefix of a path that does not exist yet (a new file under a junction).
  */
 function realpathLoose(p) {
-  try {
-    return fs.realpathSync.native(p)
-  } catch {
-    const parent = path.dirname(p)
-    if (parent === p) return p
-    return path.join(realpathLoose(parent), path.basename(p))
+  // One hook run is one process and the disk does not change under it: a path
+  // repeated in a long list (gc a,a,a,...) costs one lookup, not one each.
+  let real = REALPATHS.get(p)
+  if (real === undefined) {
+    try {
+      real = fs.realpathSync.native(p)
+    } catch {
+      const parent = path.dirname(p)
+      real = parent === p ? p : path.join(realpathLoose(parent), path.basename(p))
+    }
+    REALPATHS.set(p, real)
   }
+  return real
 }
 
 /** Absolute forms of `p`: lexical, plus the real path when it has no wildcard. */
@@ -860,7 +878,7 @@ function evaluate(payload) {
 function reason({ kind, target, tool }) {
   if (kind === 'nesting') {
     return (
-      `Vault Privacy Rule: this command nests substitutions, shells or heredocs ` +
+      `Vault Privacy Rule: this command nests substitutions, shells, heredocs or PowerShell argument groups ` +
       `past the nesting limit (${MAX_DEPTH} levels), so it cannot be checked for ` +
       `vault reads and is denied. Split it into simpler commands. See ` +
       `.claude/hooks/${GUARD}.cjs.`

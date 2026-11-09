@@ -159,13 +159,18 @@ function fnmatch(name, pattern) {
 const MAX_DEPTH = 8
 class NestingLimit extends Error {}
 
+// cmd argument delimiters, besides blanks: TYPE, DIR and the other internal commands
+// read `type a,V`, `type a;V` and `type a=V` as the arguments a and V.
+const CMD_DELIMITERS = ',;='
+
 // Characters that end a word and stand as operators (with `(` and `)`). In
 // Bash, { and } are operators only as a word of their own (see parseShell);
-// PowerShell and cmd keep them as operators.
+// PowerShell and cmd keep them as operators. Except `;` in cmd: there it is an
+// argument delimiter, never an operator (see CMD_DELIMITERS).
 const OPERATORS = ';<>|&{}'
 
 /**
- * A shell command parsed for both guards: { tokens, bash }, each token an
+ * A shell command parsed for both guards: { tokens, bash, ps }, each token an
  * operator string, a word { text, bare, live, parts, subs, start, end, open },
  * or { heredoc } where
  * a heredoc operator stands. `subs` are the parsed bodies of the
@@ -191,6 +196,11 @@ const OPERATORS = ';<>|&{}'
  *     ({ cmd; }); inside a word they are text (cat {a,b}), read by expandBraces.
  *   - word.live marks each char of text: 1 where Bash may read it as syntax,
  *     0 where it is quoted, escaped or inside ${...}.
+ *   - Comma lists: in PowerShell an unquoted comma ends a word, as a space does
+ *     (Get-Content a,V reads both: an array argument; "a,V", 'a,V' and a`,V are
+ *     one name); in cmd an unquoted , ; or = ends a word, a caret-escaped one
+ *     too (type a,V and type a;V read both; ; is not a command separator in cmd).
+ *     Bash keeps the comma: cat a,V is one file name.
  *   - A newline is the `;` operator; `#` at a word start begins a comment.
  *   - PowerShell: `<# ... #>` is a block comment ending at the first `#>`;
  *     unterminated, the text after `<#` is scanned as code.
@@ -355,8 +365,10 @@ function parseShell(command, flavor, depth = 0) {
         append(n)
         i += 2
       } else if (cmd && c === '^' && quote === null && n !== undefined) {
-        // cmd escape: ^x is a literal x (e^cho runs echo).
-        append(n)
+        // cmd escape: ^x is a literal x (e^cho runs echo). A caret-escaped , ; or =
+        // is still an argument delimiter to the command (type a^,V reads both).
+        if (CMD_DELIMITERS.includes(n)) flush()
+        else append(n)
         i += 2
       } else if (close === '`' && c === '`') {
         flush()
@@ -399,6 +411,11 @@ function parseShell(command, flavor, depth = 0) {
         flush()
         i++
         break
+      } else if ((ps && c === ',') || (cmd && CMD_DELIMITERS.includes(c))) {
+        // A comma list (PowerShell) or an argument delimiter (cmd): the
+        // elements are words of their own. Quoted ones never get here.
+        flush()
+        i++
       } else if (c === '\n') {
         flush()
         tokens.push(';')
@@ -452,7 +469,7 @@ function parseShell(command, flavor, depth = 0) {
     }
     flush()
     // An operator with no line after it inside this level has no body.
-    return { tokens, bash }
+    return { tokens, bash, ps }
   }
 
   return script(depth, null, false)
@@ -462,29 +479,79 @@ function parseShell(command, flavor, depth = 0) {
  * The pipelines of a parsed script: lists of pipe stages, each stage
  * { words, redirs, heredocs } (words and redirection targets as parsed
  * words). Pipelines end at ; && || & newline and at ( ) { } (a group runs
- * its own commands). Empty stages and pipelines are left out.
+ * its own commands).
+ *
+ * PowerShell: a "(" that follows a word of the stage is an argument
+ * (Get-Content ('a','V'), @('a','V')): its words stay a pipeline of their own,
+ * scanned as commands, and are also words of that stage, which goes on after
+ * the ")" (Get-Content ('V') -TotalCount 1). A "(" that starts a stage, and
+ * { } blocks, are groups of commands only. Empty stages and pipelines are left
+ * out. Argument groups nested past MAX_DEPTH throw NestingLimit (a word would
+ * not reach the outermost reader); the callers deny or fall back to raw text.
  */
 function pipelines(script) {
   const stage = () => ({ words: [], redirs: [], heredocs: [] })
   const out = [[stage()]]
+  let pipeline = out[0]
+  let st = pipeline[0]
   let redirect = false
+  let afterWord = false
+  const open = [] // one entry per open "(": its owner stage { pipeline, st } or null
+  const owners = [] // the non-null entries of `open`
+  const begin = () => {
+    pipeline = [stage()]
+    st = pipeline[0]
+    out.push(pipeline)
+  }
   for (const token of script.tokens) {
-    const pipeline = out[out.length - 1]
-    const st = pipeline[pipeline.length - 1]
     if (typeof token !== 'string') {
       if (token.heredoc) {
         st.heredocs.push(token.heredoc)
       } else {
-        ;(redirect ? st.redirs : st.words).push(token)
+        if (redirect) {
+          st.redirs.push(token)
+        } else {
+          st.words.push(token)
+          // At most MAX_DEPTH owners (a deeper group throws above), so this is bounded work.
+          for (const o of owners) o.st.words.push(token)
+        }
         redirect = false
+        afterWord = true
       }
     } else if (token === '|' || token === '|&') {
-      pipeline.push(stage())
-    } else if (/[;(){}]/.test(token) || token === '&&' || token === '||' || token === '&') {
-      out.push([stage()])
+      st = stage()
+      pipeline.push(st)
+      afterWord = false
+    } else if (token === '(') {
+      const owner = script.ps && afterWord && !redirect ? { pipeline, st } : null
+      open.push(owner)
+      if (owner) {
+        // Past MAX_DEPTH nested argument groups the outer stage would miss words: deny, do not truncate.
+        if (owners.length >= MAX_DEPTH) throw new NestingLimit()
+        owners.push(owner)
+      }
+      begin()
       redirect = false
+      afterWord = false
+    } else if (token === ')') {
+      const owner = open.pop()
+      if (owner) {
+        owners.pop()
+        pipeline = owner.pipeline
+        st = owner.st
+        afterWord = true
+      } else {
+        begin()
+        afterWord = false
+      }
+      redirect = false
+    } else if (/[;(){}]/.test(token) || token === '&&' || token === '||' || token === '&') {
+      begin()
+      redirect = false
+      afterWord = false
     } else if (/[<>]/.test(token)) {
       redirect = true
+      afterWord = false
     }
   }
   return out

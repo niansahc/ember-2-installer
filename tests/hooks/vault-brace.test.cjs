@@ -234,7 +234,7 @@ test('parseShell: a brace is a group operator only as a word of its own, in Bash
   assert.deepEqual(words('x=$(echo {a,b})', 'bash'), ['x='])
   // PowerShell and cmd keep braces as operators ({cat a} is a scriptblock).
   assert.deepEqual(words('& {cat a}', 'ps'), ['cat', 'a'])
-  assert.deepEqual(words('echo {a,b}', 'ps'), ['echo', 'a,b'])
+  assert.deepEqual(words('echo {a,b}', 'ps'), ['echo', 'a', 'b']) // an unquoted comma ends a word in PowerShell
   // word.live: 1 where a char can act as syntax, 0 where it is quoted, escaped or in ${...}.
   const live = (src) => parseShell(src, 'bash').tokens[0].live
   assert.equal(live('{a,b}'), '11111')
@@ -244,13 +244,20 @@ test('parseShell: a brace is a group operator only as a word of its own, in Bash
   assert.equal(live('x${y:-a}z'), '1' + '0'.repeat(7) + '1')
 })
 
-test('PowerShell and cmd have no brace expansion: the same text is not a read (verified on powershell.exe 5.1 and cmd)', () => {
-  // PowerShell: {a,V} is a parse error and {V} a scriptblock argument; neither reads V.
-  allow(run('PowerShell', 'Get-Content {a,private_vault/x.json}'))
+test('PowerShell and cmd have no brace expansion: the text is scanned as words, not expanded (verified on powershell.exe 5.1 and cmd)', () => {
+  // PowerShell: {a,V} is a parse error and {V} a scriptblock argument; neither reads V. The body is
+  // scanned as a command (a comma ends a word), so both are denied: an over-denial, as for {V}.
+  deny(run('PowerShell', 'Get-Content {a,private_vault/x.json}'))
   deny(run('PowerShell', 'Get-Content {private_vault/x.json}')) // body scanned as a command
-  // cmd: no expansion; the comma splits the argument, so {a and V} are looked up, not V.
-  allow(run('PowerShell', 'cmd /c "type {a,private_vault\\x.json}"'))
+  // cmd: no expansion; the comma splits the argument, so {a and V} are looked up, not V (denied
+  // all the same: the delimiter makes V} a word that names the vault).
+  deny(run('PowerShell', 'cmd /c "type {a,private_vault\\x.json}"'))
   deny(run('PowerShell', 'cmd /c "type {private_vault\\x.json}"'))
+  // Controls: the same text with a decoy name is allowed, so the vault name, not the braces, makes the deny.
+  allow(run('PowerShell', 'Get-Content {a,private_valve/x.json}'))
+  allow(run('PowerShell', 'Get-Content {private_valve/x.json}'))
+  allow(run('PowerShell', 'cmd /c "type {a,private_valve\\x.json}"'))
+  allow(run('PowerShell', 'cmd /c "type {private_valve\\x.json}"'))
   // Bash flavor of the same text is the bypass this file closes.
   deny(run('Bash', 'cat {a,private_vault/x.json}'))
 })

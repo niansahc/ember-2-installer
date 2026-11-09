@@ -62,7 +62,7 @@
 // Words come from parseShell, so quote-split and escaped names (`.e"n"v`,
 // `.en\v`, PowerShell `.`env`) are read as the name they make, and comments
 // (`#`, PowerShell `<# #>`) are not scanned. A command nested past MAX_DEPTH
-// falls back to a regex split of its raw text (unparsedWords; over-denies).
+// (substitutions, shells, or PowerShell argument groups) falls back to a regex split of its raw text (unparsedWords; over-denies).
 //
 // Limits: a name built at runtime (a variable, base64, a script that opens
 // the file, an 8.3 short name) is not caught, nor is a recursive read that
@@ -75,7 +75,7 @@
 'use strict'
 
 const {
-  MAX_BRACE_WORD, MAX_LIVE_BRACES, SHELLS, SHELL_TOOLS, WILDCARD, bracketEnd, commandName, dropLiteralHeredocs, fnmatch, main,
+  MAX_BRACE_WORD, MAX_LIVE_BRACES, NestingLimit, SHELLS, SHELL_TOOLS, WILDCARD, bracketEnd, commandName, dropLiteralHeredocs, fnmatch, main,
   parseOrNull, pipelines, proseFlagPrefix, proseValues, toolCall,
 } = require('./hook-utils.cjs')
 
@@ -324,7 +324,13 @@ function words(command, bash) {
   const script = parseOrNull(command, bash ? 'bash' : 'ps')
   if (!script) return unparsedWords(command)
   const out = []
-  addScript(script, out)
+  try {
+    addScript(script, out)
+  } catch (err) {
+    // Argument groups nested past MAX_DEPTH (pipelines): same fallback as an unparsable command.
+    if (err instanceof NestingLimit) return unparsedWords(command)
+    throw err
+  }
   const nested = out.some(([w]) => SHELLS.has(commandName(w)))
   return out.map(([w, quoted]) => [w, bash && !nested && quoted])
 }
