@@ -169,6 +169,9 @@ const CMD_DELIMITERS = ',;='
 // argument delimiter, never an operator (see CMD_DELIMITERS).
 const OPERATORS = ';<>|&{}'
 
+// A PowerShell parameter name as a word (-Path, -Path:); a "{" right after one is its value.
+const PS_PARAM = /^-[A-Za-z?]\w*:?$/
+
 /**
  * A shell command parsed for both guards: { tokens, bash, ps }, each token an
  * operator string, a word { text, bare, live, parts, subs, start, end, open },
@@ -523,7 +526,7 @@ function pipelines(script) {
           // At most MAX_DEPTH owners (a deeper group throws above), so this is bounded work.
           for (const o of owners) o.st.words.push(token)
         }
-        lastParam = !redirect && !token.subs?.length && /^-[A-Za-z?]\w*:?$/.test(token.text)
+        lastParam = !redirect && !token.subs?.length && PS_PARAM.test(token.text)
         redirect = false
         afterWord = true
       }
