@@ -7,9 +7,14 @@
 // powershell.exe 5.1.26100 (synthetic dir): a block directly after a -Parameter word is
 // read as the path. A positional block, an array holding a block, and blocks of
 // if/else/%/ForEach-Object/Where-Object/& . are not (error, or run as code).
-// Import-Csv reads too but is not a listed reader, with or without a block: a separate gap.
+// A redirection between the parameter and the block (gc -Path 2> err.txt {'V'}) still binds;
+// a backtick at the end of a line (LF or CRLF) is whitespace; a quoted '-Path' or "-x" is a
+// positional string (error), and so is -"Path" or -P'ath'.
 //
 // Every deny row has a control with one change: the vault name swapped for a decoy.
+// Only the rows on the live-vault target (TARGETS[1]) fail on main's parser; the
+// private_vault rows (TARGETS[0]) are denied by the name rule there too and are pins,
+// as are the env-guard rows (it scans raw text).
 
 'use strict'
 
@@ -65,13 +70,15 @@ test('PowerShell: a block that is not a parameter value is not an argument (posi
   allow(run('PowerShell', `1 | gc -Path 'a',{'${location[0]}'}`))
   // pinned: the name rule denies any word that names private_vault, block or not
   deny(run('PowerShell', `1 | gc {'${name[0]}'}`))
+  allow(run('PowerShell', `1 | gc {'${name[1]}'}`)) // its decoy twin
 })
 
 test('PowerShell over-denials (pinned): a block holding a vault word is a path even if it prints nothing', () => {
   for (const [file, decoy] of TARGETS) {
-    deny(run('PowerShell', `1 | gc -Path {a,${file}}`)) // a command named "a,V": no read, still scanned
+    deny(run('PowerShell', `1 | gc -Path {a,${file}}`)) // a parse error on 5.1: no read, still scanned
     allow(run('PowerShell', `1 | gc -Path {a,${decoy}}`))
     deny(run('PowerShell', `1 | gc -Path:{${file}}`))
+    allow(run('PowerShell', `1 | gc -Path:{${decoy}}`))
   }
 })
 
@@ -95,6 +102,8 @@ test('PowerShell: nested parameter blocks past MAX_DEPTH are denied at once, 8 a
     allow(run('PowerShell', nest(8, decoy)))
     const d = deny(run('PowerShell', nest(9, file)))
     assert.match(JSON.stringify(d), /nesting limit/)
+    assert.match(JSON.stringify(d), /-Parameter \{ \} blocks/) // the reason names what the user wrote
+    assert.doesNotMatch(JSON.stringify(deny(run('PowerShell', nest(8, file)))), /nesting limit/) // control: 8 levels is the name/location reason
     deny(run('PowerShell', nest(9, decoy))) // pinned: the cap does not read the path
   }
   deny(runEnv('PowerShell', nest(9, ENV)))
@@ -137,4 +146,168 @@ test('env-guard: an env file named by a parameter block is denied, a near-miss i
   deny(runEnv('PowerShell', `1 | gc -LiteralPath:{'a/${ENV}.local'}`))
   allow(runEnv('PowerShell', `1 | gc -Path {'${ENV}y'}`))
   allow(runEnv('PowerShell', `1 | gc -Path {'${ENV}.example'}`))
+})
+
+// ---------------------------------------------------------------------------
+// Line continuations, redirections, quoted parameter names, Import-Csv.
+// Each form below was run on powershell.exe 5.1.26100 (synthetic dir): LF, CRLF
+// and doubled continuations bind the block (the file prints); a backtick inside
+// double quotes keeps the newline; a:`<LF>b is two words; Import-Csv and its
+// alias ipcsv print rows for a positional path, -Path, -LiteralPath, -Path: and
+// a -Path block; 2> err.txt between -Path and the block still binds.
+// ---------------------------------------------------------------------------
+
+const BT = '`'
+const LF = '\n'
+const CRLF = '\r\n'
+
+const CONTINUED = [
+  `1 | gc -Path ${BT}${LF} {'%'}`,
+  `1 | gc -Path ${BT}${CRLF} {'%'}`,
+  `1 | gc -Path ${BT}${LF}${BT}${LF} {'%'}`,
+  `1 | gc -Path ${BT}${CRLF}${BT}${CRLF} {'%'}`,
+  `1 | gc -Path ${BT}${LF} {'%'} -TotalCount 1`,
+  `1 | gc -Path ${BT}${CRLF} {'%'} -TotalCount 1`,
+  `1 | gc ${BT}${LF} -Path ${BT}${LF} {'%'}`,
+  `gc -Path ${BT}${LF} ('%')`,
+  `gc ${BT}${CRLF} ('%')`,
+  `gc -Path${BT}${LF} {'%'}`, // the word ends at the continuation
+  `& { 1 | gc -Path ${BT}${LF} {'%'} }`,
+]
+
+test('PowerShell: a backtick at the end of a line (LF, CRLF) is whitespace, so a block or group after it is still an argument', async (t) => {
+  for (const row of CONTINUED) {
+    await t.test(JSON.stringify(row), () => {
+      for (const [file, decoy] of TARGETS) {
+        deny(run('PowerShell', row.replace('%', file)))
+        allow(run('PowerShell', row.replace('%', decoy)))
+      }
+    })
+  }
+})
+
+test('PowerShell: continuation controls (5.1 reads nothing, or the guard already decides the same)', () => {
+  const [, location] = TARGETS
+  // a continuation does not turn a positional block into an argument (positional error on 5.1)
+  allow(run('PowerShell', `1 | gc ${BT}${LF} {'${location[0]}'}`))
+  allow(run('PowerShell', `1 | gc ${BT}${CRLF} {'${location[0]}'}`))
+  // a block comment still separates (already denied on main): the comparison row
+  deny(run('PowerShell', `1 | gc -Path <# c #> {'${location[0]}'}`))
+  // inside double quotes the backtick keeps the newline: one word, not a break
+  const words = (cmd) => pipelines(parseShell(cmd, 'ps'))[0][0].words.map((w) => w.text)
+  assert.deepEqual(words(`echo "a${BT}${LF}b"`), ['echo', 'a\nb'])
+  assert.deepEqual(words(`echo a${BT}${LF}b`), ['echo', 'a', 'b']) // mid-word: two words
+  assert.deepEqual(words(`echo a${BT}${CRLF}b`), ['echo', 'a', 'b'])
+  // a backtick before a lone CR is not a continuation
+  assert.ok(!words(`echo a${BT}\rb`).includes('a'))
+  // no word of the continuation is left in the parse
+  for (const nl of [LF, CRLF]) {
+    const tokens = parseShell(`1 | gc -Path ${BT}${nl} {'x'}`, 'ps').tokens
+    assert.ok(!tokens.some((tk) => typeof tk === 'object' && /^[\r\n]+$/.test(tk.text)), JSON.stringify(nl))
+  }
+  // cmd is unchanged: a backtick is not a continuation there
+  assert.ok(parseShell(`echo a${BT}${LF}b`, 'cmd').tokens.some((tk) => typeof tk === 'object' && tk.text === `a${BT}`))
+})
+
+test('env-guard: a block after a continuation (pin: env-guard scans raw text, main denies it too)', () => {
+  deny(runEnv('PowerShell', `1 | gc -Path ${BT}${LF} {'${ENV}'}`))
+  allow(runEnv('PowerShell', `1 | gc -Path ${BT}${LF} {'${ENV}y'}`))
+})
+
+const REDIRECTED = [
+  "1 | gc -Path 2> err.txt {'%'}",
+  "1 | gc -Path 2>err.txt {'%'}",
+  "1 | gc -Path > err.txt {'%'}",
+  "1 | gc -Path >err.txt {'%'}",
+  "1 | gc -Path *> err.txt {'%'}",
+  "1 | gc -Path 2>&1 {'%'}",
+  "1 | gc -Path < in.txt {'%'}",
+  "1 | gc -Path 2> err.txt {'%'} -TotalCount 1",
+]
+
+test('PowerShell: a redirection between a parameter and its block does not break the binding', async (t) => {
+  for (const row of REDIRECTED) {
+    await t.test(row, () => {
+      for (const [file, decoy] of TARGETS) {
+        deny(run('PowerShell', row.replace('%', file)))
+        allow(run('PowerShell', row.replace('%', decoy)))
+      }
+    })
+  }
+})
+
+test('PowerShell: redirection controls (no parameter before the redirection: the block is not an argument)', () => {
+  const [, location] = TARGETS
+  allow(run('PowerShell', `1 | gc 2> err.txt {'${location[0]}'}`)) // positional block: error on 5.1
+  allow(run('PowerShell', `1 | gc -Path x 2> err.txt {'${location[0]}'}`)) // -Path took x
+  // the redirection target is not an operand of the reader
+  const st = pipelines(parseShell("1 | gc -Path 2> err.txt {'x'}", 'ps'))[0][1]
+  assert.ok(st.redirs.some((r) => r.text === 'err.txt'))
+  assert.ok(!st.words.some((w) => w.text === 'err.txt'))
+})
+
+test('PowerShell: a quoted word is not a parameter name (5.1: positional error, nothing is read)', () => {
+  const [, location] = TARGETS
+  for (const p of ["'-Path'", '"-Path"', '"-x"', "-'Path'", '-"Path"', "-P'ath'", '-Pa"th"']) {
+    const row = `1 | gc ${p} {'%'}`
+    allow(run('PowerShell', row.replace('%', location[0]))) // 5.1 reads nothing: no longer over-denied
+    allow(run('PowerShell', row.replace('%', location[1])))
+  }
+  // the unquoted form of the same row is the control
+  deny(run('PowerShell', `1 | gc -Path {'${location[0]}'}`))
+  allow(run('PowerShell', `1 | gc -Path {'${location[1]}'}`))
+  // a backtick-escaped letter still reads as a parameter name (5.1 errors on it): over-denial pinned
+  deny(run('PowerShell', `1 | gc -Pa${BT}th {'${location[0]}'}`))
+})
+
+test('PowerShell over-denial (pinned): any -Parameter before a block counts, -ScriptBlock and -Process included', () => {
+  for (const [file, decoy] of TARGETS) {
+    deny(run('PowerShell', `Invoke-Command -ScriptBlock {gc ${file}}`)) // a vault read: denied with or without the feature
+    allow(run('PowerShell', `Invoke-Command -ScriptBlock {gc ${decoy}}`))
+  }
+  // the over-denial: allowed on main, denied now, nothing is read (echo prints its argument)
+  deny(run('PowerShell', 'Invoke-Command -ScriptBlock {echo private_vault}'))
+  allow(run('PowerShell', 'Invoke-Command -ScriptBlock {echo private_valve}'))
+  deny(run('PowerShell', 'Start-Job -ScriptBlock {Write-Output private_vault}'))
+  deny(run('PowerShell', `gc a.txt | ForEach-Object -Process { Test-Path ${TARGETS[1][0]} }`))
+  allow(run('PowerShell', `gc a.txt | ForEach-Object -Process { Test-Path ${TARGETS[1][1]} }`))
+  // without a parameter name the same blocks are groups only
+  allow(run('PowerShell', `gc a.txt | ForEach-Object { Test-Path ${TARGETS[1][0]} }`))
+  allow(run('PowerShell', 'Invoke-Command {echo private_vault}'))
+})
+
+const CSV = [
+  'Import-Csv %',
+  'Import-Csv -Path %',
+  'Import-Csv -LiteralPath %',
+  'Import-Csv -Path:%',
+  "Import-Csv -Delimiter ';' %",
+  'ipcsv %',
+  'ipcsv -Path %',
+  'IMPORT-CSV %',
+  'Import-Csv a,%',
+  "Import-Csv ('%')",
+  "1 | Import-Csv -Path {'%'}",
+  "1 | ipcsv -Path {'%'}",
+  `1 | ipcsv -Path ${BT}${LF} {'%'}`,
+  'Get-Content a | Import-Csv -Path %',
+  '& { Import-Csv % }',
+]
+
+test('PowerShell: Import-Csv and ipcsv read files like Get-Content; each decoy allows', async (t) => {
+  for (const row of CSV) {
+    await t.test(JSON.stringify(row), () => {
+      // the live-vault target (TARGETS[1]) is the discriminator; private_vault rows are pins (name rule)
+      for (const [file, decoy] of TARGETS) {
+        deny(run('PowerShell', row.replace('%', file)))
+        allow(run('PowerShell', row.replace('%', decoy)))
+      }
+    })
+  }
+})
+
+test('PowerShell: Import-Csv controls (other paths and other cmdlets are not readers of the vault)', () => {
+  allow(run('PowerShell', 'Import-Csv src\\main.js'))
+  allow(run('PowerShell', `Export-Csv ${TARGETS[1][0]}`)) // writes, prints nothing: not a listed reader
+  allow(run('PowerShell', `Import-Csv src\\main.js -Header ${TARGETS[1][1]}`))
 })

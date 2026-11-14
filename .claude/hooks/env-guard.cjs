@@ -62,7 +62,7 @@
 // Words come from parseShell, so quote-split and escaped names (`.e"n"v`,
 // `.en\v`, PowerShell `.`env`) are read as the name they make, and comments
 // (`#`, PowerShell `<# #>`) are not scanned. A command nested past MAX_DEPTH
-// (substitutions, shells, or PowerShell argument groups) falls back to a regex split of its raw text (unparsedWords; over-denies).
+// (substitutions, shells, PowerShell argument groups, or { } blocks after a -Parameter) falls back to a regex split of its raw text (unparsedWords; over-denies).
 //
 // Limits: a name built at runtime (a variable, base64, a script that opens
 // the file, an 8.3 short name) is not caught, nor is a recursive read that
