@@ -17,6 +17,10 @@
   box-sizing: border-box;
 }
 
+html {
+  background: var(--bg);
+}
+
 body {
   font-family: system-ui, -apple-system, sans-serif;
   background: var(--bg);

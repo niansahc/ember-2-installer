@@ -321,6 +321,12 @@ function saveEmberPath(p) {
 
 let mainWindow
 
+// Same value as --bg in renderer/styles.css and the inline html rule in index.html.
+const WINDOW_BACKGROUND = '#1a0a2e'
+// Test-only: the e2e helpers set this so no window appears on screen. Ignored
+// in a packaged app, so a stray variable cannot hide a production window.
+const HIDE_WINDOWS = !app.isPackaged && process.env.EMBER_E2E_HIDE_WINDOWS === '1'
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 820,
@@ -328,13 +334,23 @@ function createWindow() {
     resizable: true,
     center: true,
     title: 'Ember-2 Setup',
-    backgroundColor: '#1a0a2e',
+    backgroundColor: WINDOW_BACKGROUND,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // A hidden window would otherwise throttle timers and animation frames.
+      backgroundThrottling: !HIDE_WINDOWS,
     },
   })
+
+  // Shown only once the first frame can paint, so the window never opens blank.
+  // A failed load shows it too, so it is never left invisible.
+  if (!HIDE_WINDOWS) {
+    mainWindow.once('ready-to-show', () => mainWindow.show())
+    mainWindow.webContents.once('did-fail-load', () => mainWindow.show())
+  }
 
   // No in-app windows: a target="_blank" link or window.open goes to the default
   // browser when the URL is allowed and is dropped otherwise.
