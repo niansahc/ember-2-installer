@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell, screen } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { spawn, execSync } = require('child_process')
@@ -6,6 +6,7 @@ const https = require('https')
 const http = require('http')
 const os = require('os')
 const { isNewer, displayVersion, vPrefixed } = require('./lib/version')
+const { intersectsDisplay } = require('./lib/park')
 const { releaseSummary } = require('./lib/notes')
 const { buildEnvFile } = require('./lib/env')
 const { uiSourceDir, uiTargetDir, uiIndexFile, venvPython } = require('./lib/paths')
@@ -350,9 +351,23 @@ function createWindow() {
     },
   })
 
+  if (PARK_WINDOWS) console.log(`[park] window bounds ${JSON.stringify(mainWindow.getBounds())}`)
+
   // Shown only once the first frame can paint, so the window never opens blank.
   // A failed load shows it too, so it is never left invisible.
-  const reveal = () => (PARK_WINDOWS ? mainWindow.showInactive() : mainWindow.show())
+  // Fail closed: a parked window that overlaps a display is never shown. The
+  // process exits (a thrown error in the main process opens an error dialog,
+  // which is itself a window) and the bounds are in the log.
+  const reveal = () => {
+    if (!PARK_WINDOWS) return mainWindow.show()
+    const bounds = mainWindow.getBounds()
+    if (intersectsDisplay(bounds, screen.getAllDisplays())) {
+      console.error(`[park] window not shown: bounds ${JSON.stringify(bounds)} overlap a display`)
+      app.exit(1)
+      return
+    }
+    mainWindow.showInactive()
+  }
   mainWindow.once('ready-to-show', reveal)
   mainWindow.webContents.once('did-fail-load', reveal)
 
