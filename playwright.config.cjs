@@ -11,6 +11,7 @@ module.exports = defineConfig({
   // flow + health poll) ran 28.9 s of 30 s at 8 workers. slow() triples this.
   timeout: 60000,
   retries: 0,
+  globalSetup: require.resolve('./tests/e2e/global-setup.cjs'),
   globalTeardown: require.resolve('./tests/e2e/global-teardown.cjs'),
   use: {
     screenshot: 'only-on-failure',

@@ -560,6 +560,7 @@ ipcMain.handle('save-ember-path', (_e, p) => {
 ipcMain.handle('pick-ember-folder', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Select the ember-2 folder',
+    defaultPath: app.getPath('home'),
     properties: ['openDirectory'],
   })
   return result.canceled ? null : result.filePaths[0]
@@ -726,6 +727,7 @@ ipcMain.handle('get-recommended-models', async () => {
 ipcMain.handle('pick-vault-folder', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Choose your Ember vault location',
+    defaultPath: app.getPath('home'),
     properties: ['openDirectory', 'createDirectory'],
   })
   return result.canceled ? null : result.filePaths[0]
