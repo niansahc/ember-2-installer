@@ -1,6 +1,6 @@
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
-const { OLLAMA_MIN_VERSION, parseOllamaVersion, meetsOllamaFloor } = require('../../src/lib/ollama-version')
+const { OLLAMA_MIN_VERSION, parseOllamaVersion, meetsOllamaFloor, ollamaFloorRefusal } = require('../../src/lib/ollama-version')
 
 test('the floor is 0.35.0', () => {
   assert.equal(OLLAMA_MIN_VERSION, '0.35.0')
@@ -35,4 +35,24 @@ test('unparseable or missing is blocked', () => {
 test('parse reads the first x.y.z and ignores build metadata', () => {
   assert.deepEqual(parseOllamaVersion('ollama version is 0.35.0').core, [0, 35, 0])
   assert.equal(parseOllamaVersion('nothing here'), null)
+})
+
+// ollamaFloorRefusal is what pull-ollama-model returns before running `ollama pull`.
+test('pull refusal: below the floor is refused', () => {
+  const msg = 'Ollama 0.35.0 or later is required.'
+  assert.equal(ollamaFloorRefusal({ ok: true, version: 'ollama version is 0.34.9' }), msg)
+  assert.equal(ollamaFloorRefusal({ ok: true, version: '0.17.1' }), msg)
+})
+
+test('pull refusal: at or above the floor is allowed (control for the refusals)', () => {
+  assert.equal(ollamaFloorRefusal({ ok: true, version: 'ollama version is 0.35.0' }), null)
+  assert.equal(ollamaFloorRefusal({ ok: true, version: 'ollama version is 0.40.2' }), null)
+})
+
+test('pull refusal: unreadable, missing or failed probe is refused', () => {
+  const msg = 'Ollama 0.35.0 or later is required.'
+  assert.equal(ollamaFloorRefusal({ ok: true, version: 'garbage' }), msg)
+  assert.equal(ollamaFloorRefusal({ ok: true, version: null }), msg)
+  assert.equal(ollamaFloorRefusal({ ok: false, version: 'ollama version is 0.35.0' }), msg)
+  assert.equal(ollamaFloorRefusal(undefined), msg)
 })

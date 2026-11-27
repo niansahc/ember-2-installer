@@ -18,7 +18,7 @@ const { downloadInstallerUpdate, isManualPlatform, manualResult } = require('./l
 const { API_PKILL_PATTERN, apiSpawnSpec } = require('./lib/api-launch')
 const { releaseTag, rowInstalled } = require('./lib/release-pin')
 const { releaseFromResponse } = require('./lib/github-release')
-const { OLLAMA_MIN_VERSION, meetsOllamaFloor, parseOllamaVersion } = require('./lib/ollama-version')
+const { OLLAMA_MIN_VERSION, meetsOllamaFloor, parseOllamaVersion, ollamaFloorRefusal } = require('./lib/ollama-version')
 const { moveToTag } = require('./exec/move-to-tag')
 const { freshInstall } = require('./exec/fresh-install')
 const { uiUpdateAction, backendUpdateAction, logStays } = require('./exec/pin-action')
@@ -730,10 +730,8 @@ ipcMain.handle('get-ollama-models', async () => {
 ipcMain.handle('pull-ollama-model', async (_e, model) => {
   // Main-side floor check: the advisory's flaw sits behind the pull, so stale
   // renderer state must not reach it.
-  const installed = await probe(['ollama', '--version'])
-  if (!installed.ok || !meetsOllamaFloor(installed.version)) {
-    return { ok: false, error: `Ollama ${OLLAMA_MIN_VERSION} or later is required.` }
-  }
+  const refusal = ollamaFloorRefusal(await probe(['ollama', '--version']))
+  if (refusal) return { ok: false, error: refusal }
   const r = await run('ollama', ['pull', model], {
     onData: (chunk) => sendLog('ollama-pull-progress', chunk),
   })

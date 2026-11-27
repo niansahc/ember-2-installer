@@ -24,4 +24,11 @@ function meetsOllamaFloor(line) {
   return v.prerelease === null
 }
 
-module.exports = { OLLAMA_MIN_VERSION, parseOllamaVersion, meetsOllamaFloor }
+// Takes a probe result ({ ok, version }) for `ollama --version`. Returns null
+// when a pull may proceed, else the error text to hand back to the renderer.
+function ollamaFloorRefusal(probeResult) {
+  if (probeResult && probeResult.ok && meetsOllamaFloor(probeResult.version)) return null
+  return `Ollama ${OLLAMA_MIN_VERSION} or later is required.`
+}
+
+module.exports = { OLLAMA_MIN_VERSION, parseOllamaVersion, meetsOllamaFloor, ollamaFloorRefusal }
