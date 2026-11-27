@@ -90,6 +90,8 @@ async function closeApp(app, options = {}) {
   }
 }
 
+// launchApp({ visible: true }) puts the window on screen instead of parking it
+// offscreen; only the CI-gated window-background control uses it.
 // launchApp({ extraArgs: ['--demo-updates'] }) — optional extra argv flags
 // get appended after the main script path. Default behaviour (no options)
 // boots the installer in standard demo mode.
@@ -111,6 +113,7 @@ async function launchApp(options = {}) {
     app = await electron.launch({
       executablePath: electronPath,
       args: [`--user-data-dir=${profile}`, MAIN_PATH, ...extraArgs],
+      env: { ...process.env, ...(options.visible ? {} : { EMBER_E2E_PARK_WINDOWS: '1' }) },
     })
   } catch (err) {
     await removeProfile(profile)

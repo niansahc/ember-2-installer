@@ -50,4 +50,4 @@ jobs:
           if-no-files-found: error
 
       - name: Run demo-mode e2e suite (headless via xvfb)
-        run: xvfb-run -a npm run test:e2e
+        run: xvfb-run -a npm run test:e2e -- --reporter=list

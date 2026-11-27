@@ -321,20 +321,40 @@ function saveEmberPath(p) {
 
 let mainWindow
 
+// Same value as --bg in renderer/styles.css and the inline html rule in index.html.
+const WINDOW_BACKGROUND = '#1a0a2e'
+// Test-only: the e2e helpers set this so no window appears on screen. The window
+// is shown (a hidden page stalls requestAnimationFrame, which Playwright's
+// actionability checks wait on) but parked far offscreen, inactive, off the
+// taskbar. Ignored in a packaged app, so a stray variable cannot move a
+// production window.
+const PARK_X = -32000
+const PARK_Y = -32000
+const PARK_WINDOWS = !app.isPackaged && process.env.EMBER_E2E_PARK_WINDOWS === '1'
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 820,
     height: 800,
     resizable: true,
-    center: true,
+    ...(PARK_WINDOWS ? { x: PARK_X, y: PARK_Y, skipTaskbar: true } : { center: true }),
     title: 'Ember-2 Setup',
-    backgroundColor: '#1a0a2e',
+    backgroundColor: WINDOW_BACKGROUND,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // An offscreen window can count as occluded and throttle timers and frames.
+      backgroundThrottling: !PARK_WINDOWS,
     },
   })
+
+  // Shown only once the first frame can paint, so the window never opens blank.
+  // A failed load shows it too, so it is never left invisible.
+  const reveal = () => (PARK_WINDOWS ? mainWindow.showInactive() : mainWindow.show())
+  mainWindow.once('ready-to-show', reveal)
+  mainWindow.webContents.once('did-fail-load', reveal)
 
   // No in-app windows: a target="_blank" link or window.open goes to the default
   // browser when the URL is allowed and is dropped otherwise.
