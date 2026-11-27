@@ -82,6 +82,7 @@ document.querySelectorAll('[data-prev]').forEach((btn) => {
 
 let hasWinget = false
 let missingPrereqs = []
+let ollamaMinVersion = null // from the last outdated check; main owns the value
 let currentPlatform = 'win32'
 
 const INSTALL_HINTS = {
@@ -154,7 +155,8 @@ async function checkPrerequisites() {
       icon.textContent = '❌'
       allGood = false
       if (installBtn) installBtn.classList.add('hidden')
-      const min = result.minVersion
+      const min = (ollamaMinVersion = result.minVersion)
+      if (link) link.classList.remove('hidden')
       if (currentPlatform === 'win32' && hasWinget) {
         version.textContent = result.unreadable
           ? `Could not read the Ollama version. Ollama ${min} or later is required.`
@@ -162,10 +164,8 @@ async function checkPrerequisites() {
         const upgradeBtn = document.getElementById('btn-upgrade-ollama')
         upgradeBtn.textContent = 'Upgrade Ollama'
         upgradeBtn.classList.remove('hidden')
-        if (link) link.classList.remove('hidden')
       } else {
         version.textContent = `Update Ollama to ${min} or later from ollama.com, then click Re-check.`
-        if (link) link.classList.remove('hidden')
       }
     } else if (result.ok) {
       icon.textContent = '✅'
@@ -269,7 +269,7 @@ document.getElementById('btn-upgrade-ollama').addEventListener('click', async ()
     await checkPrerequisites() // still outdated if winget had nothing newer; the row says so
   } else {
     btn.textContent = 'Retry'
-    logBox.textContent += `Failed to upgrade Ollama. ${result.error || 'Download 0.35.0 or later from ollama.com.'}\n\n`
+    logBox.textContent += `Failed to upgrade Ollama. ${result.error || `Download ${ollamaMinVersion} or later from ollama.com.`}\n\n`
   }
 })
 
