@@ -2,6 +2,11 @@
 const { test, expect } = require('@playwright/test')
 const { launchApp, closeApp } = require('./helpers.cjs')
 
+// The upgrade button (winget) exists only on Windows; elsewhere the row tells the
+// user to update Ollama themselves. Both branches block Next.
+const WIN = process.platform === 'win32'
+const MANUAL = 'Update Ollama to 0.35.0 or later from ollama.com, then click Re-check.'
+
 async function openPrereqs(extraArgs) {
   const launched = await launchApp({ extraArgs })
   await launched.window.locator('button[data-next="screen-prereqs"]').click()
@@ -24,29 +29,37 @@ test.describe('Ollama version floor', () => {
     await expect(window.locator('#btn-upgrade-ollama')).toBeHidden()
   })
 
-  test('below the floor: Next disabled, message and upgrade button shown', async () => {
+  test('below the floor: Next disabled, message shown, upgrade button on Windows only', async () => {
     let window
     ;({ app, window } = await openPrereqs(['--demo-ollama-version=ollama version is 0.34.9']))
-    const upgrade = window.locator('#btn-upgrade-ollama')
-    await expect(upgrade).toBeVisible({ timeout: 5000 })
-    await expect(upgrade).toHaveText('Upgrade Ollama')
+    const version = window.locator('#prereq-ollama .prereq-version')
+    await expect(version).not.toHaveText('', { timeout: 5000 })
     await expect(window.locator('#btn-prereqs-next')).toBeDisabled()
-    await expect(window.locator('#prereq-ollama .prereq-version')).toHaveText(
-      'Ollama 0.34.9 is older than the required 0.35.0. Versions before 0.35.0 have a known security flaw.'
-    )
+    if (WIN) {
+      await expect(window.locator('#btn-upgrade-ollama')).toHaveText('Upgrade Ollama')
+      await expect(window.locator('#btn-upgrade-ollama')).toBeVisible()
+      await expect(version).toHaveText(
+        'Ollama 0.34.9 is older than the required 0.35.0. Versions before 0.35.0 have a known security flaw.'
+      )
+    } else {
+      await expect(window.locator('#btn-upgrade-ollama')).toBeHidden()
+      await expect(version).toHaveText(MANUAL)
+    }
   })
 
   test('unparseable version: blocked with the unreadable message', async () => {
     let window
     ;({ app, window } = await openPrereqs(['--demo-ollama-version=garbage']))
-    await expect(window.locator('#btn-upgrade-ollama')).toBeVisible({ timeout: 5000 })
+    const version = window.locator('#prereq-ollama .prereq-version')
+    await expect(version).not.toHaveText('', { timeout: 5000 })
     await expect(window.locator('#btn-prereqs-next')).toBeDisabled()
-    await expect(window.locator('#prereq-ollama .prereq-version')).toHaveText(
-      'Could not read the Ollama version. Ollama 0.35.0 or later is required.'
+    await expect(version).toHaveText(
+      WIN ? 'Could not read the Ollama version. Ollama 0.35.0 or later is required.' : MANUAL
     )
   })
 
   test('upgrade click upgrades, re-checks and enables Next', async () => {
+    test.skip(!WIN, 'the upgrade button is Windows only')
     let window
     ;({ app, window } = await openPrereqs(['--demo-ollama-version=0.34.9']))
     await window.locator('#btn-upgrade-ollama').click()
