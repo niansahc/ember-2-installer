@@ -1,4 +1,4 @@
-// No white flash: every window has the dark background, and e2e windows stay hidden.
+// No white flash: every window has the dark background, and e2e windows are parked offscreen.
 const { test, expect } = require('@playwright/test')
 const { launchApp, closeApp } = require('./helpers.cjs')
 

@@ -330,14 +330,14 @@ const WINDOW_BACKGROUND = '#1a0a2e'
 // production window.
 const PARK_X = -32000
 const PARK_Y = -32000
-const HIDE_WINDOWS = !app.isPackaged && process.env.EMBER_E2E_HIDE_WINDOWS === '1'
+const PARK_WINDOWS = !app.isPackaged && process.env.EMBER_E2E_PARK_WINDOWS === '1'
 
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 820,
     height: 800,
     resizable: true,
-    ...(HIDE_WINDOWS ? { x: PARK_X, y: PARK_Y, skipTaskbar: true } : { center: true }),
+    ...(PARK_WINDOWS ? { x: PARK_X, y: PARK_Y, skipTaskbar: true } : { center: true }),
     title: 'Ember-2 Setup',
     backgroundColor: WINDOW_BACKGROUND,
     show: false,
@@ -346,13 +346,13 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       // An offscreen window can count as occluded and throttle timers and frames.
-      backgroundThrottling: !HIDE_WINDOWS,
+      backgroundThrottling: !PARK_WINDOWS,
     },
   })
 
   // Shown only once the first frame can paint, so the window never opens blank.
   // A failed load shows it too, so it is never left invisible.
-  const reveal = () => (HIDE_WINDOWS ? mainWindow.showInactive() : mainWindow.show())
+  const reveal = () => (PARK_WINDOWS ? mainWindow.showInactive() : mainWindow.show())
   mainWindow.once('ready-to-show', reveal)
   mainWindow.webContents.once('did-fail-load', reveal)
 
