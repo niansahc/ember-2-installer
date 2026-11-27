@@ -141,6 +141,14 @@ Any test asserting an absence ships with a positive control in the same commit. 
 
 ---
 
+## Doing the work
+- If the correct fix is blocked, larger than scoped, or a test looks wrong, stop and report it. Do not substitute a workaround, partial fix, or fallback that hides the failure.
+- Tests verify correctness; they do not define the solution. Do not edit a test to make it pass unless the prompt names it.
+- Comments: match the surrounding file's density. Comment only a non-obvious why. No comments that restate the code, narrate the change, or explain a shortcut.
+- Reports state: commands run with their results; what was not verified; shortcuts or deviations from the plan; what is incomplete. A claim without a run behind it is labelled unverified.
+
+---
+
 ## Conventional Commits (Required)
 
 Format: `type(scope): description`. Types: feat, fix, chore, docs, refactor, test, ci. Breaking changes: append `!`. release-please reads these for changelogs and version bumps.
