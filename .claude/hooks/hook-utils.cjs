@@ -153,7 +153,8 @@ function fnmatch(name, pattern) {
 // Shell parsing
 // ---------------------------------------------------------------------------
 
-// Nesting deeper than this (substitutions, nested shells, heredoc bodies) is
+// Nesting deeper than this (substitutions, nested shells, heredoc bodies, and
+// PowerShell argument groups: "(" after a word, "{" after a -Parameter) is
 // not followed: parsing throws NestingLimit. vault-guard denies such a
 // command and says so; env-guard scans its whole text instead.
 const MAX_DEPTH = 8
@@ -168,6 +169,9 @@ const CMD_DELIMITERS = ',;='
 // PowerShell and cmd keep them as operators. Except `;` in cmd: there it is an
 // argument delimiter, never an operator (see CMD_DELIMITERS).
 const OPERATORS = ';<>|&{}'
+
+// A PowerShell parameter name as a word (-Path, -Path:); a "{" right after one is its value.
+const PS_PARAM = /^-[A-Za-z?]\w*:?$/
 
 /**
  * A shell command parsed for both guards: { tokens, bash, ps }, each token an
@@ -361,6 +365,12 @@ function parseShell(command, flavor, depth = 0) {
           append(n, true)
           i += 2
         }
+      } else if (ps && c === '`' && quote === null && (n === '\n' || (n === '\r' && s[i + 2] === '\n'))) {
+        // Line continuation (backtick, LF or CRLF): whitespace, not a word. It ends the
+        // word it follows (a`<LF>b is two words), and inside double quotes it stays an
+        // escaped newline (the branch below). A backtick before a lone CR is not one.
+        flush()
+        i += n === '\n' ? 2 : 3
       } else if (ps && c === '`' && n !== undefined) {
         append(n)
         i += 2
@@ -479,13 +489,19 @@ function parseShell(command, flavor, depth = 0) {
  * The pipelines of a parsed script: lists of pipe stages, each stage
  * { words, redirs, heredocs } (words and redirection targets as parsed
  * words). Pipelines end at ; && || & newline and at ( ) { } (a group runs
- * its own commands).
+ * its own commands), except the PowerShell argument groups below, which are
+ * also words of the stage they follow.
  *
  * PowerShell: a "(" that follows a word of the stage is an argument
  * (Get-Content ('a','V'), @('a','V')): its words stay a pipeline of their own,
  * scanned as commands, and are also words of that stage, which goes on after
- * the ")" (Get-Content ('V') -TotalCount 1). A "(" that starts a stage, and
- * { } blocks, are groups of commands only. Empty stages and pipelines are left
+ * the ")" (Get-Content ('V') -TotalCount 1). A "{" right after a -Parameter word
+ * is the same (1 | gc -Path {'V'}: PowerShell runs the block per input and uses
+ * its output as the path). Any word that looks like a parameter counts, not only the
+ * path ones (-ScriptBlock, -Process, -FilterScript): over-denial is the safe side. A
+ * redirection and its target between the parameter and the block do not break the
+ * binding (gc -Path 2> err.txt {'V'}), and a quoted '-Path' is not a parameter. A "(" that starts a stage, and the other { } blocks
+ * (if, %, & ...), are groups of commands only. Empty stages and pipelines are left
  * out. Argument groups nested past MAX_DEPTH throw NestingLimit (a word would
  * not reach the outermost reader); the callers deny or fall back to raw text.
  */
@@ -496,24 +512,41 @@ function pipelines(script) {
   let st = pipeline[0]
   let redirect = false
   let afterWord = false
-  const open = [] // one entry per open "(": its owner stage { pipeline, st } or null
+  let lastParam = false // the last word of the stage is a -Parameter name (-Path, -Path:)
+  let lastParamBefore = false // `lastParam` as it was before the last word
+  let lastStream = false // the last token was a stream number word (2 in 2> err.txt)
+  const open = [] // one entry per open "(" or "{": its owner stage { pipeline, st } or null
   const owners = [] // the non-null entries of `open`
   const begin = () => {
     pipeline = [stage()]
     st = pipeline[0]
     out.push(pipeline)
   }
-  for (const token of script.tokens) {
+  // PowerShell braces are group operators glued into one token with their neighbours
+  // ("};", "|{", "}}"): split them off so each { and } is seen on its own.
+  const tokens = script.ps
+    ? script.tokens.flatMap((t) => (typeof t === 'string' && t.length > 1 && /[{}]/.test(t) ? t.match(/\{|\}|[^{}]+/g) : [t]))
+    : script.tokens
+  for (const token of tokens) {
+    const streamBefore = lastStream
+    lastStream = false
     if (typeof token !== 'string') {
       if (token.heredoc) {
         st.heredocs.push(token.heredoc)
       } else {
         if (redirect) {
+          // A redirection and its target do not break the -Parameter binding
+          // (gc -Path 2> err.txt {'V'}): lastParam stays as it was before the operator.
           st.redirs.push(token)
         } else {
           st.words.push(token)
           // At most MAX_DEPTH owners (a deeper group throws above), so this is bounded work.
           for (const o of owners) o.st.words.push(token)
+          lastParamBefore = lastParam
+          // A word with any quoted part is not a parameter name ('-Path', -"Path", -P'ath' are positional
+          // strings on 5.1): the unquoted part must be the whole word.
+          lastParam = !token.subs?.length && token.bare === token.text && PS_PARAM.test(token.text)
+          lastStream = /^(?:\d|\*)$/.test(token.text)
         }
         redirect = false
         afterWord = true
@@ -522,8 +555,10 @@ function pipelines(script) {
       st = stage()
       pipeline.push(st)
       afterWord = false
-    } else if (token === '(') {
-      const owner = script.ps && afterWord && !redirect ? { pipeline, st } : null
+    } else if (token === '(' || (token === '{' && script.ps)) {
+      // "(" after any word is an argument; "{" only as the value of a -Parameter (a delay-bound
+      // scriptblock: 1 | gc -Path {'V'}). Statement and pipeline blocks (if, %, & ) are groups.
+      const owner = script.ps && afterWord && !redirect && (token === '(' || lastParam) ? { pipeline, st } : null
       open.push(owner)
       if (owner) {
         // Past MAX_DEPTH nested argument groups the outer stage would miss words: deny, do not truncate.
@@ -533,8 +568,9 @@ function pipelines(script) {
       begin()
       redirect = false
       afterWord = false
-    } else if (token === ')') {
+    } else if (token === ')' || (token === '}' && script.ps)) {
       const owner = open.pop()
+      lastParam = false
       if (owner) {
         owners.pop()
         pipeline = owner.pipeline
@@ -550,6 +586,8 @@ function pipelines(script) {
       redirect = false
       afterWord = false
     } else if (/[<>]/.test(token)) {
+      // The stream number of 2> / *> was read as a word just before: undo its effect on lastParam.
+      if (streamBefore) lastParam = lastParamBefore
       redirect = true
       afterWord = false
     }

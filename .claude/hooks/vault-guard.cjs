@@ -59,7 +59,9 @@
 // pipelines and pipe stages. Command substitution ($(...), and in Bash
 // backticks and <(...) >(...)), the command lines run by the programs in
 // SHELLS (bash/sh/zsh/fish/csh -c, pwsh -Command, cmd /c, eval, wsl), and
-// groups ( ... ) and { ... } are scanned as commands of their own. A
+// groups ( ... ) and { ... } are scanned as commands of their own (in PowerShell
+// a ( after a word, and a { after a -Parameter word, are also arguments of the
+// stage: gc -Path {'V'}). A
 // heredoc body is scanned as commands too, unless it is literal text an
 // inert consumer receives (literalHeredocs in hook-utils.cjs: a quoted
 // delimiter, fed to tee, git commit -F -, gh --body-file -, or to cat in a
@@ -88,7 +90,8 @@
 //
 // Nesting limit: substitutions, nested shells and heredoc bodies are
 // followed MAX_DEPTH (8) levels deep, and so are PowerShell argument groups
-// (a word is mirrored into every enclosing stage). A command nested deeper is
+// ( ( ) after a word, and { } after any -Parameter word, -ScriptBlock included;
+// a word is mirrored into every enclosing stage). A command nested deeper is
 // denied with a reason that names the nesting limit.
 //
 // Bash brace expansion: a word's unquoted, unescaped braces are expanded
@@ -103,7 +106,8 @@
 // next stage) with no overflowing redirect target. A command over
 // MAX_COMMAND_CHARS (16384) is denied before parsing (runHook), since a hook
 // that times out does not block the call. PowerShell and cmd have no brace
-// expansion ({...} there is a scriptblock, or text).
+// expansion ({...} there is a scriptblock, or text; a block after a -Parameter
+// is read as its argument, see below).
 //
 // Comma lists: PowerShell reads `gc a,V` as an array argument and cmd reads
 // `type a,V` (also a;V and a=V, a caret-escaped one too) as two arguments, so
@@ -111,8 +115,13 @@
 // every element is a word the rules see; a quoted or backtick-escaped comma is
 // one name. In PowerShell a ( after a word of a stage is an argument of that
 // stage (gc ('a','V'), @('a','V')): its words are scanned as commands and are
-// also operands of the stage. Bash keeps a comma in a word. Not followed: a
-// list held in a variable ($p = 'a','V'; gc $p) and a cmd for-loop list.
+// also operands of the stage; so is a { } block right after a -Parameter word
+// (1 | gc -Path {'V'}: PowerShell binds the block's output as the path), with a
+// redirection and its target allowed between them. Any parameter name counts, so
+// Invoke-Command -ScriptBlock {echo private_vault} is denied (accepted over-denial,
+// pinned by a test). A backtick at the end of a line (LF or CRLF) is whitespace.
+// Bash keeps a comma in a word. Not followed: a list held in a variable
+// ($p = 'a','V'; gc $p) and a cmd for-loop list.
 //
 // PowerShell: <# ... #> block comments are not commands (an unterminated one
 // is scanned as code). iex / Invoke-Expression [-Command[:]] <string> runs the
@@ -126,6 +135,13 @@
 // behind a scriptblock stage (% { $_ } | iex); nor ${x:-path}. A literal path containing a wildcard
 // character (`[`, `*`, `?`) gets no realpath, so a junction named `[x]`
 // that points into the vault is matched only by its lexical spelling.
+// Also not caught: PowerShell readers outside the list (Import-Clixml,
+// Select-Xml, Format-Hex), a { } block after a
+// -Parameter word only as written (not after a variable-held parameter or
+// splat), cmd's caret-newline continuation (type ^<LF>V joins the lines) and a
+// Bash backslash before CRLF; parameter binding was verified on powershell.exe
+// 5.1 only, not on pwsh 7. Copy-Item and Move-Item print nothing and are not
+// readers (nor is Bash cp).
 
 'use strict'
 
@@ -601,6 +617,7 @@ const SEARCHES = new Set([...UNIX_SEARCHES, 'findstr', 'select-string', 'sls'])
 // executables are case-insensitive). Deliberately narrow.
 const READ_UTILITIES = new Set([
   'cat', 'type', 'more', 'less', 'head', 'tail', 'xxd', 'hexdump', 'od', 'strings', 'get-content', 'gc',
+  'import-csv', 'ipcsv',
   ...SEARCHES,
 ])
 // Listing and counting: their output is entry names (record IDs) or a count.
@@ -878,8 +895,8 @@ function evaluate(payload) {
 function reason({ kind, target, tool }) {
   if (kind === 'nesting') {
     return (
-      `Vault Privacy Rule: this command nests substitutions, shells, heredocs or PowerShell argument groups ` +
-      `past the nesting limit (${MAX_DEPTH} levels), so it cannot be checked for ` +
+      `Vault Privacy Rule: this command nests substitutions, shells, heredocs, PowerShell argument groups ` +
+      `or -Parameter { } blocks past the nesting limit (${MAX_DEPTH} levels), so it cannot be checked for ` +
       `vault reads and is denied. Split it into simpler commands. See ` +
       `.claude/hooks/${GUARD}.cjs.`
     )

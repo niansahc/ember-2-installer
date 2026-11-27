@@ -190,3 +190,20 @@ test('timing: argument groups nested past the cap are denied at once, by both gu
   deny(vault('PowerShell', chain(8, 'private_' + 'vault/x')))
   deny(envg('PowerShell', { command: long + ' ' + ENV }))
 })
+
+test('timing: parameter blocks nested past the cap are denied at once, by both guards', () => {
+  // gc -P {gc -P {... : a block after a -Parameter is an argument, so a word would be mirrored into every enclosing stage.
+  const chain = (n, tail = 'x') => 'gc -P {'.repeat(n) + tail + '}'.repeat(n)
+  const long = chain(Math.floor((N - 1) / 8)) // 'gc -P {' is 7 characters and '}' 1: 8 per level
+  assert.ok(long.length <= N)
+  const v = settled(() => vault('PowerShell', long))
+  const e = settled(() => envg('PowerShell', { command: long }))
+  assert.ok(v.ms < 1000, `vault-guard ${v.ms} ms`)
+  assert.ok(e.ms < 1000, `env-guard ${e.ms} ms`)
+  assert.match(deny(v.result).reason, /nesting limit/)
+  allow(e.result)
+  // Control: at the limit (8 levels) the same chain is parsed and scanned, not denied for nesting.
+  allow(vault('PowerShell', chain(8)))
+  deny(vault('PowerShell', chain(8, 'private_' + 'vault/x')))
+  deny(envg('PowerShell', { command: long + ' ' + ENV }))
+})
