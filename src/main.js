@@ -18,6 +18,7 @@ const { downloadInstallerUpdate, isManualPlatform, manualResult } = require('./l
 const { API_PKILL_PATTERN, apiSpawnSpec } = require('./lib/api-launch')
 const { releaseTag, rowInstalled } = require('./lib/release-pin')
 const { releaseFromResponse } = require('./lib/github-release')
+const { OLLAMA_MIN_VERSION, meetsOllamaFloor, parseOllamaVersion } = require('./lib/ollama-version')
 const { moveToTag } = require('./exec/move-to-tag')
 const { freshInstall } = require('./exec/fresh-install')
 const { uiUpdateAction, backendUpdateAction, logStays } = require('./exec/pin-action')
@@ -238,6 +239,11 @@ const DEMO_UNREACHABLE = process.argv.includes('--demo-unreachable')
 const DEMO_EXISTING_UPDATE = demoArg('demo-existing-update')
 const DEMO_UI_REBUILD = demoArg('demo-ui-rebuild')
 const DEMO_UPDATE_ALL = demoArg('demo-update-all')
+// --demo-ollama-version=<text>: the Ollama version line the demo prerequisite
+// check reports (default: at the floor). A bare flag reports an empty line.
+let demoOllamaVersion = process.argv.some((a) => a.startsWith('--demo-ollama-version='))
+  ? demoArg('demo-ollama-version') || ''
+  : `ollama version is ${OLLAMA_MIN_VERSION} (demo)`
 
 // Log channels that carry child-process or status text to the renderer.
 const LOG_CHANNELS = new Set([
@@ -445,7 +451,7 @@ ipcMain.handle('check-prerequisites', async () => {
   const checks = {
     docker: await probe(['docker', '--version']),
     python,
-    ollama: await probe(['ollama', '--version']),
+    ollama: withOllamaFloor(await probe(['ollama', '--version'])),
     git: await probe(['git', '--version']),
     node: await probe(['node', '--version']),
   }
@@ -457,6 +463,14 @@ ipcMain.handle('check-prerequisites', async () => {
 
   return checks
 })
+
+// An installed Ollama below the floor stays ok:true (so the row shows its
+// version) and is marked outdated; the renderer blocks on that.
+function withOllamaFloor(result) {
+  if (!result.ok || meetsOllamaFloor(result.version)) return result
+  const parsed = parseOllamaVersion(result.version)
+  return { ...result, outdated: true, unreadable: parsed === null, found: parsed && parsed.core.join('.'), minVersion: OLLAMA_MIN_VERSION }
+}
 
 function probe(cmd) {
   const [bin, ...args] = cmd
@@ -493,6 +507,21 @@ ipcMain.handle('install-prerequisite', async (_e, { name }) => {
   })
   if (r.error !== null) return { ok: false, error: r.error }
   return { ok: r.ok, needsRestart: name === 'docker' }
+})
+
+// Runs only when the user clicks "Upgrade Ollama". install-prerequisite cannot
+// do this: winget install reports an installed package as success.
+ipcMain.handle('upgrade-ollama', async () => {
+  if (process.platform !== 'win32') {
+    return { ok: false, error: 'Auto-upgrade is only available on Windows. Please update manually.' }
+  }
+  const r = await run('winget', ['upgrade', '--id', WINGET_PACKAGES.ollama, '--silent', '--accept-package-agreements', '--accept-source-agreements'], {
+    // 0 success; -1978335189 no applicable upgrade. The renderer re-checks the version either way.
+    okCodes: [0, -1978335189],
+    onData: (chunk) => sendLog('prereq-install-progress', { name: 'ollama', text: chunk }),
+  })
+  if (r.error !== null) return { ok: false, error: r.error }
+  return { ok: r.ok }
 })
 
 ipcMain.handle('check-winget', async () => {
@@ -699,6 +728,12 @@ ipcMain.handle('get-ollama-models', async () => {
 })
 
 ipcMain.handle('pull-ollama-model', async (_e, model) => {
+  // Main-side floor check: the advisory's flaw sits behind the pull, so stale
+  // renderer state must not reach it.
+  const installed = await probe(['ollama', '--version'])
+  if (!installed.ok || !meetsOllamaFloor(installed.version)) {
+    return { ok: false, error: `Ollama ${OLLAMA_MIN_VERSION} or later is required.` }
+  }
   const r = await run('ollama', ['pull', model], {
     onData: (chunk) => sendLog('ollama-pull-progress', chunk),
   })
@@ -1514,13 +1549,21 @@ if (DEMO_MODE) {
   ipcMain.handle('check-prerequisites', async () => ({
     docker: { ok: true, version: 'Docker version 27.5.1 (demo)' },
     python: { ok: true, version: 'Python 3.12.0 (demo)' },
-    ollama: { ok: true, version: 'ollama version 0.6.2 (demo)' },
+    ollama: withOllamaFloor({ ok: true, version: demoOllamaVersion }),
     git: { ok: true, version: 'git version 2.47.0 (demo)' },
     node: { ok: true, version: 'v24.14.0 (demo)' },
   }))
 
   ipcMain.removeHandler('check-winget')
   ipcMain.handle('check-winget', async () => ({ available: true }))
+
+  ipcMain.removeHandler('upgrade-ollama')
+  ipcMain.handle('upgrade-ollama', async () => {
+    await sleep(1500)
+    sendLog('prereq-install-progress', { name: 'ollama', text: 'Upgrading ollama... done (demo)\n' })
+    demoOllamaVersion = `ollama version is ${OLLAMA_MIN_VERSION} (demo)`
+    return { ok: true }
+  })
 
   ipcMain.removeHandler('install-prerequisite')
   ipcMain.handle('install-prerequisite', async (_e, { name }) => {

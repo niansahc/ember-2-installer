@@ -252,7 +252,8 @@ p {
   font-weight: 400;
 }
 
-.prereq-install-btn {
+.prereq-install-btn,
+.prereq-upgrade-btn {
   padding: 4px 14px;
   background: var(--accent);
   color: var(--bg);
@@ -264,11 +265,13 @@ p {
   font-family: inherit;
 }
 
-.prereq-install-btn:hover {
+.prereq-install-btn:hover,
+.prereq-upgrade-btn:hover {
   opacity: 0.9;
 }
 
-.prereq-install-btn:disabled {
+.prereq-install-btn:disabled,
+.prereq-upgrade-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
