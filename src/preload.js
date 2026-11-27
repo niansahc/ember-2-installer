@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('ember', {
 
   installPrerequisite: (name) => ipcRenderer.invoke('install-prerequisite', { name }),
   checkWinget: () => ipcRenderer.invoke('check-winget'),
+  upgradeOllama: () => ipcRenderer.invoke('upgrade-ollama'),
   onPrereqInstallProgress: (fn) =>
     ipcRenderer.on('prereq-install-progress', (_e, data) => fn(data)),
 

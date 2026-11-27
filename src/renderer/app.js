@@ -82,6 +82,7 @@ document.querySelectorAll('[data-prev]').forEach((btn) => {
 
 let hasWinget = false
 let missingPrereqs = []
+let ollamaMinVersion = null // from the last outdated check; main owns the value
 let currentPlatform = 'win32'
 
 const INSTALL_HINTS = {
@@ -146,7 +147,27 @@ async function checkPrerequisites() {
     const installBtn = row.querySelector('.prereq-install-btn')
     const link = row.querySelector('.prereq-link')
 
-    if (result.ok) {
+    if (name === 'ollama') document.getElementById('btn-upgrade-ollama').classList.add('hidden')
+
+    if (result.ok && result.outdated) {
+      // Installed but below the security floor: blocks Next, and is not in
+      // missingPrereqs so Install All never upgrades it.
+      icon.textContent = '❌'
+      allGood = false
+      if (installBtn) installBtn.classList.add('hidden')
+      const min = (ollamaMinVersion = result.minVersion)
+      if (link) link.classList.remove('hidden')
+      if (currentPlatform === 'win32' && hasWinget) {
+        version.textContent = result.unreadable
+          ? `Could not read the Ollama version. Ollama ${min} or later is required.`
+          : `Ollama ${result.found} is older than the required ${min}. Versions before ${min} have a known security flaw.`
+        const upgradeBtn = document.getElementById('btn-upgrade-ollama')
+        upgradeBtn.textContent = 'Upgrade Ollama'
+        upgradeBtn.classList.remove('hidden')
+      } else {
+        version.textContent = `Update Ollama to ${min} or later from ollama.com, then click Re-check.`
+      }
+    } else if (result.ok) {
       icon.textContent = '✅'
       version.textContent = result.version || 'Installed'
       if (installBtn) installBtn.classList.add('hidden')
@@ -222,6 +243,34 @@ document.querySelectorAll('.prereq-install-btn').forEach((btn) => {
     const name = btn.dataset.prereq
     await installOnePrereq(name, btn)
   })
+})
+
+document.getElementById('btn-upgrade-ollama').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-upgrade-ollama')
+  const logBox = document.getElementById('prereq-install-log')
+  logBox.classList.remove('hidden')
+  btn.disabled = true
+  btn.textContent = 'Upgrading...'
+  logBox.textContent += 'Upgrading ollama...\n'
+
+  window.ember.onPrereqInstallProgress(({ name: n, text }) => {
+    if (n === 'ollama') {
+      logBox.textContent += text
+      logBox.scrollTop = logBox.scrollHeight
+    }
+  })
+  const result = await window.ember.upgradeOllama()
+  window.ember.removeAllListeners('prereq-install-progress')
+  btn.disabled = false
+
+  if (result.ok) {
+    btn.textContent = 'Upgraded ✓'
+    logBox.textContent += 'ollama upgraded ✓\n\n'
+    await checkPrerequisites() // still outdated if winget had nothing newer; the row says so
+  } else {
+    btn.textContent = 'Retry'
+    logBox.textContent += `Failed to upgrade Ollama. ${result.error || `Download ${ollamaMinVersion} or later from ollama.com.`}\n\n`
+  }
 })
 
 async function installOnePrereq(name, btn) {

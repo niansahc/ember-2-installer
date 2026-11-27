@@ -42,3 +42,6 @@ jobs:
 
       - name: Run network gate logic and declared-list drift tests
         run: npm run test:netgate
+
+      - name: Run unit tests
+        run: npm run test:unit
